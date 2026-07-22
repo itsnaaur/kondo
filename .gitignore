@@ -39,3 +39,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+/app/generated/prisma
+
+# client folders (uploaded assets, crawl data, generated sites, exports)
+/storage
+# local sqlite database
+/dev.db
+/dev.db-journal

@@ -1,0 +1,103 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum ClientStatus {
+  DRAFT
+  AUDITING
+  AUDIT_READY
+  GENERATING
+  READY_FOR_REVIEW
+  EXPORTED
+}
+
+enum AssetType {
+  LOGO
+  BRAND_GUIDE
+  CASE_STUDY
+  IMAGE
+  OTHER
+}
+
+model Client {
+  id        String       @id @default(cuid())
+  name      String
+  siteUrl   String
+  briefText String?
+  status    ClientStatus @default(DRAFT)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  crawlPagesDone  Int?
+  crawlPagesTotal Int?
+
+  assets      Asset[]
+  pages       CrawledPage[]
+  auditReport AuditReport?
+  generations Generation[]
+}
+
+model Asset {
+  id          String    @id @default(cuid())
+  clientId    String
+  client      Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  type        AssetType @default(OTHER)
+  filename    String
+  storagePath String
+  mimeType    String
+  size        Int
+  createdAt   DateTime  @default(now())
+}
+
+model CrawledPage {
+  id             String   @id @default(cuid())
+  clientId       String
+  client         Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  url            String
+  title          String?
+  textContent    String?
+  htmlPath       String?
+  screenshotPath String?
+  createdAt      DateTime @default(now())
+}
+
+model AuditReport {
+  id                String    @id @default(cuid())
+  clientId          String    @unique
+  client            Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  pagesCrawled      Int       @default(0)
+  technical         Json?
+  visualDesign      Json?
+  motionInteraction Json?
+  brandTone         Json?
+  contentInventory  Json?
+  reviewNotes       String?
+  reviewedAt        DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  generations Generation[]
+}
+
+model Generation {
+  id            String      @id @default(cuid())
+  clientId      String
+  client        Client      @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  auditReportId String
+  auditReport   AuditReport @relation(fields: [auditReportId], references: [id], onDelete: Cascade)
+  status        String      @default("PENDING")
+  outputDir     String?
+  zipPath       String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+}
