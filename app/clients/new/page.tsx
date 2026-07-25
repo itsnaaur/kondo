@@ -1,5 +1,7 @@
 import { createClient } from "@/lib/actions/clients";
 import { AssetDropzone } from "@/components/AssetDropzone";
+import { IntentFields } from "@/components/IntentFields";
+import { ReferenceFields } from "@/components/ReferenceFields";
 import { TopNav } from "@/components/TopNav";
 
 export default function NewClientPage() {
@@ -39,15 +41,33 @@ export default function NewClientPage() {
           </div>
 
           <div>
+            <h2 className="mb-3 text-sm font-medium uppercase tracking-wide text-neutral-500">
+              What are we doing for them?
+            </h2>
+            <IntentFields />
+          </div>
+
+          <div>
             <label className="mb-1 block text-sm font-medium text-neutral-300">
-              Facelift preferences / brief
+              Preferences / brief
             </label>
             <textarea
               name="briefText"
               rows={6}
-              placeholder="What do they want kept, changed, tone, inspiration sites, anything explicit..."
+              placeholder="What do they want kept, changed, tone, anything explicit..."
               className="w-full rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-2 text-neutral-100 outline-none focus:border-yellow-400"
             />
+          </div>
+
+          <div>
+            <h2 className="mb-3 text-sm font-medium uppercase tracking-wide text-neutral-500">
+              Inspiration / reference sites (optional)
+            </h2>
+            <p className="mb-3 text-xs text-neutral-500">
+              Not the whole site necessarily — could be an animation style, a layout, a font.
+              Explain what to follow in the note.
+            </p>
+            <ReferenceFields />
           </div>
 
           <div>

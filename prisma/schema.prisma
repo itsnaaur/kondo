@@ -26,25 +26,47 @@ enum AssetType {
   BRAND_GUIDE
   CASE_STUDY
   IMAGE
+  PROJECT_ARCHIVE
   OTHER
 }
 
+enum ProjectIntent {
+  FACELIFT
+  WORDPRESS_TRANSFER
+}
+
+// Mirrors auth.users (managed by Supabase Auth) via a DB trigger — Prisma can't
+// relate directly across schemas, so we keep our own copy in `public` to join against.
+model Profile {
+  id        String   @id
+  email     String?
+  createdAt DateTime @default(now())
+
+  clients     Client[]
+  generations Generation[]
+}
+
 model Client {
-  id        String       @id @default(cuid())
-  name      String
-  siteUrl   String
-  briefText String?
-  status    ClientStatus @default(DRAFT)
-  createdAt DateTime     @default(now())
-  updatedAt DateTime     @updatedAt
+  id              String        @id @default(cuid())
+  name            String
+  siteUrl         String
+  intent          ProjectIntent
+  briefText       String?
+  status          ClientStatus  @default(DRAFT)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  createdByUserId String?
+  createdBy       Profile?      @relation(fields: [createdByUserId], references: [id])
 
   crawlPagesDone  Int?
   crawlPagesTotal Int?
 
   assets      Asset[]
+  references  Reference[]
   pages       CrawledPage[]
   auditReport AuditReport?
   generations Generation[]
+  messages    GenerationMessage[]
 }
 
 model Asset {
@@ -57,6 +79,15 @@ model Asset {
   mimeType    String
   size        Int
   createdAt   DateTime  @default(now())
+}
+
+model Reference {
+  id        String   @id @default(cuid())
+  clientId  String
+  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  url       String
+  note      String?
+  createdAt DateTime @default(now())
 }
 
 model CrawledPage {
@@ -81,6 +112,7 @@ model AuditReport {
   motionInteraction Json?
   brandTone         Json?
   contentInventory  Json?
+  contentSample     String?
   reviewNotes       String?
   reviewedAt        DateTime?
   createdAt         DateTime  @default(now())
@@ -90,14 +122,32 @@ model AuditReport {
 }
 
 model Generation {
-  id            String      @id @default(cuid())
-  clientId      String
-  client        Client      @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  auditReportId String
-  auditReport   AuditReport @relation(fields: [auditReportId], references: [id], onDelete: Cascade)
-  status        String      @default("PENDING")
-  outputDir     String?
-  zipPath       String?
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
+  id                String      @id @default(cuid())
+  clientId          String
+  client            Client      @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  auditReportId     String
+  auditReport       AuditReport @relation(fields: [auditReportId], references: [id], onDelete: Cascade)
+  status            String      @default("PENDING")
+  outputDir         String?
+  zipPath           String?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  generatedByUserId String?
+  generatedBy       Profile?    @relation(fields: [generatedByUserId], references: [id])
+
+  messages GenerationMessage[]
+}
+
+// The running per-client conversation: each generation/refinement prompt and its
+// response, so re-prompting after the first generation can edit in place with
+// full context instead of starting over.
+model GenerationMessage {
+  id           String      @id @default(cuid())
+  clientId     String
+  client       Client      @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  role         String // "user" | "assistant"
+  content      String
+  generationId String?
+  generation   Generation? @relation(fields: [generationId], references: [id], onDelete: SetNull)
+  createdAt    DateTime    @default(now())
 }

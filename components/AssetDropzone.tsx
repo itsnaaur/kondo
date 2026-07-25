@@ -2,7 +2,15 @@
 
 import { useRef, useState, type DragEvent, type ChangeEvent } from "react";
 
-export function AssetDropzone({ label, name }: { label: string; name: string }) {
+export function AssetDropzone({
+  label,
+  name,
+  multiple = true,
+}: {
+  label: string;
+  name: string;
+  multiple?: boolean;
+}) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [fileNames, setFileNames] = useState<string[]>([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -54,7 +62,7 @@ export function AssetDropzone({ label, name }: { label: string; name: string }) 
         ref={inputRef}
         type="file"
         name={name}
-        multiple
+        multiple={multiple}
         className="hidden"
         onChange={(e: ChangeEvent<HTMLInputElement>) => updateFileNames(e.target.files)}
       />

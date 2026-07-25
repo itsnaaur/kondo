@@ -12,5 +12,11 @@ export const ASSET_TYPE_LABEL: Record<string, string> = {
   BRAND_GUIDE: "Brand guide",
   CASE_STUDY: "Case study",
   IMAGE: "Image",
+  PROJECT_ARCHIVE: "Project archive",
   OTHER: "Other",
+};
+
+export const INTENT_LABEL: Record<string, string> = {
+  FACELIFT: "Website facelift",
+  WORDPRESS_TRANSFER: "WordPress transfer",
 };

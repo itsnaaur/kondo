@@ -4,7 +4,10 @@ import { TopNav } from "@/components/TopNav";
 import { STATUS_LABEL } from "@/lib/labels";
 
 export default async function DashboardPage() {
-  const clients = await prisma.client.findMany({ orderBy: { createdAt: "desc" } });
+  const clients = await prisma.client.findMany({
+    orderBy: { createdAt: "desc" },
+    include: { createdBy: true },
+  });
 
   return (
     <div className="min-h-screen bg-black">
@@ -40,6 +43,11 @@ export default async function DashboardPage() {
                   <div>
                     <p className="font-medium text-neutral-100">{client.name}</p>
                     <p className="text-sm text-neutral-500">{client.siteUrl}</p>
+                    {client.createdBy && (
+                      <p className="text-xs text-neutral-600">
+                        Added by {client.createdBy.email ?? client.createdBy.id}
+                      </p>
+                    )}
                   </div>
                   <span className="rounded-full border border-neutral-700 px-3 py-1 text-xs text-neutral-300">
                     {STATUS_LABEL[client.status] ?? client.status}

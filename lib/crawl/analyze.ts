@@ -1,19 +1,8 @@
 import type { PageExtraction } from "./types";
+import { tallyTop } from "@/lib/audit-common";
 
 const PAGE_BUILDER_HINTS = ["Elementor", "Divi", "Beaver Builder"];
 const ANIMATION_LIBRARY_HINTS = ["AOS (animate on scroll)", "GSAP", "WOW.js", "ScrollMagic", "Animate.css"];
-
-function tallyTop(values: string[], limit: number): Array<{ value: string; count: number }> {
-  const counts = new Map<string, number>();
-  for (const v of values) {
-    if (!v) continue;
-    counts.set(v, (counts.get(v) ?? 0) + 1);
-  }
-  return Array.from(counts.entries())
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, limit)
-    .map(([value, count]) => ({ value, count }));
-}
 
 function detectHints(src: string, hints: Set<string>) {
   if (/wp-content|wp-includes/i.test(src)) hints.add("WordPress");
@@ -79,5 +68,11 @@ export function buildAuditFromPages(pages: PageExtraction[], pagesTruncated: boo
 
   const contentInventory = pages.map((p) => ({ url: p.url, title: p.title }));
 
-  return { technical, visualDesign, motionInteraction, contentInventory };
+  const contentSample = pages
+    .slice(0, 3)
+    .map((p) => p.text)
+    .join("\n\n")
+    .slice(0, 6000);
+
+  return { technical, visualDesign, motionInteraction, contentInventory, contentSample };
 }

@@ -18,3 +18,10 @@ export type MotionInteractionAudit = {
 };
 
 export type ContentInventoryEntry = { url: string; title: string };
+
+export type BrandToneAudit = {
+  personality: string[];
+  voice: string;
+  emotionalImpression: string;
+  summary: string;
+};

@@ -14,6 +14,10 @@ export function clientCrawlDir(clientId: string): string {
   return path.join(clientDir(clientId), "crawl");
 }
 
+export function clientSourceDir(clientId: string): string {
+  return path.join(clientDir(clientId), "source");
+}
+
 export function clientGeneratedDir(clientId: string): string {
   return path.join(clientDir(clientId), "generated");
 }
