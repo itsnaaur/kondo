@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
@@ -37,7 +38,7 @@ export default function LoginForm() {
         onSubmit={handleSubmit}
         className="w-full max-w-sm rounded-xl border border-neutral-800 bg-neutral-950 p-8 shadow-xl"
       >
-        <h1 className="mb-1 text-xl font-semibold text-neutral-100">Kondo</h1>
+        <Image src="/kondo-logo.png" alt="Kondo" width={276} height={45} className="mb-2 h-8 w-auto" priority />
         <p className="mb-6 text-sm text-neutral-400">Internal facelift tool — JRNY Digital</p>
         <input
           type="email"

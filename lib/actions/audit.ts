@@ -11,7 +11,12 @@ import { screenshotReferenceSites } from "@/lib/crawl/reference-screenshot";
 import { clientSourceDir, clientReferenceScreenshotsDir } from "@/lib/storage";
 import { analyzeAuditNarrative } from "@/lib/audit/narrative";
 import type { PageExtraction } from "@/lib/crawl/types";
-import type { TechnicalAudit, VisualDesignAudit, MotionInteractionAudit } from "@/lib/audit-types";
+import type {
+  TechnicalAudit,
+  VisualDesignAudit,
+  MotionInteractionAudit,
+  RecommendationItem,
+} from "@/lib/audit-types";
 
 export async function saveAuditNotes(auditReportId: string, notes: string) {
   await prisma.auditReport.update({
@@ -46,6 +51,21 @@ async function saveAuditResult(clientId: string, result: Record<string, any>, pa
     create: { clientId, pagesCrawled: pagesCount, ...result },
     update: { pagesCrawled: pagesCount, ...result },
   });
+
+  const recommendations = result.recommendations as RecommendationItem[] | null | undefined;
+  if (recommendations?.length) {
+    await prisma.generationMessage.create({
+      data: {
+        clientId,
+        role: "assistant",
+        content: [
+          "Based on the audit, here's what I'd propose for the facelift:",
+          "",
+          ...recommendations.map((r) => `• ${r.title} — ${r.rationale}`),
+        ].join("\n"),
+      },
+    });
+  }
 
   await prisma.client.update({
     where: { id: clientId },
