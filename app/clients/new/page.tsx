@@ -8,7 +8,7 @@ export default function NewClientPage() {
   return (
     <div className="min-h-screen bg-black">
       <TopNav />
-      <main className="mx-auto max-w-3xl px-6 py-10">
+      <main className="mx-auto max-w-4xl px-6 py-10">
         <h1 className="mb-1 text-2xl font-semibold text-neutral-100">New client</h1>
         <p className="mb-8 text-sm text-neutral-400">
           Set up a client folder, drop their brief and assets, then run the audit.

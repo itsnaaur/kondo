@@ -7,9 +7,11 @@ import { ClientStatus, ProjectIntent, AssetType } from "@/app/generated/prisma/c
 import { crawlClientSite } from "@/lib/crawl/crawler";
 import { buildAuditFromPages } from "@/lib/crawl/analyze";
 import { analyzeProjectArchive } from "@/lib/source-analysis/analyzer";
-import { clientSourceDir } from "@/lib/storage";
-import { analyzeBrandTone } from "@/lib/audit/brand-tone";
+import { screenshotReferenceSites } from "@/lib/crawl/reference-screenshot";
+import { clientSourceDir, clientReferenceScreenshotsDir } from "@/lib/storage";
+import { analyzeAuditNarrative } from "@/lib/audit/narrative";
 import type { PageExtraction } from "@/lib/crawl/types";
+import type { TechnicalAudit, VisualDesignAudit, MotionInteractionAudit } from "@/lib/audit-types";
 
 export async function saveAuditNotes(auditReportId: string, notes: string) {
   await prisma.auditReport.update({
@@ -59,26 +61,75 @@ async function failAudit(clientId: string, context: string, err: unknown) {
   });
 }
 
+async function tryAnalyzeNarrative(
+  clientId: string,
+  args: {
+    contentSample: string;
+    screenshotPaths: string[];
+    technical: TechnicalAudit;
+    visualDesign: VisualDesignAudit;
+    motionInteraction: MotionInteractionAudit;
+  }
+) {
+  try {
+    const [client, references] = await Promise.all([
+      prisma.client.findUniqueOrThrow({ where: { id: clientId } }),
+      prisma.reference.findMany({ where: { clientId } }),
+    ]);
+
+    const referenceScreenshots = await screenshotReferenceSites(
+      references.map((r) => r.url),
+      clientReferenceScreenshotsDir(clientId)
+    );
+
+    const referenceInput = references.map((r) => ({
+      url: r.url,
+      note: r.note,
+      screenshotPath:
+        referenceScreenshots.find((s) => s.url === r.url)?.screenshotPath ?? null,
+    }));
+
+    const narrative = await analyzeAuditNarrative({
+      contentSample: args.contentSample,
+      screenshotPaths: args.screenshotPaths,
+      briefText: client.briefText,
+      references: referenceInput,
+      technical: args.technical,
+      visualDesign: args.visualDesign,
+      motionInteraction: args.motionInteraction,
+    });
+
+    return {
+      brandTone: narrative?.brandTone ?? null,
+      findingsSummary: narrative?.findingsSummary ?? null,
+      briefUnderstanding: narrative?.briefUnderstanding ?? null,
+      recommendations: narrative?.recommendations ?? null,
+    };
+  } catch (err) {
+    console.error("[audit] narrative analysis failed, continuing without it:", err);
+    return {
+      brandTone: null,
+      findingsSummary: null,
+      briefUnderstanding: null,
+      recommendations: null,
+    };
+  }
+}
+
 async function runCrawlAuditInBackground(clientId: string, siteUrl: string) {
   try {
     const { pages, truncated } = await crawlClientSite(clientId, siteUrl);
     const result = buildAuditFromPages(pages, truncated);
-    const brandTone = await tryAnalyzeBrandTone(
-      result.contentSample,
-      pages.map((p: PageExtraction) => p.screenshotPath)
-    );
-    await saveAuditResult(clientId, { ...result, brandTone }, pages.length);
+    const narrative = await tryAnalyzeNarrative(clientId, {
+      contentSample: result.contentSample,
+      screenshotPaths: pages.map((p: PageExtraction) => p.screenshotPath),
+      technical: result.technical,
+      visualDesign: result.visualDesign,
+      motionInteraction: result.motionInteraction,
+    });
+    await saveAuditResult(clientId, { ...result, ...narrative }, pages.length);
   } catch (err) {
     await failAudit(clientId, "crawl", err);
-  }
-}
-
-async function tryAnalyzeBrandTone(contentSample: string, screenshotPaths: string[] = []) {
-  try {
-    return await analyzeBrandTone(contentSample, screenshotPaths);
-  } catch (err) {
-    console.error("[audit] brand tone analysis failed, continuing without it:", err);
-    return null;
   }
 }
 
@@ -95,8 +146,18 @@ async function runSourceAuditInBackground(clientId: string) {
 
     const archivePath = path.join(process.cwd(), archiveAsset.storagePath);
     const result = await analyzeProjectArchive(archivePath, clientSourceDir(clientId));
-    const brandTone = await tryAnalyzeBrandTone(result.contentSample);
-    await saveAuditResult(clientId, { ...result, brandTone }, result.contentInventory.length);
+    const narrative = await tryAnalyzeNarrative(clientId, {
+      contentSample: result.contentSample,
+      screenshotPaths: [],
+      technical: result.technical,
+      visualDesign: result.visualDesign,
+      motionInteraction: result.motionInteraction,
+    });
+    await saveAuditResult(
+      clientId,
+      { ...result, ...narrative },
+      result.contentInventory.length
+    );
   } catch (err) {
     await failAudit(clientId, "source analysis", err);
   }

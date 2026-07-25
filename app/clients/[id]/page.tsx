@@ -13,6 +13,7 @@ import type {
   MotionInteractionAudit,
   ContentInventoryEntry,
   BrandToneAudit,
+  RecommendationItem,
 } from "@/lib/audit-types";
 
 export default async function ClientDetailPage({
@@ -40,11 +41,12 @@ export default async function ClientDetailPage({
   const motionInteraction = audit?.motionInteraction as MotionInteractionAudit | null | undefined;
   const contentInventory = audit?.contentInventory as ContentInventoryEntry[] | null | undefined;
   const brandTone = audit?.brandTone as BrandToneAudit | null | undefined;
+  const recommendations = audit?.recommendations as RecommendationItem[] | null | undefined;
 
   return (
     <div className="min-h-screen bg-black">
       <TopNav />
-      <main className="mx-auto max-w-3xl px-6 py-10">
+      <main className="mx-auto max-w-5xl px-6 py-10">
         <div className="mb-8 flex items-start justify-between">
           <div>
             <h1 className="text-2xl font-semibold text-neutral-100">{client.name}</h1>
@@ -169,8 +171,52 @@ export default async function ClientDetailPage({
             <div className="space-y-6">
               <div className="rounded-lg border border-neutral-800 bg-neutral-950 px-4 py-3">
                 <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-neutral-500">
-                  Technical
+                  What we found
                 </h3>
+                <p className="text-sm text-neutral-200">
+                  {audit.findingsSummary || "Not available for this audit."}
+                </p>
+              </div>
+
+              {client.briefText && (
+                <div className="rounded-lg border border-neutral-800 bg-neutral-950 px-4 py-3">
+                  <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-neutral-500">
+                    Understanding your brief
+                  </h3>
+                  <p className="text-sm text-neutral-200">
+                    {audit.briefUnderstanding ||
+                      "Not available — the brief wasn't cross-referenced against the audit."}
+                  </p>
+                </div>
+              )}
+
+              <div className="rounded-lg border border-yellow-400/30 bg-neutral-950 px-4 py-3">
+                <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-yellow-400">
+                  Proposed changes
+                </h3>
+                {recommendations?.length ? (
+                  <ul className="space-y-3">
+                    {recommendations.map((rec) => (
+                      <li key={rec.title}>
+                        <p className="text-sm font-medium text-neutral-100">{rec.title}</p>
+                        <p className="text-sm text-neutral-400">{rec.rationale}</p>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-sm text-neutral-500">Not available for this audit.</p>
+                )}
+              </div>
+
+              <details className="group">
+                <summary className="cursor-pointer text-sm font-medium uppercase tracking-wide text-neutral-500 hover:text-neutral-300">
+                  Full audit details
+                </summary>
+                <div className="mt-4 space-y-6">
+                  <div className="rounded-lg border border-neutral-800 bg-neutral-950 px-4 py-3">
+                    <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-neutral-500">
+                      Technical
+                    </h3>
                 <p className="text-sm text-neutral-200">
                   Platform: <span className="text-neutral-400">{technical?.platform}</span>
                 </p>
@@ -270,6 +316,8 @@ export default async function ClientDetailPage({
                   ))}
                 </ul>
               </div>
+                </div>
+              </details>
 
               <div>
                 <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-neutral-500">

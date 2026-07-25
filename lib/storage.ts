@@ -14,6 +14,10 @@ export function clientCrawlDir(clientId: string): string {
   return path.join(clientDir(clientId), "crawl");
 }
 
+export function clientReferenceScreenshotsDir(clientId: string): string {
+  return path.join(clientDir(clientId), "crawl", "reference-screenshots");
+}
+
 export function clientSourceDir(clientId: string): string {
   return path.join(clientDir(clientId), "source");
 }

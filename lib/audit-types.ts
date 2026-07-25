@@ -25,3 +25,5 @@ export type BrandToneAudit = {
   emotionalImpression: string;
   summary: string;
 };
+
+export type RecommendationItem = { title: string; rationale: string };

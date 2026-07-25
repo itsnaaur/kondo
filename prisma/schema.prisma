@@ -113,6 +113,9 @@ model AuditReport {
   brandTone         Json?
   contentInventory  Json?
   contentSample     String?
+  findingsSummary   String?
+  briefUnderstanding String?
+  recommendations   Json?
   reviewNotes       String?
   reviewedAt        DateTime?
   createdAt         DateTime  @default(now())
