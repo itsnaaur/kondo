@@ -57,6 +57,7 @@ model Client {
   updatedAt       DateTime      @updatedAt
   createdByUserId String?
   createdBy       Profile?      @relation(fields: [createdByUserId], references: [id])
+  deletedAt       DateTime?
 
   crawlPagesDone  Int?
   crawlPagesTotal Int?
