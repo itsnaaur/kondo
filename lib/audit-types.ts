@@ -24,6 +24,7 @@ export type BrandToneAudit = {
   voice: string;
   emotionalImpression: string;
   summary: string;
+  designArchetype?: string;
 };
 
 export type RecommendationItem = { title: string; rationale: string };

@@ -34,6 +34,11 @@ export function buildAuditSummaryLines(input: PromptInput): string[] {
 
   lines.push("\n## Inspiration / reference sites");
   if (input.references.length > 0) {
+    lines.push(
+      "Screenshots of these sites are attached above as images — actually look at their visual" +
+        " style, layout, and energy; the note next to each one explains specifically what to take" +
+        " from it (and, just as importantly, what NOT to copy)."
+    );
     for (const r of input.references) {
       lines.push(`- ${r.url}${r.note ? `: ${r.note}` : ""}`);
     }
@@ -61,7 +66,13 @@ export function buildAuditSummaryLines(input: PromptInput): string[] {
     lines.push(`Emotional impression: ${input.brandTone.emotionalImpression}`);
   }
 
-  lines.push(buildDesignStandardsSection(input.brandTone, input.briefText));
+  // Reference-site notes often carry explicit feeling-words too (e.g. "professional but
+  // not the generic corporate feel") — fold them in alongside the brief for archetype matching.
+  const explicitFeelingsText = [input.briefText, ...input.references.map((r) => r.note)]
+    .filter((t): t is string => !!t && t.trim().length > 0)
+    .join(". ");
+
+  lines.push(buildDesignStandardsSection(input.brandTone, explicitFeelingsText || null));
 
   if (input.contentInventory?.length) {
     lines.push("\nContent inventory (their existing pages):");

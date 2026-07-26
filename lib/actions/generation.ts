@@ -3,12 +3,14 @@
 import path from "path";
 import { readFile, writeFile, mkdir, readdir } from "fs/promises";
 import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { ClientStatus, AssetType, ProjectIntent } from "@/app/generated/prisma/client";
-import { clientGeneratedDir } from "@/lib/storage";
+import { clientGeneratedDir, clientReferenceScreenshotsDir } from "@/lib/storage";
 import { buildGenerationPromptText, type GeneratedFile } from "@/lib/generation/prompt";
 import { buildWordPressThemePromptText } from "@/lib/generation/wp-theme-prompt";
-import { generateSite, type LogoImage } from "@/lib/generation/generate";
+import { generateSite, type LogoImage, type ReferenceImage } from "@/lib/generation/generate";
+import { screenshotReferenceSites } from "@/lib/crawl/reference-screenshot";
 import { createClient as createSupabaseServerClient } from "@/lib/supabase/server";
 import type {
   TechnicalAudit,
@@ -44,6 +46,7 @@ export async function startGeneration(clientId: string, formData: FormData) {
 
   runGenerationInBackground(clientId, client.auditReport.id, userPrompt || null, fallbackStatus);
 
+  revalidatePath("/", "layout");
   redirect(`/clients/${clientId}`);
 }
 
@@ -77,6 +80,28 @@ async function runGenerationInBackground(
       }))
     );
 
+    // Reference sites are just a URL + note to the model otherwise — it can't actually
+    // see what the site looks like without a screenshot attached.
+    let referenceImages: ReferenceImage[] = [];
+    try {
+      const referenceScreenshots = await screenshotReferenceSites(
+        references.map((r) => r.url),
+        clientReferenceScreenshotsDir(clientId)
+      );
+      referenceImages = (
+        await Promise.all(
+          references.map(async (ref): Promise<ReferenceImage | null> => {
+            const shot = referenceScreenshots.find((s) => s.url === ref.url);
+            if (!shot?.screenshotPath) return null;
+            const data = (await readFile(shot.screenshotPath)).toString("base64");
+            return { url: ref.url, note: ref.note, mediaType: "image/png", data };
+          })
+        )
+      ).filter((img): img is ReferenceImage => img !== null);
+    } catch (err) {
+      console.error(`[generation] failed to screenshot reference sites for ${clientId}, continuing:`, err);
+    }
+
     const promptInput = {
       clientName: client.name,
       briefText: client.briefText,
@@ -97,7 +122,7 @@ async function runGenerationInBackground(
       ? buildWordPressThemePromptText(promptInput)
       : buildGenerationPromptText(promptInput);
 
-    const result = await generateSite(promptText, logoImages);
+    const result = await generateSite(promptText, logoImages, referenceImages);
 
     const supabase = await createSupabaseServerClient();
     const {

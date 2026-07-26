@@ -2,6 +2,7 @@
 
 import path from "path";
 import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { ClientStatus, ProjectIntent, AssetType } from "@/app/generated/prisma/client";
 import { crawlClientSite } from "@/lib/crawl/crawler";
@@ -42,6 +43,7 @@ export async function startAudit(clientId: string) {
     runCrawlAuditInBackground(clientId, client.siteUrl);
   }
 
+  revalidatePath("/", "layout");
   redirect(`/clients/${clientId}`);
 }
 

@@ -92,20 +92,39 @@ const ARCHETYPE_KEYWORDS: Record<string, string[]> = {
 const DEFAULT_ARCHETYPE = "Professional / trustworthy / corporate";
 const MAX_ARCHETYPES = 2;
 
-// Patterns that signal the brief is explicitly rejecting the generic/default
-// execution of a feeling word ("professional but not generic", "trustworthy
-// but not boring/corporate", "avoid cookie-cutter", "without looking cold").
-const GENERIC_NEGATION_PATTERNS = [
-  /\bnot\s+(too\s+)?(generic|boring|corporate|bland|cold|sterile|cookie[\s-]?cutter|template[d]?|cliche|dated|stock|old[\s-]?fashioned)\b/i,
-  /\bavoid(ing)?\s+(a\s+|the\s+|any\s+)?(generic|boring|corporate|bland|cold|sterile|cookie[\s-]?cutter|template[d]?|cliche|dated|stock)\b/i,
-  /\bwithout\s+(being\s+|looking\s+|feeling\s+)?(too\s+)?(generic|boring|corporate|bland|cold|sterile|dated|stock)\b/i,
+// Words that signal the generic/default execution of a feeling — flagged when a
+// negation appears anywhere in the text *before* one of these within a short window,
+// e.g. "professional but not generic", "not in the generic color", "avoid cookie-cutter",
+// "without looking cold". Deliberately window-based rather than a strict adjacent-word
+// regex, since real phrasing often has filler words between the negation and the target
+// ("not in the generic color" — "not" and "generic" are 3 words apart).
+const GENERIC_DESCRIPTORS = [
+  "generic",
+  "boring",
+  "corporate",
+  "bland",
+  "cold",
+  "sterile",
+  "cookie-cutter",
+  "cookie cutter",
+  "templated",
+  "template",
+  "cliche",
+  "dated",
+  "stock",
+  "old-fashioned",
+  "old fashioned",
 ];
+const GENERIC_NEGATION_WINDOW_CHARS = 30;
 
 type BrandToneInput = {
   personality?: string[] | null;
   voice?: string | null;
   emotionalImpression?: string | null;
+  designArchetype?: string | null;
 } | null;
+
+const KNOWN_ARCHETYPES = new Set(Object.keys(ARCHETYPE_KEYWORDS));
 
 const NEGATION_WINDOW_CHARS = 20;
 const NEGATION_WORDS = /\b(not|avoid|avoiding|without|never|no|non)\b/;
@@ -135,11 +154,21 @@ function findMatchingArchetypes(text: string): string[] {
   return matched;
 }
 
-// The brief describes what the client wants the site to become; the audit's
-// detected brand tone describes what the old site currently is. When both
-// suggest archetypes, the brief's explicit ask takes priority.
+// Priority: (1) explicit feeling-words in the brief's own text — always checked
+// directly so a second, blended feeling isn't lost even if the narrative call
+// only names one archetype; (2) the narrative analysis's own archetype pick —
+// Claude reasoning over the actual screenshots/content/brief together, which
+// covers far more real-world phrasing than a fixed keyword list ever can;
+// (3) keyword-matching the detected brand tone, as a fallback when narrative
+// analysis wasn't available (e.g. it failed, or ANTHROPIC_API_KEY was unset).
 function selectArchetypes(brandTone: BrandToneInput, briefText: string | null): string[] {
   const briefMatches = findMatchingArchetypes(briefText ?? "");
+
+  const narrativePick =
+    brandTone?.designArchetype && KNOWN_ARCHETYPES.has(brandTone.designArchetype)
+      ? [brandTone.designArchetype]
+      : [];
+
   const brandToneMatches = findMatchingArchetypes(
     [
       ...(brandTone?.personality ?? []),
@@ -148,14 +177,26 @@ function selectArchetypes(brandTone: BrandToneInput, briefText: string | null): 
     ].join(" ")
   );
 
-  const combined = [...briefMatches, ...brandToneMatches.filter((a) => !briefMatches.includes(a))];
+  const combined = [...briefMatches, ...narrativePick, ...brandToneMatches].filter(
+    (archetype, index, all) => all.indexOf(archetype) === index
+  );
 
   return combined.length > 0 ? combined.slice(0, MAX_ARCHETYPES) : [DEFAULT_ARCHETYPE];
 }
 
 function briefWantsToAvoidGeneric(briefText: string | null): boolean {
   if (!briefText) return false;
-  return GENERIC_NEGATION_PATTERNS.some((pattern) => pattern.test(briefText));
+  const haystack = briefText.toLowerCase();
+  return GENERIC_DESCRIPTORS.some((word) => {
+    let searchFrom = 0;
+    while (true) {
+      const index = haystack.indexOf(word, searchFrom);
+      if (index === -1) return false;
+      const window = haystack.slice(Math.max(0, index - GENERIC_NEGATION_WINDOW_CHARS), index);
+      if (NEGATION_WORDS.test(window)) return true;
+      searchFrom = index + word.length;
+    }
+  });
 }
 
 function extractSection(markdown: string, heading: string): string | null {

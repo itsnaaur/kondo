@@ -4,6 +4,7 @@ import path from "path";
 import { mkdir, writeFile } from "fs/promises";
 import { randomUUID } from "crypto";
 import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { clientDir, clientAssetsDir } from "@/lib/storage";
 import { AssetType, ProjectIntent } from "@/app/generated/prisma/client";
@@ -82,5 +83,6 @@ export async function createClient(formData: FormData) {
     }
   }
 
+  revalidatePath("/", "layout");
   redirect(`/clients/${client.id}`);
 }

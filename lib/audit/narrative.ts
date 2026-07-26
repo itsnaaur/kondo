@@ -4,6 +4,41 @@ import type { TechnicalAudit, VisualDesignAudit, MotionInteractionAudit } from "
 
 const TOOL_NAME = "report_audit_narrative";
 
+const DESIGN_ARCHETYPES = [
+  {
+    name: "Professional / trustworthy / corporate",
+    hint: "consistency, restraint, credibility — B2B, legal, security, finance, established services",
+  },
+  {
+    name: "Modern / tech / innovative",
+    hint: "high contrast, generous negative space, one bold accent — SaaS, startups, digital products",
+  },
+  {
+    name: "Playful / friendly / approachable",
+    hint: "warm neutral background, two friendly accents, conversational copy — consumer, family, local services",
+  },
+  {
+    name: "Luxurious / elegant / premium",
+    hint: "dark or rich base, one restrained metallic/jewel accent, large scale — high-end retail, hospitality",
+  },
+  {
+    name: "Bold / energetic / confident",
+    hint: "high-contrast dominant color, decisive large typography — fitness, sports, youth brands",
+  },
+  {
+    name: "Calm / wellness / minimal",
+    hint: "low-contrast analogous palette, generous whitespace, slow pacing — health, wellness, mindfulness",
+  },
+  {
+    name: "Warm / organic / natural",
+    hint: "earth tones, serif type, handcrafted feel — food, sustainability, artisanal, outdoors",
+  },
+  {
+    name: "Creative / artistic / expressive",
+    hint: "triadic/split-complementary color blocks, unconventional layout — agencies, portfolios, the arts",
+  },
+] as const;
+
 const AUDIT_NARRATIVE_TOOL: Anthropic.Tool = {
   name: TOOL_NAME,
   description:
@@ -46,8 +81,19 @@ const AUDIT_NARRATIVE_TOOL: Anthropic.Tool = {
           voice: { type: "string", description: "One sentence on the tone of voice in the site's copy." },
           emotionalImpression: { type: "string", description: "One sentence on the emotional impression a visitor gets." },
           summary: { type: "string", description: "2-3 sentence overall brand tone summary." },
+          designArchetype: {
+            type: "string",
+            enum: DESIGN_ARCHETYPES.map((a) => a.name),
+            description:
+              "Pick the SINGLE archetype from the provided list that should drive the redesign's" +
+              " color/type/layout decisions — based on genuine judgment from the screenshots," +
+              " content, and brief together, not just keyword-matching the brief's wording." +
+              " This describes the desired REDESIGNED site, which may differ from what the" +
+              " current site looks like today — if the brief asks for a different feel than the" +
+              " current site has, pick the archetype for what the client is asking for.",
+          },
         },
-        required: ["personality", "voice", "emotionalImpression", "summary"],
+        required: ["personality", "voice", "emotionalImpression", "summary", "designArchetype"],
       },
     },
     required: ["findingsSummary", "briefUnderstanding", "recommendations", "brandTone"],
@@ -59,6 +105,7 @@ export type BrandToneResult = {
   voice: string;
   emotionalImpression: string;
   summary: string;
+  designArchetype: string;
 };
 
 export type RecommendationItem = { title: string; rationale: string };
@@ -121,6 +168,11 @@ export async function analyzeAuditNarrative(input: {
     "",
     "## Page copy sample from the current site",
     input.contentSample.slice(0, 6000) || "(no text extracted)",
+    "",
+    "## Design archetypes to choose from for brandTone.designArchetype",
+    "Pick whichever one best fits what the REDESIGNED site should feel like — weigh the brief's" +
+      " own wording most heavily, then the content/industry, then the current site's screenshots.",
+    ...DESIGN_ARCHETYPES.map((a) => `- ${a.name}: ${a.hint}`),
   ];
 
   const message = await anthropic.messages.create({

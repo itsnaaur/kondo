@@ -2,23 +2,27 @@
 
 import { rm } from "fs/promises";
 import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { clientDir } from "@/lib/storage";
 import { TRASH_RETENTION_DAYS } from "@/lib/trash-utils";
 
 export async function moveToTrash(clientId: string) {
   await prisma.client.update({ where: { id: clientId }, data: { deletedAt: new Date() } });
+  revalidatePath("/", "layout");
   redirect("/");
 }
 
 export async function restoreFromTrash(clientId: string) {
   await prisma.client.update({ where: { id: clientId }, data: { deletedAt: null } });
+  revalidatePath("/", "layout");
   redirect("/trash");
 }
 
 export async function permanentlyDeleteClient(clientId: string) {
   await rm(clientDir(clientId), { recursive: true, force: true });
   await prisma.client.delete({ where: { id: clientId } });
+  revalidatePath("/", "layout");
   redirect("/trash");
 }
 

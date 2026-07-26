@@ -39,11 +39,14 @@ export type LogoImage = {
   data: string;
 };
 
+export type ReferenceImage = LogoImage & { url: string; note: string | null };
+
 export type GenerationResult = { summary: string; files: GeneratedFile[] };
 
 export async function generateSite(
   promptText: string,
-  logoImages: LogoImage[] = []
+  logoImages: LogoImage[] = [],
+  referenceImages: ReferenceImage[] = []
 ): Promise<GenerationResult> {
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -54,6 +57,15 @@ export async function generateSite(
         source: { type: "base64", media_type: img.mediaType, data: img.data },
       })
     ),
+    ...referenceImages.flatMap((img): Anthropic.ContentBlockParam[] => [
+      {
+        type: "text",
+        text: `The following image is a screenshot of a reference/inspiration site the client provided: ${img.url}${
+          img.note ? ` — note: ${img.note}` : ""
+        }`,
+      },
+      { type: "image", source: { type: "base64", media_type: img.mediaType, data: img.data } },
+    ]),
     { type: "text", text: promptText },
   ];
 
