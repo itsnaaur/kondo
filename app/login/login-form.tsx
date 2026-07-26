@@ -38,8 +38,10 @@ export default function LoginForm() {
         onSubmit={handleSubmit}
         className="w-full max-w-sm rounded-xl border border-neutral-800 bg-neutral-950 p-8 shadow-xl"
       >
-        <Image src="/kondo-logo.png" alt="Kondo" width={276} height={45} className="mb-2 h-8 w-auto" priority />
-        <p className="mb-6 text-sm text-neutral-400">Internal facelift tool — JRNY Digital</p>
+        <div className="mb-6 flex flex-col items-center text-center">
+          <Image src="/kondo-logo.png" alt="Kondo" width={276} height={45} className="mb-2 h-6 w-auto" priority />
+          <p className="text-sm text-neutral-400">Internal facelift tool — JRNY Digital</p>
+        </div>
         <input
           type="email"
           autoFocus

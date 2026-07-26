@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { ClientStatus, ProjectIntent, AssetType } from "@/app/generated/prisma/client";
 import { crawlClientSite } from "@/lib/crawl/crawler";
 import { buildAuditFromPages } from "@/lib/crawl/analyze";
+import { downloadCrawlImages } from "@/lib/crawl/download-images";
 import { analyzeProjectArchive } from "@/lib/source-analysis/analyzer";
 import { screenshotReferenceSites } from "@/lib/crawl/reference-screenshot";
 import { clientSourceDir, clientReferenceScreenshotsDir } from "@/lib/storage";
@@ -139,6 +140,13 @@ async function tryAnalyzeNarrative(
 async function runCrawlAuditInBackground(clientId: string, siteUrl: string) {
   try {
     const { pages, truncated } = await crawlClientSite(clientId, siteUrl);
+
+    try {
+      await downloadCrawlImages(clientId, pages);
+    } catch (err) {
+      console.error(`[audit] logo/image download failed for client ${clientId}, continuing:`, err);
+    }
+
     const result = buildAuditFromPages(pages, truncated);
     const narrative = await tryAnalyzeNarrative(clientId, {
       contentSample: result.contentSample,

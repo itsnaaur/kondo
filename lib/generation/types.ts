@@ -5,6 +5,7 @@ import type {
   BrandToneAudit,
   ContentInventoryEntry,
 } from "@/lib/audit-types";
+import { buildDesignStandardsSection } from "@/lib/design-standards";
 
 export type GeneratedFile = { path: string; content: string };
 
@@ -59,6 +60,8 @@ export function buildAuditSummaryLines(input: PromptInput): string[] {
     lines.push(`Voice: ${input.brandTone.voice}`);
     lines.push(`Emotional impression: ${input.brandTone.emotionalImpression}`);
   }
+
+  lines.push(buildDesignStandardsSection(input.brandTone, input.briefText));
 
   if (input.contentInventory?.length) {
     lines.push("\nContent inventory (their existing pages):");

@@ -12,6 +12,9 @@ export type PageExtraction = {
   text: string;
   links: string[];
   images: string[];
+  logoCandidate: string | null;
+  favicon: string | null;
+  ogImage: string | null;
   samples: Array<{ selector: string; style: StyleSample }>;
   generatorMeta: string | null;
   scriptSrcs: string[];
