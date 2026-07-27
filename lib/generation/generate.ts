@@ -41,6 +41,8 @@ export type LogoImage = {
 
 export type ReferenceImage = LogoImage & { url: string; note: string | null };
 
+export type ContentImage = LogoImage & { filename: string };
+
 export type GenerationResult = { summary: string; files: GeneratedFile[] };
 
 const MAX_ATTEMPTS = 2;
@@ -48,7 +50,8 @@ const MAX_ATTEMPTS = 2;
 export async function generateSite(
   promptText: string,
   logoImages: LogoImage[] = [],
-  referenceImages: ReferenceImage[] = []
+  referenceImages: ReferenceImage[] = [],
+  contentImages: ContentImage[] = []
 ): Promise<GenerationResult> {
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -65,6 +68,13 @@ export async function generateSite(
         text: `The following image is a screenshot of a reference/inspiration site the client provided: ${img.url}${
           img.note ? ` — note: ${img.note}` : ""
         }`,
+      },
+      { type: "image", source: { type: "base64", media_type: img.mediaType, data: img.data } },
+    ]),
+    ...contentImages.flatMap((img): Anthropic.ContentBlockParam[] => [
+      {
+        type: "text",
+        text: `The following is a real photo/image from the client's current site. If you use it, reference it exactly as "assets/${img.filename}" — do not rename it or fabricate a different filename.`,
       },
       { type: "image", source: { type: "base64", media_type: img.mediaType, data: img.data } },
     ]),

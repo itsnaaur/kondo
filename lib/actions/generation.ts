@@ -9,7 +9,12 @@ import { ClientStatus, AssetType, ProjectIntent } from "@/app/generated/prisma/c
 import { clientGeneratedDir, clientReferenceScreenshotsDir } from "@/lib/storage";
 import { buildGenerationPromptText, type GeneratedFile } from "@/lib/generation/prompt";
 import { buildWordPressThemePromptText } from "@/lib/generation/wp-theme-prompt";
-import { generateSite, type LogoImage, type ReferenceImage } from "@/lib/generation/generate";
+import {
+  generateSite,
+  type LogoImage,
+  type ReferenceImage,
+  type ContentImage,
+} from "@/lib/generation/generate";
 import { screenshotReferenceSites } from "@/lib/crawl/reference-screenshot";
 import { createClient as createSupabaseServerClient } from "@/lib/supabase/server";
 import type {
@@ -80,6 +85,17 @@ async function runGenerationInBackground(
       }))
     );
 
+    const contentImageAssets = assets.filter(
+      (a) => a.type === AssetType.IMAGE && IMAGE_MIME_TYPES.has(a.mimeType)
+    );
+    const contentImages: ContentImage[] = await Promise.all(
+      contentImageAssets.map(async (a) => ({
+        filename: a.filename,
+        mediaType: a.mimeType as ContentImage["mediaType"],
+        data: (await readFile(path.join(process.cwd(), a.storagePath))).toString("base64"),
+      }))
+    );
+
     // Reference sites are just a URL + note to the model otherwise — it can't actually
     // see what the site looks like without a screenshot attached.
     let referenceImages: ReferenceImage[] = [];
@@ -122,7 +138,7 @@ async function runGenerationInBackground(
       ? buildWordPressThemePromptText(promptInput)
       : buildGenerationPromptText(promptInput);
 
-    const result = await generateSite(promptText, logoImages, referenceImages);
+    const result = await generateSite(promptText, logoImages, referenceImages, contentImages);
 
     const supabase = await createSupabaseServerClient();
     const {
@@ -136,11 +152,12 @@ async function runGenerationInBackground(
     const outputDirAbs = path.join(clientGeneratedDir(clientId), generation.id);
     await mkdir(outputDirAbs, { recursive: true });
 
-    // Copy logo assets into the output so the generated HTML can reference them.
-    if (logoAssets.length > 0) {
+    // Copy logo + content image assets into the output so the generated HTML can reference them.
+    const assetsToCopy = [...logoAssets, ...contentImageAssets];
+    if (assetsToCopy.length > 0) {
       const assetsSubdir = path.join(outputDirAbs, "assets");
       await mkdir(assetsSubdir, { recursive: true });
-      for (const a of logoAssets) {
+      for (const a of assetsToCopy) {
         const src = path.join(process.cwd(), a.storagePath);
         await writeFile(path.join(assetsSubdir, a.filename), await readFile(src));
       }

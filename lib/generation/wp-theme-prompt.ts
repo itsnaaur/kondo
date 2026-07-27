@@ -11,7 +11,7 @@ export function buildWordPressThemePromptText(input: PromptInput): string {
 
   if (input.assetList.length > 0) {
     lines.push(
-      'Logo images (if any) are attached below as images — reference them at "assets/{filename}" and wire them up as the custom logo (add_theme_support("custom-logo")) with a fallback to the site title/bloginfo("name") when no logo is set.'
+      'Logo and any real content images crawled from the client\'s current site are attached below as images, each labeled with the exact filename. Wire the logo up as the custom logo (add_theme_support("custom-logo")) with a fallback to the site title/bloginfo("name") when no logo is set. Reference content images at get_template_directory_uri() . "/assets/{filename}" wherever a section calls for a real photo — prefer a real attached image over a fabricated CSS placeholder wherever one fits.'
     );
   }
 
@@ -49,7 +49,7 @@ export function buildWordPressThemePromptText(input: PromptInput): string {
     "- Use semantic HTML, template tags (get_header(), get_footer(), wp_head(), wp_footer(), the_content(), etc.) correctly per WordPress conventions — this will be installed on a real WordPress site."
   );
   lines.push(
-    "- Do not fabricate photographic imagery — use CSS gradients, shapes, or simple inline SVG icons instead of placeholder photos, unless a logo asset is attached."
+    "- Do not fabricate photographic imagery — use CSS gradients, shapes, or simple inline SVG icons instead of placeholder photos, unless a logo or real content-image asset is attached (see below)."
   );
   lines.push(
     "- Typography is a craft, not just a font choice: build a real heading hierarchy (h1-h3 should differ in weight/color/letter-spacing, not just size), and use bold/italic emphasis on the one or two phrases per section that earn it. A page where every paragraph is one uniform weight reads as unfinished."

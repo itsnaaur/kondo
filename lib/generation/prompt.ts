@@ -11,7 +11,7 @@ export function buildGenerationPromptText(input: PromptInput): string {
 
   if (input.assetList.length > 0) {
     lines.push(
-      'Logo images (if any) are attached below as images — reference them at "assets/{filename}" in your HTML.'
+      'Logo and any real content images crawled from the client\'s current site are attached below as images, each labeled with the exact filename to reference at "assets/{filename}" in your HTML. Prefer a real attached content image over a fabricated CSS placeholder wherever one fits the section — that\'s the whole reason it was crawled and attached. Only fall back to CSS/SVG treatment for sections with no matching real image.'
     );
   }
 
@@ -24,7 +24,7 @@ export function buildGenerationPromptText(input: PromptInput): string {
     "- Use semantic HTML and responsive CSS (flexbox/grid). No external CSS/JS framework or component-library CDN dependencies (no Bootstrap, Tailwind CDN, jQuery, etc.) — the only permitted external reference is the Google Fonts `<link>` tag specified by the design standards below."
   );
   lines.push(
-    "- Do not fabricate photographic imagery — use CSS gradients, shapes, or simple inline SVG icons instead of placeholder photos, unless a logo asset is attached."
+    "- Do not fabricate photographic imagery — use CSS gradients, shapes, or simple inline SVG icons instead of placeholder photos, unless a logo or real content-image asset is attached (see below)."
   );
   lines.push(
     "- Typography is a craft, not just a font choice: build a real heading hierarchy (h1-h3 should differ in weight/color/letter-spacing, not just size), and use bold/italic emphasis on the one or two phrases per section that earn it. A page where every paragraph is one uniform weight reads as unfinished."
