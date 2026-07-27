@@ -5,7 +5,8 @@ import type {
   BrandToneAudit,
   ContentInventoryEntry,
 } from "@/lib/audit-types";
-import { buildDesignStandardsSection } from "@/lib/design-standards";
+import { QUALITY_FLOOR } from "./quality-floor";
+import type { DesignSpec } from "./design-spec-types";
 
 export type GeneratedFile = { path: string; content: string };
 
@@ -22,6 +23,8 @@ export type PromptInput = {
   assetList: Array<{ filename: string; type: string }>;
   priorFiles: GeneratedFile[] | null;
   userPrompt: string | null;
+  /** The approved Call 1 output — Call 2 executes this faithfully rather than inventing it. */
+  designSpec: DesignSpec;
 };
 
 export function buildAuditSummaryLines(input: PromptInput): string[] {
@@ -35,9 +38,7 @@ export function buildAuditSummaryLines(input: PromptInput): string[] {
   lines.push("\n## Inspiration / reference sites");
   if (input.references.length > 0) {
     lines.push(
-      "Screenshots of these sites are attached above as images — actually look at their visual" +
-        " style, layout, and energy; the note next to each one explains specifically what to take" +
-        " from it (and, just as importantly, what NOT to copy)."
+      "These informed the approved design direction below — you do not need to look at them again, just execute the spec."
     );
     for (const r of input.references) {
       lines.push(`- ${r.url}${r.note ? `: ${r.note}` : ""}`);
@@ -50,15 +51,6 @@ export function buildAuditSummaryLines(input: PromptInput): string[] {
   lines.push(`Platform: ${input.technical?.platform ?? "Unknown"}`);
   lines.push(`Pages crawled: ${input.technical?.pagesCrawled ?? 0}`);
   lines.push(`Forms present: ${input.technical?.formsDetected ? "Yes" : "No"}`);
-  lines.push(
-    `Color palette detected: ${input.visualDesign?.colorPalette.map((c) => c.value).join(", ") || "none"}`
-  );
-  lines.push(
-    `Typography detected: ${input.visualDesign?.typography.map((t) => t.value).join(", ") || "none"}`
-  );
-  lines.push(
-    `Animation/motion: ${input.motionInteraction?.animationLibraries.join(", ") || "None detected"}`
-  );
 
   if (input.brandTone) {
     lines.push(`Brand tone: ${input.brandTone.personality.join(", ")} — ${input.brandTone.summary}`);
@@ -66,20 +58,27 @@ export function buildAuditSummaryLines(input: PromptInput): string[] {
     lines.push(`Emotional impression: ${input.brandTone.emotionalImpression}`);
   }
 
-  // Reference-site notes often carry explicit feeling-words too (e.g. "professional but
-  // not the generic corporate feel") — fold them in alongside the brief for archetype matching.
-  const explicitFeelingsText = [input.briefText, ...input.references.map((r) => r.note)]
-    .filter((t): t is string => !!t && t.trim().length > 0)
-    .join(". ");
-
-  lines.push(buildDesignStandardsSection(input.brandTone, explicitFeelingsText || null));
-
   if (input.contentInventory?.length) {
     lines.push("\nContent inventory (their existing pages):");
     for (const p of input.contentInventory.slice(0, 20)) {
       lines.push(`- ${p.title || p.url}`);
     }
   }
+
+  lines.push("\n## Approved design specification");
+  lines.push(
+    "This direction has already been decided and approved by the team. Execute it faithfully — " +
+      "you are not a second opinion on the direction. Do not introduce a colour that is not in the " +
+      "palette, a typeface that is not in the type spec, or motion that is not in the motion spec. " +
+      "If executing the spec faithfully appears impossible, build the closest faithful version and " +
+      "record the conflict in an HTML comment at the end of the document rather than silently " +
+      "falling back to a default."
+  );
+  lines.push("```json");
+  lines.push(JSON.stringify(input.designSpec, null, 2));
+  lines.push("```");
+
+  lines.push(`\n${QUALITY_FLOOR}`);
 
   lines.push("\n## Team review notes");
   lines.push(input.reviewNotes?.trim() || "None.");

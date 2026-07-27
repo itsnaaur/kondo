@@ -3,7 +3,16 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 
-export function GenerationProgress({ clientId }: { clientId: string }) {
+export function GenerationProgress({
+  clientId,
+  status,
+  message,
+}: {
+  clientId: string;
+  /** The status this component polls away from — refreshes once the client leaves it. */
+  status: string;
+  message?: string;
+}) {
   const router = useRouter();
 
   useEffect(() => {
@@ -16,7 +25,7 @@ export function GenerationProgress({ clientId }: { clientId: string }) {
       const data: { status: string } = await res.json();
       if (cancelled) return;
 
-      if (data.status !== "GENERATING") {
+      if (data.status !== status) {
         router.refresh();
         return;
       }
@@ -29,11 +38,13 @@ export function GenerationProgress({ clientId }: { clientId: string }) {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [clientId, router]);
+  }, [clientId, status, router]);
 
   return (
     <div className="rounded-lg border border-neutral-800 bg-neutral-950 px-4 py-3">
-      <p className="text-sm text-neutral-300">Generating — this usually takes under a minute...</p>
+      <p className="text-sm text-neutral-300">
+        {message ?? "Generating — this usually takes under a minute..."}
+      </p>
     </div>
   );
 }

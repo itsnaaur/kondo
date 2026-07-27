@@ -5,7 +5,8 @@ const TOOL_NAME = "generate_site";
 
 const GENERATE_SITE_TOOL: Anthropic.Tool = {
   name: TOOL_NAME,
-  description: "Return the complete set of static site files for the facelifted website.",
+  description:
+    "Return the complete set of static site files that faithfully execute the approved design specification.",
   input_schema: {
     type: "object",
     properties: {
@@ -39,8 +40,6 @@ export type LogoImage = {
   data: string;
 };
 
-export type ReferenceImage = LogoImage & { url: string; note: string | null };
-
 export type ContentImage = LogoImage & { filename: string };
 
 export type GenerationResult = { summary: string; files: GeneratedFile[] };
@@ -50,7 +49,6 @@ const MAX_ATTEMPTS = 2;
 export async function generateSite(
   promptText: string,
   logoImages: LogoImage[] = [],
-  referenceImages: ReferenceImage[] = [],
   contentImages: ContentImage[] = []
 ): Promise<GenerationResult> {
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -62,15 +60,6 @@ export async function generateSite(
         source: { type: "base64", media_type: img.mediaType, data: img.data },
       })
     ),
-    ...referenceImages.flatMap((img): Anthropic.ContentBlockParam[] => [
-      {
-        type: "text",
-        text: `The following image is a screenshot of a reference/inspiration site the client provided: ${img.url}${
-          img.note ? ` — note: ${img.note}` : ""
-        }`,
-      },
-      { type: "image", source: { type: "base64", media_type: img.mediaType, data: img.data } },
-    ]),
     ...contentImages.flatMap((img): Anthropic.ContentBlockParam[] => [
       {
         type: "text",
@@ -100,14 +89,15 @@ async function requestGeneration(
 ): Promise<GenerationResult> {
   // Streaming is required by the SDK once max_tokens is high enough that a request
   // could plausibly run past its non-streaming timeout.
-  // effort: "xhigh" gives real design/typographic judgment room to think before writing
-  // the tool call — forced tool_choice doesn't disable adaptive thinking on Sonnet 5, and
-  // this is exactly the kind of creative+technical task that benefits from it. max_tokens
-  // is raised to leave room for that thinking alongside the full file output.
+  // This call executes an already-approved spec rather than deciding a direction — the
+  // design judgment happened in Call 1 (design-direction.ts). effort: "medium" is the
+  // closest available substitute for the "low temperature, obedient execution" the
+  // design-prompt-system called for (Sonnet 5 rejects temperature/top_p/top_k outright).
+  // Lower effort here also means less second-guessing of the spec's explicit choices.
   const stream = anthropic.messages.stream({
     model: "claude-sonnet-5",
     max_tokens: 64000,
-    output_config: { effort: "xhigh" },
+    output_config: { effort: "medium" },
     tools: [GENERATE_SITE_TOOL],
     tool_choice: { type: "tool", name: TOOL_NAME },
     messages: [{ role: "user", content }],

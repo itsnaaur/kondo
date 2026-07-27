@@ -2,7 +2,7 @@ import { buildAuditSummaryLines, type PromptInput } from "./types";
 
 export function buildWordPressThemePromptText(input: PromptInput): string {
   const lines: string[] = [
-    "You are generating a complete, installable WordPress theme for a JRNY Digital client, converting their existing coded site into WordPress. This is a code-to-WordPress transfer, based on a static analysis of their uploaded source repository.",
+    "You are building a complete, installable WordPress theme for a JRNY Digital client, converting their existing coded site into WordPress. This is a code-to-WordPress transfer, based on a static analysis of their uploaded source repository. The design direction below has already been decided and approved by the team — your job is to execute it faithfully in the theme, not to make a second round of design decisions.",
     "",
     "IMPORTANT: the client will edit their page content themselves later, in the WordPress editor (Gutenberg/block editor). Your job is the theme — the visual skin, typography, colors, header/footer/navigation chrome, and page templates — NOT fabricated marketing copy. Page and post templates MUST render real WordPress content via the Loop (the_content()) rather than hardcoded text, so whatever the client writes in WP Admin shows up correctly inside your design.",
     "",
@@ -40,22 +40,13 @@ export function buildWordPressThemePromptText(input: PromptInput): string {
 
   lines.push("\n## Output rules");
   lines.push(
-    "- This must be a real, valid, installable WordPress theme — no external CSS/JS framework or component-library CDN dependencies; assets are enqueued via functions.php. The one exception is the Google Fonts `<link>` tag specified by the design standards below — enqueue it via wp_enqueue_style() pointed at the Google Fonts URL rather than hardcoding a <link> tag."
+    "- This must be a real, valid, installable WordPress theme — no external CSS/JS framework or component-library CDN dependencies; assets are enqueued via functions.php. The one exception is a Google Fonts link if the spec's type source is \"google\" — enqueue it via wp_enqueue_style() pointed at the Google Fonts URL rather than hardcoding a <link> tag."
   );
   lines.push(
-    "- Preserve the brand's detected color palette and typography where sensible; use CSS custom properties for the palette."
+    "- Define the spec's palette, type scale, and spacing scale as CSS custom properties; never hardcode a hex value or font family outside that block."
   );
   lines.push(
     "- Use semantic HTML, template tags (get_header(), get_footer(), wp_head(), wp_footer(), the_content(), etc.) correctly per WordPress conventions — this will be installed on a real WordPress site."
-  );
-  lines.push(
-    "- Do not fabricate photographic imagery — use CSS gradients, shapes, or simple inline SVG icons instead of placeholder photos, unless a logo or real content-image asset is attached (see below)."
-  );
-  lines.push(
-    "- Typography is a craft, not just a font choice: build a real heading hierarchy (h1-h3 should differ in weight/color/letter-spacing, not just size), and use bold/italic emphasis on the one or two phrases per section that earn it. A page where every paragraph is one uniform weight reads as unfinished."
-  );
-  lines.push(
-    "- Treat every visual dimension of the theme as a deliberate decision, not a default: color palette, font pairing and heading hierarchy, spacing scale, shadows, gradients, corner radius, image treatment, motion and page transitions, and mobile layout. The design standards below give current, concrete guidance for each of these per archetype — use it instead of reaching for the safest generic choice (soft gray shadow, 8px radius everywhere, no gradient, desktop-shrunk-to-mobile) on any of them."
   );
 
   if (input.priorFiles && input.priorFiles.length > 0) {
@@ -66,11 +57,14 @@ export function buildWordPressThemePromptText(input: PromptInput): string {
     lines.push("\n## Requested change");
     lines.push(input.userPrompt?.trim() || "Refine and improve the current theme.");
     lines.push(
+      "\nThe approved design spec above still governs palette/type/layout/motion — apply the requested change within it unless the change explicitly asks to alter the direction itself."
+    );
+    lines.push(
       "\nReturn the FULL updated set of files reflecting this change, including any files left unchanged."
     );
   } else {
     lines.push("\n## Task");
-    lines.push("Generate the first version of the WordPress theme now.");
+    lines.push("Generate the first version of the WordPress theme now, executing the approved spec.");
     if (input.userPrompt?.trim()) {
       lines.push(`Additional instruction for this first pass: ${input.userPrompt.trim()}`);
     }

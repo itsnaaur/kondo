@@ -18,6 +18,10 @@ export function clientReferenceScreenshotsDir(clientId: string): string {
   return path.join(clientDir(clientId), "crawl", "reference-screenshots");
 }
 
+export function clientVisualShotsDir(clientId: string): string {
+  return path.join(clientDir(clientId), "crawl", "visual-shots");
+}
+
 export function clientSourceDir(clientId: string): string {
   return path.join(clientDir(clientId), "source");
 }

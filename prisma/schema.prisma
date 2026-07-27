@@ -16,6 +16,10 @@ enum ClientStatus {
   DRAFT
   AUDITING
   AUDIT_READY
+  INTERPRETING
+  BRIEF_REVIEW
+  DESIGNING
+  DESIGN_REVIEW
   GENERATING
   READY_FOR_REVIEW
   EXPORTED
@@ -61,6 +65,17 @@ model Client {
 
   crawlPagesDone  Int?
   crawlPagesTotal Int?
+
+  // The Call 0 (interpretation layer) output — a bundle of { existingSiteRead,
+  // referenceReads, interpretedBrief }, cached per client so it survives a BRIEF_REVIEW
+  // pause and so refinements don't re-run it.
+  interpretedBrief           Json?
+  interpretedBriefApprovedAt DateTime?
+
+  // The Call 1 (design-direction) output — cached per client, not per page/generation,
+  // so refinements reuse the same approved direction instead of re-deciding it each time.
+  designSpec           Json?
+  designSpecApprovedAt DateTime?
 
   assets      Asset[]
   references  Reference[]

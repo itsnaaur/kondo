@@ -4,8 +4,12 @@ import { GenerationProgress } from "@/components/GenerationProgress";
 import { GenerationForm } from "@/components/GenerationForm";
 import { MessageList } from "@/components/MessageList";
 import { ClientBriefPanel } from "@/components/ClientBriefPanel";
+import { DesignSpecReview } from "@/components/DesignSpecReview";
+import { InterpretedBriefReview } from "@/components/InterpretedBriefReview";
 import { STATUS_LABEL, INTENT_LABEL } from "@/lib/labels";
 import { moveToTrash } from "@/lib/actions/trash";
+import { isValidDesignSpecShape, type DesignSpec } from "@/lib/generation/design-spec-types";
+import { isValidInterpretedBriefBundle } from "@/lib/generation/interpreted-brief-types";
 import type {
   TechnicalAudit,
   VisualDesignAudit,
@@ -39,6 +43,12 @@ export default async function ClientDetailPage({
   const motionInteraction = audit?.motionInteraction as MotionInteractionAudit | null | undefined;
   const contentInventory = audit?.contentInventory as ContentInventoryEntry[] | null | undefined;
   const brandTone = audit?.brandTone as BrandToneAudit | null | undefined;
+  const designSpec: DesignSpec | null = isValidDesignSpecShape(client.designSpec)
+    ? (client.designSpec as unknown as DesignSpec)
+    : null;
+  const interpretedBriefBundle = isValidInterpretedBriefBundle(client.interpretedBrief)
+    ? client.interpretedBrief
+    : null;
 
   const hasConversationStarted = client.messages.length > 0;
 
@@ -104,7 +114,37 @@ export default async function ClientDetailPage({
             <MessageList messages={client.messages} />
 
             <div className="flex-shrink-0 border-t border-neutral-800 px-6 py-4">
-              {client.status === "GENERATING" && <GenerationProgress clientId={client.id} />}
+              {client.status === "GENERATING" && (
+                <GenerationProgress clientId={client.id} status="GENERATING" />
+              )}
+
+              {client.status === "INTERPRETING" && (
+                <GenerationProgress
+                  clientId={client.id}
+                  status="INTERPRETING"
+                  message="Reading the existing site and references, and interpreting the brief..."
+                />
+              )}
+
+              {client.status === "BRIEF_REVIEW" && interpretedBriefBundle && (
+                <InterpretedBriefReview
+                  clientId={client.id}
+                  brief={interpretedBriefBundle.interpretedBrief}
+                  failedReferenceUrls={interpretedBriefBundle.failedReferenceUrls}
+                />
+              )}
+
+              {client.status === "DESIGNING" && (
+                <GenerationProgress
+                  clientId={client.id}
+                  status="DESIGNING"
+                  message="Deciding on a design direction — this usually takes under a minute..."
+                />
+              )}
+
+              {client.status === "DESIGN_REVIEW" && designSpec && (
+                <DesignSpecReview clientId={client.id} spec={designSpec} />
+              )}
 
               {client.status === "READY_FOR_REVIEW" && (
                 <div className="space-y-3">
@@ -141,6 +181,10 @@ export default async function ClientDetailPage({
               )}
 
               {client.status !== "GENERATING" &&
+                client.status !== "INTERPRETING" &&
+                client.status !== "BRIEF_REVIEW" &&
+                client.status !== "DESIGNING" &&
+                client.status !== "DESIGN_REVIEW" &&
                 client.status !== "READY_FOR_REVIEW" &&
                 client.status !== "AUDIT_READY" && (
                   <p className="text-sm text-neutral-600">
@@ -167,6 +211,50 @@ export default async function ClientDetailPage({
                   Generate the first version
                 </h2>
                 <GenerationForm clientId={client.id} isRefinement={false} />
+              </section>
+            )}
+            {client.status === "INTERPRETING" && (
+              <section>
+                <h2 className="mb-3 text-sm font-medium uppercase tracking-wide text-neutral-500">
+                  Interpreting the brief
+                </h2>
+                <GenerationProgress
+                  clientId={client.id}
+                  status="INTERPRETING"
+                  message="Reading the existing site and references, and interpreting the brief..."
+                />
+              </section>
+            )}
+            {client.status === "BRIEF_REVIEW" && interpretedBriefBundle && (
+              <section>
+                <h2 className="mb-3 text-sm font-medium uppercase tracking-wide text-neutral-500">
+                  Review the interpreted brief
+                </h2>
+                <InterpretedBriefReview
+                  clientId={client.id}
+                  brief={interpretedBriefBundle.interpretedBrief}
+                  failedReferenceUrls={interpretedBriefBundle.failedReferenceUrls}
+                />
+              </section>
+            )}
+            {client.status === "DESIGNING" && (
+              <section>
+                <h2 className="mb-3 text-sm font-medium uppercase tracking-wide text-neutral-500">
+                  Deciding on a design direction
+                </h2>
+                <GenerationProgress
+                  clientId={client.id}
+                  status="DESIGNING"
+                  message="Deciding on a design direction — this usually takes under a minute..."
+                />
+              </section>
+            )}
+            {client.status === "DESIGN_REVIEW" && designSpec && (
+              <section>
+                <h2 className="mb-3 text-sm font-medium uppercase tracking-wide text-neutral-500">
+                  Review the design direction
+                </h2>
+                <DesignSpecReview clientId={client.id} spec={designSpec} />
               </section>
             )}
           </div>
