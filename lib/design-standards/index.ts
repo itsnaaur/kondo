@@ -269,6 +269,10 @@ export function buildDesignStandardsSection(
   ]);
   const universalLayout = extractSections(files.layout, [
     "## Motion guidance (all archetypes)",
+    "## Spacing scale (all archetypes)",
+    "## Responsive & mobile behavior (all archetypes)",
+    "## Images & imagery treatment (all archetypes)",
+    "## Page transitions (all archetypes)",
     "## Dark mode",
     "## Section arrangement checklist",
   ]);

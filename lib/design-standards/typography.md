@@ -1,10 +1,16 @@
 # Typography standards
 
-Generated sites must work standalone with no external font CDN, so every stack below uses
-**system fonts only** — fonts already installed on the client's OS, referenced by CSS font-stack
-with sensible fallbacks across Windows, macOS, and Linux. No `<link>` tags, no `@font-face`
-downloads. This still produces real visual distinction across archetypes because modern system
-fonts (Segoe UI Variable, San Francisco, Georgia, ui-monospace) span a wide range of moods.
+Generated sites load their fonts from the Google Fonts CDN — real, distinctive typefaces
+instead of the OS-default system-font stack. This is a deliberate reversal of an earlier
+"system fonts only" rule: real websites are deployed live with an internet connection, so
+there's no good reason to give up genuine typographic character for an offline guarantee
+nobody needs in production. Every stack below still ends in a matching system-font fallback,
+so the page degrades gracefully if the CDN is ever unreachable — it just won't look as
+distinctive in that rare case.
+
+**Include the archetype's `<link>` tag in `<head>`, before your own stylesheet.** Use the
+`font-family` value given exactly as written (it already includes the CDN font first,
+generic-family-appropriate system fonts after).
 
 **Pairing rule**: pick one distinctive font for headings and one quiet, highly-legible font for
 body text — never two loud fonts, never the same font at the same weight for both. Contrast in
@@ -13,69 +19,85 @@ is what makes a pairing read as intentional.
 
 ## Archetype: Professional / trustworthy / corporate
 
-- **Heading**: `"Segoe UI Semibold", "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif`
-- **Body**: `-apple-system, "Segoe UI", system-ui, Roboto, Helvetica, Arial, sans-serif`
-- **Scale**: moderate size jumps (e.g. 16px body → 32px h1), medium weight headings (600), avoid
-  extreme size contrast — it reads as considered rather than shouting.
+- **Link**: `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Libre+Franklin:wght@600;700&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet">`
+- **Heading**: `"Libre Franklin", -apple-system, "Segoe UI", system-ui, Roboto, Arial, sans-serif` at 600-700 weight
+- **Body**: `"Source Sans 3", -apple-system, "Segoe UI", system-ui, Roboto, Helvetica, Arial, sans-serif` at 400-600 weight
+- **Scale**: moderate size jumps (e.g. 16px body → 32px h1), avoid extreme size contrast — it
+  reads as considered rather than shouting.
 
 ## Archetype: Modern / tech / innovative
 
-- **Heading**: `-apple-system, "Segoe UI", system-ui, Roboto, sans-serif` at a heavy weight (700-800)
-- **Body**: same stack at regular weight (400), slightly tighter line-height (1.5)
-- **Accent**: `ui-monospace, "SF Mono", "Cascadia Code", "Roboto Mono", Consolas, "Courier New", monospace`
-  for labels, stats, or code-like details — reinforces a technical feel without needing a
-  downloaded font.
+- **Link**: `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Sans:wght@400;500&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">`
+- **Heading**: `"Space Grotesk", -apple-system, "Segoe UI", system-ui, sans-serif` at 700 weight
+- **Body**: `"IBM Plex Sans", -apple-system, "Segoe UI", system-ui, sans-serif` at 400 weight,
+  slightly tighter line-height (1.5)
+- **Accent**: `"IBM Plex Mono", ui-monospace, "SF Mono", Consolas, monospace` for labels, stats,
+  or code-like details — reinforces a technical feel and shares a designer with the body font.
 
 ## Archetype: Playful / friendly / approachable
 
-- **Heading**: `-apple-system, "Segoe UI", system-ui, Roboto, sans-serif` at a rounded-reading
-  heavy weight (700), slightly larger than strictly needed
-- **Body**: same stack, regular weight, generous line-height (1.6-1.7) for an easygoing feel
-- **Note**: since a true rounded system font isn't reliably available cross-platform, lean on
-  generous spacing, rounded UI corners, and warm color instead of font choice to carry the
-  playful feel.
+- **Link**: `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@600;700&family=Nunito+Sans:wght@400;600&display=swap" rel="stylesheet">`
+- **Heading**: `"Fredoka", -apple-system, "Segoe UI", system-ui, sans-serif` at 600-700 weight —
+  genuinely rounded, unlike any system font, so it carries the friendly feel on its own
+- **Body**: `"Nunito Sans", -apple-system, "Segoe UI", system-ui, sans-serif` at 400-600 weight,
+  generous line-height (1.6-1.7)
 
 ## Archetype: Luxurious / elegant / premium
 
-- **Heading**: `Georgia, "Iowan Old Style", "Palatino Linotype", Palatino, "Times New Roman", serif`
-  at a light-to-regular weight, generous letter-spacing on all-caps labels
-- **Body**: `-apple-system, "Segoe UI", system-ui, Roboto, sans-serif` at regular weight — a serif
-  heading against a clean sans body is the classic premium pairing
+- **Link**: `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,300;0,400;1,400&family=Karla:wght@400;500&display=swap" rel="stylesheet">`
+- **Heading**: `"Fraunces", Georgia, "Times New Roman", serif` at 300-400 weight, italic for
+  accents/pull-quotes, generous letter-spacing on all-caps labels — a high-contrast serif with
+  real editorial character
+- **Body**: `"Karla", -apple-system, "Segoe UI", system-ui, sans-serif` at regular weight — a
+  serif heading against a clean sans body is the classic premium pairing
 - **Scale**: larger size contrast than other archetypes (e.g. 16px body → 48px+ h1) — scale
   itself communicates luxury.
 
 ## Archetype: Bold / energetic / confident
 
-- **Heading**: `-apple-system, "Segoe UI", system-ui, Roboto, sans-serif` at maximum weight
+- **Link**: `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;800;900&display=swap" rel="stylesheet">`
+- **Heading**: `"Archivo", -apple-system, "Segoe UI", system-ui, sans-serif` at maximum weight
   (800-900), tight letter-spacing, often uppercase
-- **Body**: same stack at regular weight — keep body text quiet so the heading weight reads as
-  a deliberate contrast, not just "everything is bold"
+- **Body**: same family (`"Archivo"`) at regular weight — one family across the whole weight
+  range keeps it cohesive while the heading weight still reads as a deliberate contrast
 
 ## Archetype: Calm / wellness / minimal
 
-- **Heading**: `Georgia, "Iowan Old Style", Palatino, serif` at a light weight, or
-  `-apple-system, "Segoe UI", system-ui, sans-serif` at regular weight — avoid heavy weights
-  entirely, they contradict the calm feel
-- **Body**: same family as heading for a quieter, more unified page; wide line-height (1.7+)
-  and generous paragraph spacing
+- **Link**: `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;500;600&display=swap" rel="stylesheet">`
+- **Heading**: `"Manrope", -apple-system, "Segoe UI", system-ui, sans-serif` at 500-600 weight
+- **Body**: `"Manrope", -apple-system, "Segoe UI", system-ui, sans-serif` at 300 weight — one
+  family for a quieter, more unified page; wide line-height (1.7+) and generous paragraph
+  spacing. Avoid heavy weights entirely, they contradict the calm feel.
 
 ## Archetype: Warm / organic / natural
 
-- **Heading**: `Georgia, "Iowan Old Style", Palatino, serif` at regular weight — serif reads as
-  crafted/human rather than mass-produced
-- **Body**: `-apple-system, "Segoe UI", system-ui, Roboto, sans-serif` regular weight
+- **Link**: `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;600&family=Mulish:wght@400;500&display=swap" rel="stylesheet">`
+- **Heading**: `"Lora", Georgia, "Times New Roman", serif` at 400-600 weight — a warm, readable
+  serif that reads as crafted/human rather than mass-produced
+- **Body**: `"Mulish", -apple-system, "Segoe UI", system-ui, sans-serif` at regular weight
 
 ## Archetype: Creative / artistic / expressive
 
-- **Heading**: `-apple-system, "Segoe UI", system-ui, sans-serif` at heavy weight, used at
-  unconventional scale/rotation/placement rather than a "special" typeface — the system-font
-  constraint means creativity here comes from layout and color, not font selection
-- **Body**: same stack at regular weight, kept deliberately plain so it doesn't compete with
-  the expressive heading treatment
+- **Link**: `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;700&family=Work+Sans:wght@400;500&display=swap" rel="stylesheet">`
+- **Heading**: `"Bricolage Grotesque", -apple-system, "Segoe UI", system-ui, sans-serif` at
+  600-700 weight, used at unconventional scale/rotation/placement — an expressive variable
+  display face rather than the safest possible choice
+- **Body**: `"Work Sans", -apple-system, "Segoe UI", system-ui, sans-serif` at regular weight,
+  kept deliberately plain so it doesn't compete with the expressive heading treatment
 
 ## General rules (all archetypes)
 
-- Never use more than 2 font stacks on one page (heading stack + body stack; a monospace accent
-  is a permitted third only for the Tech archetype).
+- Never use more than 2 font families on one page (heading family + body family; a monospace
+  accent is a permitted third only for the Tech archetype).
+- Every `font-family` CSS value must end in the matching system-font fallback shown above —
+  never reference the Google Font name alone.
 - Set a real type scale (e.g. a 1.25 or 1.333 ratio) rather than picking sizes ad hoc.
 - Line-height: tighter (1.1-1.3) for large headings, looser (1.5-1.7) for body copy.
+- Use `<strong>` and `<em>` (or an equivalent weight/style bump in your own component markup)
+  to give body copy rhythm — a key phrase, a number, a promise — instead of leaving every
+  paragraph as one uniform weight and style throughout. Overusing this is worse than not using
+  it at all: reserve it for the one or two phrases per section that actually deserve the
+  emphasis, not every sentence.
+- Headings are a hierarchy, not a repeated pattern: h1/h2/h3 should differ in more than just
+  size — vary weight, color, or letter-spacing between levels so the structure of the page is
+  legible even with the text scaled to gray boxes.

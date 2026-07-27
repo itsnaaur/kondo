@@ -40,7 +40,7 @@ export function buildWordPressThemePromptText(input: PromptInput): string {
 
   lines.push("\n## Output rules");
   lines.push(
-    "- This must be a real, valid, installable WordPress theme — no external framework/CDN dependencies (no CDN links); assets are enqueued via functions.php."
+    "- This must be a real, valid, installable WordPress theme — no external CSS/JS framework or component-library CDN dependencies; assets are enqueued via functions.php. The one exception is the Google Fonts `<link>` tag specified by the design standards below — enqueue it via wp_enqueue_style() pointed at the Google Fonts URL rather than hardcoding a <link> tag."
   );
   lines.push(
     "- Preserve the brand's detected color palette and typography where sensible; use CSS custom properties for the palette."
@@ -50,6 +50,12 @@ export function buildWordPressThemePromptText(input: PromptInput): string {
   );
   lines.push(
     "- Do not fabricate photographic imagery — use CSS gradients, shapes, or simple inline SVG icons instead of placeholder photos, unless a logo asset is attached."
+  );
+  lines.push(
+    "- Typography is a craft, not just a font choice: build a real heading hierarchy (h1-h3 should differ in weight/color/letter-spacing, not just size), and use bold/italic emphasis on the one or two phrases per section that earn it. A page where every paragraph is one uniform weight reads as unfinished."
+  );
+  lines.push(
+    "- Treat every visual dimension of the theme as a deliberate decision, not a default: color palette, font pairing and heading hierarchy, spacing scale, shadows, gradients, corner radius, image treatment, motion and page transitions, and mobile layout. The design standards below give current, concrete guidance for each of these per archetype — use it instead of reaching for the safest generic choice (soft gray shadow, 8px radius everywhere, no gradient, desktop-shrunk-to-mobile) on any of them."
   );
 
   if (input.priorFiles && input.priorFiles.length > 0) {

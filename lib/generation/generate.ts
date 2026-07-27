@@ -43,6 +43,8 @@ export type ReferenceImage = LogoImage & { url: string; note: string | null };
 
 export type GenerationResult = { summary: string; files: GeneratedFile[] };
 
+const MAX_ATTEMPTS = 2;
+
 export async function generateSite(
   promptText: string,
   logoImages: LogoImage[] = [],
@@ -69,11 +71,33 @@ export async function generateSite(
     { type: "text", text: promptText },
   ];
 
+  let lastError: Error | null = null;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      return await requestGeneration(anthropic, content);
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      console.error(`[generation] attempt ${attempt}/${MAX_ATTEMPTS} failed:`, lastError.message);
+    }
+  }
+
+  throw lastError ?? new Error("Generation failed for an unknown reason");
+}
+
+async function requestGeneration(
+  anthropic: Anthropic,
+  content: Anthropic.ContentBlockParam[]
+): Promise<GenerationResult> {
   // Streaming is required by the SDK once max_tokens is high enough that a request
   // could plausibly run past its non-streaming timeout.
+  // effort: "xhigh" gives real design/typographic judgment room to think before writing
+  // the tool call — forced tool_choice doesn't disable adaptive thinking on Sonnet 5, and
+  // this is exactly the kind of creative+technical task that benefits from it. max_tokens
+  // is raised to leave room for that thinking alongside the full file output.
   const stream = anthropic.messages.stream({
     model: "claude-sonnet-5",
-    max_tokens: 32000,
+    max_tokens: 64000,
+    output_config: { effort: "xhigh" },
     tools: [GENERATE_SITE_TOOL],
     tool_choice: { type: "tool", name: TOOL_NAME },
     messages: [{ role: "user", content }],
@@ -91,6 +115,9 @@ export async function generateSite(
     (block): block is Anthropic.ToolUseBlock => block.type === "tool_use"
   );
 
+  // Forced tool_choice occasionally still comes back with an empty/malformed tool call at
+  // this effort level on a long prompt — retried once by the caller rather than failing the
+  // whole generation outright.
   if (!toolUse || !Array.isArray((toolUse.input as GenerationResult)?.files)) {
     throw new Error("Claude did not return a valid set of generated files");
   }

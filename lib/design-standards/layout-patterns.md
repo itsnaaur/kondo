@@ -69,6 +69,53 @@ doesn't support.
   should never block interaction — no animation the user has to wait out.
 - Respect `prefers-reduced-motion` — disable non-essential animation when set.
 
+## Spacing scale (all archetypes)
+
+- Use a consistent numeric spacing scale for every margin/padding/gap value (e.g. a 4px base
+  unit: 4, 8, 12, 16, 24, 32, 48, 64, 96, 128) — never arbitrary values like 17px or 23px.
+- Vary *which* step you use by section weight, per the section-arrangement checklist below —
+  a dense section might sit at 24-32px padding, a spacious hero at 96-128px — but every value
+  should come from the scale, not be picked ad hoc per section.
+- On mobile, drop down the scale rather than keeping desktop spacing at every breakpoint (e.g.
+  a 96px desktop section padding becomes 48px on mobile, not squeezed content at full padding).
+
+## Responsive & mobile behavior (all archetypes)
+
+- Design mobile as its own layout, not a squeezed desktop one: multi-column grids stack to a
+  single column, side-by-side image+text sections reorder (image above or below text, never
+  narrowed to a sliver), and navigation collapses to a menu control below roughly 768px.
+- Touch targets (buttons, nav links, form inputs) must be at least 44x44px on mobile. Don't
+  rely on hover-only states for anything functionally important — touch has no hover.
+- Typography scales down but stays legible — a 60px desktop hero heading should get a
+  recalculated mobile size (often 32-40px), not a straight percentage shrink that leaves it
+  either still oversized or cramped.
+- Check the layout at roughly 375px (small phone) and 768px (tablet/small laptop) specifically
+  — a layout that only looks right at a wide desktop width isn't done.
+
+## Images & imagery treatment (all archetypes)
+
+- When a real asset is available (logo, uploaded photo), use `object-fit: cover` inside a
+  fixed-aspect-ratio container so images crop consistently instead of distorting or varying
+  wildly in proportion across the page.
+- When no real photography exists (the common case per the output rules — no fabricated stock
+  photos), still vary the CSS-generated visual interest across the page: don't reuse the
+  identical gradient blob or identical inline SVG icon shape in every section. Vary shape,
+  composition, and placement so the page doesn't read as one motif copy-pasted down the page.
+- Give an attached logo real breathing room (padding around it in header/footer) rather than
+  cramming it against nav links or other elements.
+
+## Page transitions (all archetypes)
+
+- For multi-page static sites, use the CSS View Transitions API for a subtle cross-fade
+  between pages (`@view-transition { navigation: auto; }`, with `::view-transition-old/new`
+  rules if you want more than the default cross-fade). It degrades invisibly to an instant page
+  swap on browsers that don't support it, so it's safe to always include — no JS framework or
+  library needed.
+- Keep any transition subtle (150-250ms cross-fade). A page transition should feel like part of
+  the same site, not a slideshow effect.
+- Skip this entirely for a true single-page site (index.html only) — there's nothing to
+  transition between.
+
 ## Dark mode
 
 - Treat as a deliberate design choice tied to archetype (Modern/Tech, Luxurious, Bold suit a

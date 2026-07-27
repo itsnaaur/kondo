@@ -21,10 +21,16 @@ export function buildGenerationPromptText(input: PromptInput): string {
     "- Preserve the brand's color palette and typography where sensible; evolve the layout per the brief/references."
   );
   lines.push(
-    "- Use semantic HTML and responsive CSS (flexbox/grid). No external framework/CDN dependencies — it must work standalone when unzipped and opened locally."
+    "- Use semantic HTML and responsive CSS (flexbox/grid). No external CSS/JS framework or component-library CDN dependencies (no Bootstrap, Tailwind CDN, jQuery, etc.) — the only permitted external reference is the Google Fonts `<link>` tag specified by the design standards below."
   );
   lines.push(
     "- Do not fabricate photographic imagery — use CSS gradients, shapes, or simple inline SVG icons instead of placeholder photos, unless a logo asset is attached."
+  );
+  lines.push(
+    "- Typography is a craft, not just a font choice: build a real heading hierarchy (h1-h3 should differ in weight/color/letter-spacing, not just size), and use bold/italic emphasis on the one or two phrases per section that earn it. A page where every paragraph is one uniform weight reads as unfinished."
+  );
+  lines.push(
+    "- Treat every visual dimension of the page as a deliberate decision, not a default: color palette, font pairing and heading hierarchy, spacing scale, shadows, gradients, corner radius, image treatment, motion and page transitions, and mobile layout. The design standards below give current, concrete guidance for each of these per archetype — use it instead of reaching for the safest generic choice (soft gray shadow, 8px radius everywhere, no gradient, desktop-shrunk-to-mobile) on any of them."
   );
 
   if (input.priorFiles && input.priorFiles.length > 0) {
