@@ -1,6 +1,15 @@
+import { checkUrlIsSafe } from "@/lib/security/ssrf";
+
 export async function fetchRobotsDisallowPaths(origin: string): Promise<string[]> {
   try {
-    const res = await fetch(new URL("/robots.txt", origin).toString());
+    const robotsUrl = new URL("/robots.txt", origin).toString();
+    const check = await checkUrlIsSafe(robotsUrl);
+    if (!check.safe) {
+      console.error(`[crawl] refusing to fetch robots.txt at ${robotsUrl}: ${check.reason}`);
+      return [];
+    }
+
+    const res = await fetch(robotsUrl);
     if (!res.ok) return [];
     const text = await res.text();
 

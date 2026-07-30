@@ -1,14 +1,19 @@
-import path from "path";
-import { mkdir, writeFile } from "fs/promises";
-import { randomUUID } from "crypto";
 import { prisma } from "@/lib/prisma";
-import { clientAssetsDir } from "@/lib/storage";
-import { AssetType } from "@/app/generated/prisma/client";
+import { uploadAssetToStorage } from "@/lib/storage/upload-asset";
+import { AssetType, type Asset } from "@/app/generated/prisma/client";
 import type { PageExtraction } from "./types";
+import { checkUrlIsSafe } from "@/lib/security/ssrf";
 
 type AssetTypeValue = (typeof AssetType)[keyof typeof AssetType];
 
-const MAX_CONTENT_IMAGES = 5;
+export type DownloadedAsset = { asset: Asset; buffer: Buffer };
+export type DownloadedCandidate = DownloadedAsset & { fromHomepage: boolean };
+
+// Total across every source page combined, not per-page — previously this was "5 images
+// from the homepage only," which meant a real hero photo living on an /about or
+// /services page was never even a candidate. A slightly higher total gives the hero
+// selection heuristic (lib/content/select-hero-image.ts) an actual pool to choose from.
+const MAX_CANDIDATE_IMAGES = 10;
 const FETCH_TIMEOUT_MS = 10_000;
 
 const MIME_EXTENSIONS: Record<string, string> = {
@@ -21,24 +26,49 @@ const MIME_EXTENSIONS: Record<string, string> = {
   "image/vnd.microsoft.icon": "ico",
 };
 
+const MAX_IMAGE_REDIRECTS = 5;
+
 async function downloadImage(
   url: string
 ): Promise<{ buffer: Buffer; mimeType: string } | null> {
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-    const res = await fetch(url, { signal: controller.signal });
-    clearTimeout(timeout);
+    let currentUrl = url;
 
-    if (!res.ok) return null;
+    // Follow redirects manually, re-validating each hop — a plain fetch() with
+    // redirect:"follow" would happily land on a blocked address after the original
+    // URL passed its check.
+    for (let hop = 0; hop <= MAX_IMAGE_REDIRECTS; hop++) {
+      const check = await checkUrlIsSafe(currentUrl);
+      if (!check.safe) {
+        console.error(`[crawl] refusing to fetch image ${currentUrl}: ${check.reason}`);
+        return null;
+      }
 
-    const mimeType = res.headers.get("content-type")?.split(";")[0]?.trim() || "";
-    if (!mimeType.startsWith("image/")) return null;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+      const res = await fetch(currentUrl, { signal: controller.signal, redirect: "manual" });
+      clearTimeout(timeout);
 
-    const buffer = Buffer.from(await res.arrayBuffer());
-    if (buffer.length === 0) return null;
+      if (res.status >= 300 && res.status < 400) {
+        const location = res.headers.get("location");
+        if (!location) return null;
+        currentUrl = new URL(location, currentUrl).toString();
+        continue;
+      }
 
-    return { buffer, mimeType };
+      if (!res.ok) return null;
+
+      const mimeType = res.headers.get("content-type")?.split(";")[0]?.trim() || "";
+      if (!mimeType.startsWith("image/")) return null;
+
+      const buffer = Buffer.from(await res.arrayBuffer());
+      if (buffer.length === 0) return null;
+
+      return { buffer, mimeType };
+    }
+
+    console.error(`[crawl] too many redirects fetching image ${url}`);
+    return null;
   } catch (err) {
     console.error(`[crawl] failed to download image ${url}:`, err);
     return null;
@@ -47,6 +77,8 @@ async function downloadImage(
 
 // The header/nav logo appears on every page, unlike content images which are
 // page-specific — so the most-repeated candidate across pages is the strongest signal.
+// Scans every crawled page (not just the ones selected for content analysis), since a
+// logo can be identified from frequency alone regardless of which pages' text mattered.
 function pickBestLogoCandidate(pages: PageExtraction[]): string | null {
   const counts = new Map<string, number>();
   for (const p of pages) {
@@ -63,62 +95,95 @@ async function saveAsset(
   type: AssetTypeValue,
   url: string,
   filenameHint: string
-) {
+): Promise<DownloadedAsset | null> {
   const downloaded = await downloadImage(url);
   if (!downloaded) return null;
 
   const ext = MIME_EXTENSIONS[downloaded.mimeType] ?? "bin";
-  const typeDir = clientAssetsDir(clientId, type);
-  await mkdir(typeDir, { recursive: true });
+  const filename = `${filenameHint}.${ext}`;
 
-  const storedName = `${randomUUID()}-${filenameHint}.${ext}`;
-  const storagePath = path.join(typeDir, storedName);
-  await writeFile(storagePath, downloaded.buffer);
+  // Uploads to Supabase Storage (not local disk) — this is what makes the resulting
+  // public URL readable by both the worker process that downloaded it and the Vercel app
+  // process that later serves a published concept referencing it. See
+  // lib/storage/upload-asset.ts.
+  const uploaded = await uploadAssetToStorage(clientId, downloaded.buffer, filename, downloaded.mimeType);
 
-  return prisma.asset.create({
+  const asset = await prisma.asset.create({
     data: {
       clientId,
       type,
-      filename: `${filenameHint}.${ext}`,
-      storagePath: path.relative(process.cwd(), storagePath),
+      filename,
+      url: uploaded.url,
       mimeType: downloaded.mimeType,
       size: downloaded.buffer.length,
     },
   });
+
+  return { asset, buffer: downloaded.buffer };
 }
 
+// Re-fetches an already-uploaded asset's bytes (e.g. a manually-uploaded logo, or one
+// saved by an earlier analysis) so callers that need raw pixels — dominant-color
+// extraction, image-quality flagging — don't have to special-case "asset already existed."
+async function fetchExistingAssetBytes(asset: Asset): Promise<DownloadedAsset | null> {
+  try {
+    const res = await fetch(asset.url);
+    if (!res.ok) return null;
+    const buffer = Buffer.from(await res.arrayBuffer());
+    return { asset, buffer };
+  } catch (err) {
+    console.error(`[crawl] failed to re-fetch existing asset ${asset.id}:`, err);
+    return null;
+  }
+}
+
+// allPages: every crawled page, used for logo frequency detection only.
+// candidateSourcePages: the pages selected for content analysis (see
+// lib/content/select-relevant-pages.ts — homepage always first), used as the pool for
+// hero/gallery image candidates. Sourcing from more than just the homepage is what makes
+// "prefer the homepage" in the hero heuristic (lib/content/select-hero-image.ts) a real
+// choice rather than a tie-break that never triggers.
 export async function downloadCrawlImages(
   clientId: string,
-  pages: PageExtraction[]
-): Promise<{ logoSaved: boolean; imagesSaved: number }> {
-  // Respect a manually-uploaded logo instead of overriding it with a guess.
+  allPages: PageExtraction[],
+  candidateSourcePages: PageExtraction[]
+): Promise<{ logo: DownloadedAsset | null; candidates: DownloadedCandidate[] }> {
+  // Respect a manually-uploaded logo (or one from a prior analysis — assets are
+  // append-only, see lib/storage/upload-asset.ts) instead of overriding it with a guess.
   const existingLogo = await prisma.asset.findFirst({
     where: { clientId, type: AssetType.LOGO },
+    orderBy: { createdAt: "desc" },
   });
 
-  let logoSaved = false;
-  if (!existingLogo) {
-    const logoUrl = pickBestLogoCandidate(pages);
+  let logo: DownloadedAsset | null = null;
+  if (existingLogo) {
+    logo = await fetchExistingAssetBytes(existingLogo);
+  } else {
+    const logoUrl = pickBestLogoCandidate(allPages);
     if (logoUrl) {
-      logoSaved = !!(await saveAsset(clientId, AssetType.LOGO, logoUrl, "logo-from-crawl"));
+      logo = await saveAsset(clientId, AssetType.LOGO, logoUrl, "logo-from-crawl");
     }
   }
 
-  const homepage = pages[0];
-  const contentImageUrls = homepage
-    ? [...new Set(homepage.images)].filter((src) => !src.startsWith("data:")).slice(0, MAX_CONTENT_IMAGES)
-    : [];
-
-  let imagesSaved = 0;
-  for (let i = 0; i < contentImageUrls.length; i++) {
-    const saved = await saveAsset(
-      clientId,
-      AssetType.IMAGE,
-      contentImageUrls[i],
-      `site-image-${i + 1}`
-    );
-    if (saved) imagesSaved++;
+  const homepageUrl = candidateSourcePages[0]?.url;
+  const seen = new Set<string>();
+  const orderedCandidateUrls: { url: string; fromHomepage: boolean }[] = [];
+  for (const page of candidateSourcePages) {
+    for (const src of page.images) {
+      if (src.startsWith("data:") || seen.has(src)) continue;
+      seen.add(src);
+      orderedCandidateUrls.push({ url: src, fromHomepage: page.url === homepageUrl });
+      if (orderedCandidateUrls.length >= MAX_CANDIDATE_IMAGES) break;
+    }
+    if (orderedCandidateUrls.length >= MAX_CANDIDATE_IMAGES) break;
   }
 
-  return { logoSaved, imagesSaved };
+  const candidates: DownloadedCandidate[] = [];
+  for (let i = 0; i < orderedCandidateUrls.length; i++) {
+    const { url, fromHomepage } = orderedCandidateUrls[i];
+    const saved = await saveAsset(clientId, AssetType.IMAGE, url, `site-image-${i + 1}`);
+    if (saved) candidates.push({ ...saved, fromHomepage });
+  }
+
+  return { logo, candidates };
 }

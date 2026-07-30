@@ -1,87 +1,47 @@
 "use server";
 
-import path from "path";
-import { mkdir, writeFile } from "fs/promises";
-import { randomUUID } from "crypto";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
-import { clientDir, clientAssetsDir } from "@/lib/storage";
-import { AssetType, ProjectIntent } from "@/app/generated/prisma/client";
-import { createClient as createSupabaseServerClient } from "@/lib/supabase/server";
+import { checkUrlIsSafe } from "@/lib/security/ssrf";
+import { requireUser } from "@/lib/auth/require-user";
+import { clientNameSchema, siteUrlInputSchema } from "@/lib/validation/text-limits";
+import { logAuditEvent } from "@/lib/audit-log";
 
-const ASSET_FIELDS: Array<{ field: string; type: (typeof AssetType)[keyof typeof AssetType] }> = [
-  { field: "logoFiles", type: AssetType.LOGO },
-  { field: "brandGuideFiles", type: AssetType.BRAND_GUIDE },
-  { field: "caseStudyFiles", type: AssetType.CASE_STUDY },
-  { field: "otherFiles", type: AssetType.OTHER },
-  { field: "projectArchiveFiles", type: AssetType.PROJECT_ARCHIVE },
-];
-
-const VALID_INTENTS = new Set(Object.values(ProjectIntent));
-
+// Add Client: just a name and a URL. Everything else — analysis, content, templates,
+// concepts — happens later in the Client Workspace, not at creation time.
 export async function createClient(formData: FormData) {
-  const name = String(formData.get("name") ?? "").trim();
-  const siteUrl = String(formData.get("siteUrl") ?? "").trim();
-  const briefText = String(formData.get("briefText") ?? "").trim();
-  const intentInput = String(formData.get("intent") ?? "");
+  const user = await requireUser();
 
-  if (!name || !siteUrl) {
-    throw new Error("Client name and site URL are required");
+  const nameCheck = clientNameSchema.safeParse(formData.get("name"));
+  if (!nameCheck.success) {
+    throw new Error("Client name is required and must be under 200 characters");
   }
-  if (!VALID_INTENTS.has(intentInput as (typeof ProjectIntent)[keyof typeof ProjectIntent])) {
-    throw new Error("Invalid project intent");
-  }
-  const intent = intentInput as (typeof ProjectIntent)[keyof typeof ProjectIntent];
+  const name = nameCheck.data;
 
-  const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const siteUrlCandidate = siteUrlInputSchema.safeParse(formData.get("siteUrl"));
+  if (!siteUrlCandidate.success) {
+    throw new Error("Site URL is required and must be under 2000 characters");
+  }
+  const siteUrl = siteUrlCandidate.data;
+
+  // Reject obviously-unsafe URLs at the point of input, before they ever reach the
+  // crawler. Re-checked again at actual fetch time (DNS can change between now and
+  // then), but failing fast here gives an immediate, clear error instead of a job that
+  // silently fails deep in the pipeline.
+  const siteUrlCheck = await checkUrlIsSafe(siteUrl);
+  if (!siteUrlCheck.safe) {
+    throw new Error(`Site URL is not allowed: ${siteUrlCheck.reason}`);
+  }
 
   const client = await prisma.client.create({
-    data: { name, siteUrl, intent, briefText: briefText || null, createdByUserId: user?.id },
+    data: { name, siteUrl, createdByUserId: user.id },
   });
 
-  await mkdir(clientDir(client.id), { recursive: true });
-
-  const referenceUrls = formData.getAll("referenceUrl").map((v) => String(v).trim());
-  const referenceNotes = formData.getAll("referenceNote").map((v) => String(v).trim());
-  const references = referenceUrls
-    .map((url, i) => ({ url, note: referenceNotes[i] || null }))
-    .filter((r) => r.url.length > 0);
-
-  if (references.length > 0) {
-    await prisma.reference.createMany({
-      data: references.map((r) => ({ clientId: client.id, url: r.url, note: r.note })),
-    });
-  }
-
-  for (const { field, type } of ASSET_FIELDS) {
-    const files = formData.getAll(field).filter((f): f is File => f instanceof File && f.size > 0);
-    if (files.length === 0) continue;
-
-    const typeDir = clientAssetsDir(client.id, type);
-    await mkdir(typeDir, { recursive: true });
-
-    for (const file of files) {
-      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-      const storedName = `${randomUUID()}-${safeName}`;
-      const storagePath = path.join(typeDir, storedName);
-      await writeFile(storagePath, Buffer.from(await file.arrayBuffer()));
-
-      await prisma.asset.create({
-        data: {
-          clientId: client.id,
-          type,
-          filename: file.name,
-          storagePath: path.relative(process.cwd(), storagePath),
-          mimeType: file.type || "application/octet-stream",
-          size: file.size,
-        },
-      });
-    }
-  }
+  // added_by/date_added cost nothing to store and answer "who's already contacted this
+  // business" later — createdByUserId/createdAt are captured by the schema default and
+  // the field above, not anything extra this action needs to do.
+  await logAuditEvent("CLIENT_CREATED", { userId: user.id, clientId: client.id, metadata: { name } });
 
   revalidatePath("/", "layout");
   redirect(`/clients/${client.id}`);

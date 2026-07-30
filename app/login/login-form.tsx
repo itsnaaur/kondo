@@ -2,16 +2,34 @@
 
 import { useState, type FormEvent } from "react";
 import Image from "next/image";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { logLoginEvent } from "@/lib/actions/auth";
+import { isAllowedEmail } from "@/lib/auth/domain";
+
+// Maps the middleware's ?error= query param (lib/supabase/middleware.ts) to a message
+// a person actually understands. This is a fallback for sessions that reach the domain
+// check some other way (a stale cookie, a session established outside this form) — the
+// form's own submit flow below checks the domain itself and never triggers this
+// redirect at all. Read directly from searchParams on every render, not seeded into
+// useState at mount: this route can be reached via a client-side redirect that reuses
+// this same component instance rather than remounting it, so a value captured once at
+// mount would go stale exactly when it matters (the first fix here didn't render this
+// message until a hard refresh).
+const ERROR_MESSAGES: Record<string, string> = {
+  unauthorized_domain: "That account isn't on an approved company domain — sign in with your @jrnydigital.com.au account.",
+};
 
 export default function LoginForm() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  const redirectErrorCode = searchParams.get("error");
+  const displayError =
+    error ?? (redirectErrorCode ? (ERROR_MESSAGES[redirectErrorCode] ?? "Sign-in failed — try again.") : null);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -19,17 +37,43 @@ export default function LoginForm() {
     setError(null);
 
     const supabase = createClient();
-    const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
-
-    setSubmitting(false);
+    const { data, error: signInError } = await supabase.auth.signInWithPassword({ email, password });
 
     if (signInError) {
+      setSubmitting(false);
       setError("Incorrect email or password");
       return;
     }
 
-    router.push(searchParams.get("next") || "/");
-    router.refresh();
+    // Checked here, client-side, before ever navigating — the alternative (letting the
+    // middleware catch it after redirecting to "/") round-trips through a URL param,
+    // which doesn't just delay the message (see ERROR_MESSAGES above) but also wipes
+    // the email/password fields on the bounce back. Checking in place keeps the form
+    // intact and shows the message immediately.
+    if (!isAllowedEmail(data.user?.email)) {
+      // Recorded before signOut(), which invalidates the session logLoginEvent() reads
+      // to identify who this was — a rejected-domain attempt is exactly the kind of
+      // event the audit trail exists to catch.
+      await logLoginEvent().catch(() => {});
+      await supabase.auth.signOut();
+      setSubmitting(false);
+      setError(
+        "That account isn't on an approved company domain — sign in with your @jrnydigital.com.au account."
+      );
+      return;
+    }
+
+    // Best-effort — a logging failure should never block a successful sign-in.
+    await logLoginEvent().catch(() => {});
+
+    setSubmitting(false);
+    // A hard navigation, not router.push()/refresh() — see the identical fix (and the
+    // full explanation) in app/mfa/mfa-form.tsx's handleVerify. The auth-cookie write
+    // after a Supabase auth mutation isn't guaranteed to have flushed by the time this
+    // line runs, and Next's client router can race ahead of it. This route happened to
+    // get away with router.push()+refresh() in testing, but there's no guarantee that
+    // holds for every session state, so it uses the same reliable fix as MFA.
+    window.location.href = searchParams.get("next") || "/";
   }
 
   return (
@@ -59,7 +103,7 @@ export default function LoginForm() {
           placeholder="Password"
           className="mb-3 w-full rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-2 text-neutral-100 outline-none focus:border-neutral-500"
         />
-        {error && <p className="mb-3 text-sm text-red-400">{error}</p>}
+        {displayError && <p className="mb-3 text-sm text-red-400">{displayError}</p>}
         <button
           type="submit"
           disabled={submitting}

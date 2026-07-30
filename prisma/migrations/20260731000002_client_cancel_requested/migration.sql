@@ -1,0 +1,1 @@
+ALTER TABLE "Client" ADD COLUMN "cancelRequested" BOOLEAN NOT NULL DEFAULT false;

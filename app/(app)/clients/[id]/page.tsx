@@ -1,265 +1,168 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { GenerationProgress } from "@/components/GenerationProgress";
-import { GenerationForm } from "@/components/GenerationForm";
-import { MessageList } from "@/components/MessageList";
-import { ClientBriefPanel } from "@/components/ClientBriefPanel";
-import { DesignSpecReview } from "@/components/DesignSpecReview";
-import { InterpretedBriefReview } from "@/components/InterpretedBriefReview";
-import { STATUS_LABEL, INTENT_LABEL } from "@/lib/labels";
-import { moveToTrash } from "@/lib/actions/trash";
-import { isValidDesignSpecShape, type DesignSpec } from "@/lib/generation/design-spec-types";
-import { isValidInterpretedBriefBundle } from "@/lib/generation/interpreted-brief-types";
-import type {
-  TechnicalAudit,
-  VisualDesignAudit,
-  MotionInteractionAudit,
-  ContentInventoryEntry,
-  BrandToneAudit,
-} from "@/lib/audit-types";
+import { STATUS_LABEL } from "@/lib/labels";
+import { startAnalysis } from "@/lib/actions/analysis";
+import { SubmitButton } from "@/components/SubmitButton";
+import { ConfirmSubmitButton } from "@/components/ConfirmSubmitButton";
+import { AnalysisProgress } from "@/components/AnalysisProgress";
+import { ContentReviewForm } from "@/components/ContentReviewForm";
+import { ConceptHistoryList } from "@/components/ConceptHistoryList";
+import type { ContentImage, FieldFlags } from "@/lib/content/types";
 
-export default async function ClientDetailPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
+export default async function ClientWorkspacePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+
   const client = await prisma.client.findUnique({
     where: { id },
     include: {
-      assets: true,
-      auditReport: true,
-      references: true,
       createdBy: true,
-      messages: { orderBy: { createdAt: "asc" } },
+      contentRecord: { include: { reviewedBy: true } },
+      assets: true,
+      concepts: { orderBy: { createdAt: "desc" }, include: { createdBy: true } },
     },
   });
 
   if (!client) notFound();
 
-  const audit = client.auditReport;
-  const technical = audit?.technical as TechnicalAudit | null | undefined;
-  const visualDesign = audit?.visualDesign as VisualDesignAudit | null | undefined;
-  const motionInteraction = audit?.motionInteraction as MotionInteractionAudit | null | undefined;
-  const contentInventory = audit?.contentInventory as ContentInventoryEntry[] | null | undefined;
-  const brandTone = audit?.brandTone as BrandToneAudit | null | undefined;
-  const designSpec: DesignSpec | null = isValidDesignSpecShape(client.designSpec)
-    ? (client.designSpec as unknown as DesignSpec)
-    : null;
-  const interpretedBriefBundle = isValidInterpretedBriefBundle(client.interpretedBrief)
-    ? client.interpretedBrief
-    : null;
+  const { contentRecord } = client;
+  const isAnalyzing = client.status === "ANALYZING";
+  const analysisFailed = client.status === "ANALYSIS_FAILED";
+  const isApproved = !!contentRecord?.reviewedAt;
 
-  const hasConversationStarted = client.messages.length > 0;
-
-  const briefPanelProps = {
-    clientId: client.id,
-    status: client.status,
-    intent: client.intent,
-    briefText: client.briefText,
-    assets: client.assets,
-    references: client.references,
-    audit,
-    technical,
-    visualDesign,
-    motionInteraction,
-    contentInventory,
-    brandTone,
-  };
+  const images: (ContentImage & { url: string | null })[] = contentRecord
+    ? ((contentRecord.images as unknown as ContentImage[] | null) ?? []).map((img) => ({
+        ...img,
+        url: client.assets.find((a) => a.id === img.assetId)?.url ?? null,
+      }))
+    : [];
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex flex-shrink-0 items-start justify-between border-b border-neutral-800 px-6 py-4">
+    <main className="mx-auto max-w-4xl px-6 py-10">
+      <div className="mb-8 flex items-start justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-neutral-100">{client.name}</h1>
-          <p className="text-sm text-neutral-400">
-            <a href={client.siteUrl} target="_blank" rel="noreferrer" className="hover:text-neutral-200">
-              {client.siteUrl}
-            </a>
-            {client.createdBy && (
-              <span className="text-neutral-600">
-                {" "}
-                | Added by {client.createdBy.email ?? client.createdBy.id}
-              </span>
-            )}
+          <h1 className="text-2xl font-semibold text-neutral-100">{client.name}</h1>
+          <a
+            href={client.siteUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="text-sm text-neutral-500 hover:text-neutral-300 hover:underline"
+          >
+            {client.siteUrl}
+          </a>
+          <p className="mt-1 text-xs text-neutral-600">
+            Added {client.createdAt.toLocaleDateString()}
+            {client.createdBy?.email ? ` by ${client.createdBy.email}` : ""}
           </p>
         </div>
-        <div className="flex flex-col items-end gap-2">
-          <div className="flex gap-2">
-            <span className="rounded-full border border-neutral-700 px-3 py-1 text-xs text-neutral-300">
-              {INTENT_LABEL[client.intent] ?? client.intent}
-            </span>
-            <span className="rounded-full border border-neutral-700 px-3 py-1 text-xs text-neutral-300">
-              {STATUS_LABEL[client.status] ?? client.status}
-            </span>
-          </div>
-          <form action={moveToTrash.bind(null, client.id)}>
-            <button type="submit" className="text-xs text-neutral-500 transition hover:text-red-400">
-              Move to trash
-            </button>
-          </form>
-        </div>
+        <span className="rounded-full border border-neutral-700 px-3 py-1 text-xs text-neutral-300">
+          {STATUS_LABEL[client.status] ?? client.status}
+        </span>
       </div>
 
-      {hasConversationStarted ? (
-        <div className="flex min-h-0 flex-1">
-          {/* Conversation — main pane, sits beside the sidebar */}
-          <div className="flex min-w-0 flex-1 flex-col">
-            <div className="flex-shrink-0 px-6 pb-2 pt-4">
-              <h2 className="text-sm font-medium uppercase tracking-wide text-neutral-500">
-                Conversation
-              </h2>
-            </div>
+      {isAnalyzing && <AnalysisProgress clientId={client.id} />}
 
-            <MessageList messages={client.messages} />
-
-            <div className="flex-shrink-0 border-t border-neutral-800 px-6 py-4">
-              {client.status === "GENERATING" && (
-                <GenerationProgress clientId={client.id} status="GENERATING" />
-              )}
-
-              {client.status === "INTERPRETING" && (
-                <GenerationProgress
-                  clientId={client.id}
-                  status="INTERPRETING"
-                  message="Reading the existing site and references, and interpreting the brief..."
-                />
-              )}
-
-              {client.status === "BRIEF_REVIEW" && interpretedBriefBundle && (
-                <InterpretedBriefReview
-                  clientId={client.id}
-                  brief={interpretedBriefBundle.interpretedBrief}
-                  failedReferenceUrls={interpretedBriefBundle.failedReferenceUrls}
-                />
-              )}
-
-              {client.status === "DESIGNING" && (
-                <GenerationProgress
-                  clientId={client.id}
-                  status="DESIGNING"
-                  message="Deciding on a design direction — this usually takes under a minute..."
-                />
-              )}
-
-              {client.status === "DESIGN_REVIEW" && designSpec && (
-                <DesignSpecReview clientId={client.id} spec={designSpec} />
-              )}
-
-              {client.status === "READY_FOR_REVIEW" && (
-                <div className="space-y-3">
-                  <div className="flex gap-3">
-                    {client.intent === "FACELIFT" && (
-                      <a
-                        href={`/api/clients/${client.id}/preview/index.html`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-block rounded-lg border border-neutral-700 px-3 py-1.5 text-sm text-neutral-200 transition hover:border-neutral-500"
-                      >
-                        Open preview ↗
-                      </a>
-                    )}
-                    <a
-                      href={`/api/clients/${client.id}/export`}
-                      className="inline-block rounded-lg bg-yellow-400 px-3 py-1.5 text-sm font-medium text-neutral-900 transition hover:bg-yellow-300"
-                    >
-                      {client.intent === "WORDPRESS_TRANSFER" ? "Download theme zip" : "Download zip"}
-                    </a>
-                  </div>
-                  {client.intent === "WORDPRESS_TRANSFER" && (
-                    <p className="text-xs text-neutral-500">
-                      No live preview for WordPress themes — install the zip on a WP site via
-                      Appearance → Themes → Add New → Upload Theme to see it rendered.
-                    </p>
-                  )}
-                  <GenerationForm clientId={client.id} isRefinement />
-                </div>
-              )}
-
-              {client.status === "AUDIT_READY" && (
-                <GenerationForm clientId={client.id} isRefinement={false} />
-              )}
-
-              {client.status !== "GENERATING" &&
-                client.status !== "INTERPRETING" &&
-                client.status !== "BRIEF_REVIEW" &&
-                client.status !== "DESIGNING" &&
-                client.status !== "DESIGN_REVIEW" &&
-                client.status !== "READY_FOR_REVIEW" &&
-                client.status !== "AUDIT_READY" && (
-                  <p className="text-sm text-neutral-600">
-                    Conversation starts once the audit is ready and the first generation runs.
-                  </p>
-                )}
-            </div>
-          </div>
-
-          {/* Brief, audit, assets, references — secondary pane */}
-          <div className="w-[400px] flex-shrink-0 overflow-y-auto border-l border-neutral-800 px-6 py-6">
-            <ClientBriefPanel {...briefPanelProps} />
-          </div>
-        </div>
-      ) : (
-        // No conversation yet — the audit/brief is the main thing to act on, so give it
-        // the full width instead of squeezing it into the narrow side rail.
-        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-8">
-          <div className="mx-auto w-full max-w-2xl">
-            <ClientBriefPanel {...briefPanelProps} emphasizeRunAudit />
-            {client.status === "AUDIT_READY" && (
-              <section>
-                <h2 className="mb-3 text-sm font-medium uppercase tracking-wide text-neutral-500">
-                  Generate the first version
-                </h2>
-                <GenerationForm clientId={client.id} isRefinement={false} />
-              </section>
-            )}
-            {client.status === "INTERPRETING" && (
-              <section>
-                <h2 className="mb-3 text-sm font-medium uppercase tracking-wide text-neutral-500">
-                  Interpreting the brief
-                </h2>
-                <GenerationProgress
-                  clientId={client.id}
-                  status="INTERPRETING"
-                  message="Reading the existing site and references, and interpreting the brief..."
-                />
-              </section>
-            )}
-            {client.status === "BRIEF_REVIEW" && interpretedBriefBundle && (
-              <section>
-                <h2 className="mb-3 text-sm font-medium uppercase tracking-wide text-neutral-500">
-                  Review the interpreted brief
-                </h2>
-                <InterpretedBriefReview
-                  clientId={client.id}
-                  brief={interpretedBriefBundle.interpretedBrief}
-                  failedReferenceUrls={interpretedBriefBundle.failedReferenceUrls}
-                />
-              </section>
-            )}
-            {client.status === "DESIGNING" && (
-              <section>
-                <h2 className="mb-3 text-sm font-medium uppercase tracking-wide text-neutral-500">
-                  Deciding on a design direction
-                </h2>
-                <GenerationProgress
-                  clientId={client.id}
-                  status="DESIGNING"
-                  message="Deciding on a design direction — this usually takes under a minute..."
-                />
-              </section>
-            )}
-            {client.status === "DESIGN_REVIEW" && designSpec && (
-              <section>
-                <h2 className="mb-3 text-sm font-medium uppercase tracking-wide text-neutral-500">
-                  Review the design direction
-                </h2>
-                <DesignSpecReview clientId={client.id} spec={designSpec} />
-              </section>
-            )}
-          </div>
+      {!isAnalyzing && !contentRecord && (
+        <div className="rounded-xl border border-dashed border-neutral-800 px-6 py-12 text-center">
+          {analysisFailed && (
+            <p className="mb-4 text-sm text-red-400">
+              The last analysis attempt failed — check the site URL is reachable and try again.
+            </p>
+          )}
+          <p className="mb-4 text-sm text-neutral-400">
+            Fetch this site&apos;s content, logo, and brand colours to get started.
+          </p>
+          <form action={startAnalysis.bind(null, client.id)}>
+            <SubmitButton
+              pendingLabel="Starting..."
+              className="rounded-lg bg-yellow-400 px-6 py-3 font-medium text-neutral-900 transition hover:bg-yellow-300"
+            >
+              {analysisFailed ? "Retry analysis" : "Analyse Site"}
+            </SubmitButton>
+          </form>
         </div>
       )}
-    </div>
+
+      {!isAnalyzing && contentRecord && (
+        <div className="space-y-8">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-neutral-800 bg-neutral-950 px-4 py-3">
+            <p className="text-sm text-neutral-400">
+              {analysisFailed
+                ? "The last re-analysis failed — showing content from the last successful run."
+                : isApproved
+                  ? `Content approved${contentRecord.reviewedBy?.email ? ` by ${contentRecord.reviewedBy.email}` : ""} on ${contentRecord.reviewedAt!.toLocaleDateString()}.`
+                  : "Review the extracted content below, then approve it to unlock Choose Template."}
+            </p>
+            <form action={startAnalysis.bind(null, client.id)}>
+              <ConfirmSubmitButton
+                confirmText="This re-crawls the site and replaces the current content record, including any edits you've made. Published concepts are unaffected."
+                className="rounded-lg border border-neutral-700 px-4 py-2 text-sm text-neutral-300 transition hover:bg-neutral-900"
+              >
+                Re-analyse site
+              </ConfirmSubmitButton>
+            </form>
+          </div>
+
+          {contentRecord.pagesAnalyzed < contentRecord.crawlPagesCount && (
+            <div className="rounded-lg border border-amber-700/60 bg-amber-950/30 px-4 py-3 text-sm text-amber-300">
+              Only {contentRecord.pagesAnalyzed} of {contentRecord.crawlPagesCount} crawled pages were
+              actually read to produce this content — the rest were crawled but never analysed. Service
+              or page detail that only lives on a page that wasn&apos;t read may be thin or missing below
+              — worth a quick check against the live site before approving.
+            </div>
+          )}
+
+          {isApproved ? (
+            <div className="flex items-center justify-between rounded-xl border border-neutral-800 bg-neutral-950 px-6 py-5">
+              <div>
+                <p className="font-medium text-neutral-100">{contentRecord.businessName || client.name}</p>
+                <p className="text-sm text-neutral-400">{contentRecord.tagline}</p>
+              </div>
+              <Link
+                href={`/clients/${client.id}/templates`}
+                className="rounded-lg bg-yellow-400 px-5 py-2.5 font-medium text-neutral-900 transition hover:bg-yellow-300"
+              >
+                Choose Template
+              </Link>
+            </div>
+          ) : (
+            <ContentReviewForm
+              clientId={client.id}
+              businessName={contentRecord.businessName}
+              tagline={contentRecord.tagline}
+              aboutCopy={contentRecord.aboutCopy}
+              contactEmail={contentRecord.contactEmail}
+              contactPhone={contentRecord.contactPhone}
+              contactAddress={contentRecord.contactAddress}
+              services={(contentRecord.services as never) ?? []}
+              testimonials={(contentRecord.testimonials as never) ?? []}
+              brandColors={(contentRecord.brandColors as never) ?? []}
+              images={images}
+              fieldFlags={((contentRecord.fieldFlags as unknown as FieldFlags | null) ?? {}) as FieldFlags}
+            />
+          )}
+        </div>
+      )}
+
+      <section className="mt-10">
+        <h2 className="mb-3 text-sm font-medium uppercase tracking-wide text-neutral-500">Concept history</h2>
+        {!isApproved && client.concepts.length > 0 && (
+          <p className="mb-3 rounded-lg border border-neutral-800 bg-neutral-950 px-4 py-2 text-sm text-neutral-400">
+            New extraction ready for review. Existing concepts below are unaffected.
+          </p>
+        )}
+        <ConceptHistoryList
+          clientId={client.id}
+          concepts={client.concepts.map((c) => ({
+            id: c.id,
+            templateKey: c.templateKey,
+            createdAt: c.createdAt,
+            createdByEmail: c.createdBy?.email ?? null,
+            publishSlug: c.publishSlug,
+            publishStatus: c.publishStatus,
+          }))}
+        />
+      </section>
+    </main>
   );
 }

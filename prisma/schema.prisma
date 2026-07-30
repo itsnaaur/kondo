@@ -12,31 +12,21 @@ datasource db {
   provider = "postgresql"
 }
 
+// Purely a progress indicator for the Analyse Site job — never a gate on Choose
+// Template/Generate & Preview/Concept History. Those are gated on data
+// (contentRecord.reviewedAt != null / concepts.length > 0), not on this enum, so a
+// transient re-analysis failure can never lock a client out of its own already-approved
+// content or its concept history. See lib/actions/analysis.ts and the Client Workspace page.
 enum ClientStatus {
-  DRAFT
-  AUDITING
-  AUDIT_READY
-  INTERPRETING
-  BRIEF_REVIEW
-  DESIGNING
-  DESIGN_REVIEW
-  GENERATING
-  READY_FOR_REVIEW
-  EXPORTED
+  NEW              // created, no analysis run yet
+  ANALYZING        // crawl + one AI structuring call in flight (first run or re-analysis)
+  ANALYSIS_FAILED  // job errored — Analyse/Re-analyse Site can be retried
+  READY_FOR_REVIEW // ContentRecord written (or re-written), awaiting human review/re-review
 }
 
 enum AssetType {
   LOGO
-  BRAND_GUIDE
-  CASE_STUDY
   IMAGE
-  PROJECT_ARCHIVE
-  OTHER
-}
-
-enum ProjectIntent {
-  FACELIFT
-  WORDPRESS_TRANSFER
 }
 
 // Mirrors auth.users (managed by Supabase Auth) via a DB trigger — Prisma can't
@@ -46,127 +36,195 @@ model Profile {
   email     String?
   createdAt DateTime @default(now())
 
-  clients     Client[]
-  generations Generation[]
+  clients               Client[]
+  reviewedContentRecords ContentRecord[]
+  concepts              Concept[]
 }
 
 model Client {
-  id              String        @id @default(cuid())
+  id              String       @id @default(cuid())
   name            String
   siteUrl         String
-  intent          ProjectIntent
-  briefText       String?
-  status          ClientStatus  @default(DRAFT)
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  status          ClientStatus @default(NEW)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
   createdByUserId String?
-  createdBy       Profile?      @relation(fields: [createdByUserId], references: [id])
+  createdBy       Profile?     @relation(fields: [createdByUserId], references: [id])
   deletedAt       DateTime?
 
+  // Drives the ANALYZING progress UI (see app/api/clients/[id]/status/route.ts). Not a
+  // gate on anything — see the ClientStatus comment above.
   crawlPagesDone  Int?
   crawlPagesTotal Int?
 
-  // The Call 0 (interpretation layer) output — a bundle of { existingSiteRead,
-  // referenceReads, interpretedBrief }, cached per client so it survives a BRIEF_REVIEW
-  // pause and so refinements don't re-run it.
-  interpretedBrief           Json?
-  interpretedBriefApprovedAt DateTime?
-
-  // The Call 1 (design-direction) output — cached per client, not per page/generation,
-  // so refinements reuse the same approved direction instead of re-deciding it each time.
-  designSpec           Json?
-  designSpecApprovedAt DateTime?
-
-  assets      Asset[]
-  references  Reference[]
-  pages       CrawledPage[]
-  auditReport AuditReport?
-  generations Generation[]
-  messages    GenerationMessage[]
+  assets        Asset[]
+  pages         CrawledPage[]
+  contentRecord ContentRecord?
+  concepts      Concept[]
 }
 
 model Asset {
-  id          String    @id @default(cuid())
-  clientId    String
-  client      Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  type        AssetType @default(OTHER)
-  filename    String
-  storagePath String
-  mimeType    String
-  size        Int
-  createdAt   DateTime  @default(now())
-}
-
-model Reference {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   clientId  String
-  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  client    Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  type      AssetType @default(IMAGE)
+  filename  String
+  // Public Supabase Storage URL, not a local filesystem path — crawled assets are
+  // uploaded via lib/storage/upload-asset.ts so they're readable by both the worker
+  // process and the Vercel app (different hosts, no shared disk). Assets are
+  // append-only: a re-analysis or a manual fix creates new rows and re-points
+  // ContentRecord at them rather than deleting the old ones, since already-published
+  // Concept HTML has this URL baked in permanently. Only a permanent client deletion
+  // (trash purge) ever removes the underlying Storage object.
   url       String
-  note      String?
-  createdAt DateTime @default(now())
+  mimeType  String
+  size      Int
+  createdAt DateTime  @default(now())
+
+  contentRecordLogoFor ContentRecord? @relation("ContentRecordLogo")
 }
 
 model CrawledPage {
-  id             String   @id @default(cuid())
-  clientId       String
-  client         Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  url            String
-  title          String?
-  textContent    String?
-  htmlPath       String?
-  screenshotPath String?
-  createdAt      DateTime @default(now())
+  id          String   @id @default(cuid())
+  clientId    String
+  client      Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  url         String
+  title       String?
+  textContent String?
+  createdAt   DateTime @default(now())
 }
 
-model AuditReport {
-  id                String    @id @default(cuid())
-  clientId          String    @unique
-  client            Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  pagesCrawled      Int       @default(0)
-  technical         Json?
-  visualDesign      Json?
-  motionInteraction Json?
-  brandTone         Json?
-  contentInventory  Json?
-  contentSample     String?
-  findingsSummary   String?
-  briefUnderstanding String?
-  recommendations   Json?
-  reviewNotes       String?
-  reviewedAt        DateTime?
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+// The structured, human-reviewable content record produced by Analyse Site — business
+// identity, services, testimonials, contact details, brand colors, and images, plus
+// per-field confidence/flag metadata (see lib/content/types.ts for the JSON shapes) that
+// the Review Extraction screen renders as ConfidenceBadges. One per client.
+//
+// reviewedAt is the real "is this client ready for Choose Template / Generate & Preview"
+// gate — not Client.status. It's set only by an explicit human approval
+// (approveContentRecord) and cleared to null on every fresh write from Analyse Site
+// (including a re-analysis), so stale or newly-overwritten-but-unreviewed content is
+// never mistaken for approved content.
+model ContentRecord {
+  id       String @id @default(cuid())
+  clientId String @unique
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
 
-  generations Generation[]
+  businessName String?
+  tagline      String?
+  aboutCopy    String? // AI-rewritten, punchier version — the only version stored
+
+  services     Json // ContentService[]
+  testimonials Json // ContentTestimonial[]
+  brandColors  Json // ContentColor[]
+  images       Json // ContentImage[] (references Asset ids)
+
+  contactEmail   String?
+  contactPhone   String?
+  contactAddress String?
+
+  logoAssetId String? @unique
+  logoAsset   Asset?  @relation("ContentRecordLogo", fields: [logoAssetId], references: [id], onDelete: SetNull)
+
+  detectedIndustry String? // drives template pre-selection, see lib/templates/registry.ts
+
+  // Confidence/flag metadata for the scalar fields above, keyed by field name
+  // (Record<string, { confidence: "low"|"medium"|"high"; reason: string }>). Array-item
+  // fields (services/testimonials/brandColors/images) carry their own confidence/flagged
+  // inline instead — see lib/content/types.ts.
+  fieldFlags Json?
+
+  crawlPagesCount      Int     @default(0)
+  sourceCrawlTruncated Boolean @default(false)
+  // How many of crawlPagesCount were actually fed to the structuring/rewrite call (see
+  // lib/content/select-relevant-pages.ts) — the two numbers routinely differ a lot on
+  // anything bigger than a handful of pages (confirmed live: 92 crawled, 12 read), and
+  // crawlPagesCount alone makes an incomplete extraction look complete. The review
+  // screen surfaces a warning whenever pagesAnalyzed < crawlPagesCount.
+  pagesAnalyzed Int @default(0)
+
+  reviewedAt       DateTime?
+  reviewedByUserId String?
+  reviewedBy       Profile?  @relation(fields: [reviewedByUserId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  concepts Concept[]
 }
 
-model Generation {
-  id                String      @id @default(cuid())
-  clientId          String
-  client            Client      @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  auditReportId     String
-  auditReport       AuditReport @relation(fields: [auditReportId], references: [id], onDelete: Cascade)
-  status            String      @default("PENDING")
-  outputDir         String?
-  zipPath           String?
-  createdAt         DateTime    @default(now())
-  updatedAt         DateTime    @updatedAt
-  generatedByUserId String?
-  generatedBy       Profile?    @relation(fields: [generatedByUserId], references: [id])
+// A generated landing-page concept: one hand-built template filled with a snapshot of the
+// (approved, at generation time) content record. Only created when a human clicks
+// "Generate Concept" — trying templates in the gallery or toggling desktop/mobile is a
+// pure, ephemeral render, nothing persisted. `html` is the fully rendered page (inlined
+// CSS, absolute Supabase Storage image URLs — "portable," not fully self-contained, see
+// lib/templates/shell.tsx) stored directly in Postgres rather than on disk, since
+// "Generate Concept" runs as a fast Vercel server action and Vercel's filesystem is
+// ephemeral — a file written there would not reliably survive to be read back by the
+// publish route later.
+//
+// publishSlug is unique per Concept, not per Client: each generated concept gets its own
+// permanent link once published, so a follow-up concept (different template, or a re-run
+// after editing content) is a new row with its own new slug rather than overwriting
+// whatever link was already sent to a prospect.
+model Concept {
+  id              String        @id @default(cuid())
+  clientId        String
+  client          Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  contentRecordId String
+  contentRecord   ContentRecord @relation(fields: [contentRecordId], references: [id], onDelete: Cascade)
 
-  messages GenerationMessage[]
+  templateKey String // matches lib/templates/<key>
+  html        String
+
+  publishSlug   String?   @unique
+  publishStatus String    @default("DRAFT") // DRAFT | PUBLISHED | UNPUBLISHED
+  publishedAt   DateTime?
+
+  createdByUserId String?
+  createdBy       Profile? @relation(fields: [createdByUserId], references: [id])
+  createdAt       DateTime @default(now())
+
+  @@index([clientId, createdAt])
 }
 
-// The running per-client conversation: each generation/refinement prompt and its
-// response, so re-prompting after the first generation can edit in place with
-// full context instead of starting over.
-model GenerationMessage {
-  id           String      @id @default(cuid())
-  clientId     String
-  client       Client      @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  role         String // "user" | "assistant"
-  content      String
-  generationId String?
-  generation   Generation? @relation(fields: [generationId], references: [id], onDelete: SetNull)
-  createdAt    DateTime    @default(now())
+// The background-job queue. Vercel serverless functions are killed once the response is
+// sent, so a multi-page Playwright crawl can't run as a fire-and-forget async call from a
+// server action — it has to be a durable row a separate long-running worker process
+// (scripts/worker.ts) picks up. Only one job type exists: analysing a site is the one
+// slow, AI-touching step in the flow; everything downstream (template rendering, publish)
+// is synchronous.
+model Job {
+  id              String    @id @default(cuid())
+  type            String // ANALYZE_SITE
+  payload         Json
+  status          String    @default("PENDING") // PENDING | RUNNING | COMPLETE | FAILED
+  attempts        Int       @default(0)
+  lastError       String?
+  createdByUserId String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  startedAt       DateTime?
+  finishedAt      DateTime?
+
+  @@index([status, createdAt])
+  @@index([createdByUserId, status])
+}
+
+// Who did what, when — login, client created/trashed/deleted, analysis started/failed,
+// content edited/approved, concept generated/published/unpublished, export downloaded.
+// Deliberately stores only IDs and short event metadata, never prompt text, generated
+// content, or crawled content — logs are the least-protected place data lives.
+model AuditLog {
+  id        String   @id @default(cuid())
+  event     String // LOGIN | CLIENT_CREATED | CLIENT_TRASHED | CLIENT_DELETED |
+                    // ANALYSIS_STARTED | ANALYSIS_FAILED | CONTENT_UPDATED |
+                    // CONTENT_APPROVED | CONCEPT_GENERATED | CONCEPT_PUBLISHED |
+                    // CONCEPT_UNPUBLISHED | EXPORT_DOWNLOADED
+  userId    String?
+  clientId  String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  @@index([clientId, createdAt])
+  @@index([userId, createdAt])
 }

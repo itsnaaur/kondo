@@ -1,12 +1,11 @@
-import path from "path";
-import { mkdir } from "fs/promises";
 import { chromium } from "playwright";
 import { prisma } from "@/lib/prisma";
-import { clientCrawlDir } from "@/lib/storage";
 import { fetchRobotsDisallowPaths, isDisallowed } from "./robots";
-import { normalizeUrl, isCrawlableLink, slugFor } from "./url-utils";
+import { normalizeUrl, isCrawlableLink } from "./url-utils";
 import { extractPageData } from "./extract";
 import type { PageExtraction } from "./types";
+import { checkUrlIsSafe, installSsrfGuard } from "@/lib/security/ssrf";
+import { gotoAndSettle } from "./goto-and-settle";
 
 const MAX_PAGES = 150;
 const REQUEST_DELAY_MS = 400;
@@ -16,11 +15,13 @@ export async function crawlClientSite(
   clientId: string,
   startUrl: string
 ): Promise<{ pages: PageExtraction[]; truncated: boolean }> {
+  const startUrlCheck = await checkUrlIsSafe(startUrl);
+  if (!startUrlCheck.safe) {
+    throw new Error(`Refusing to crawl ${startUrl}: ${startUrlCheck.reason}`);
+  }
+
   const origin = new URL(startUrl).origin;
   const disallowRules = await fetchRobotsDisallowPaths(origin);
-
-  const screenshotsDir = path.join(clientCrawlDir(clientId), "screenshots");
-  await mkdir(screenshotsDir, { recursive: true });
 
   const visited = new Set<string>();
   const queued = new Set<string>();
@@ -34,7 +35,17 @@ export async function crawlClientSite(
   const browser = await chromium.launch();
 
   try {
-    const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    // A link that slips past the download-path filter (isCrawlableLink) still shouldn't
+    // be able to hang navigation waiting on a download that will never render a page —
+    // this makes Playwright abort the navigation immediately instead.
+    const context = await browser.newContext({
+      viewport: { width: 1440, height: 900 },
+      acceptDownloads: false,
+    });
+    // One guard for every page this crawl session creates — a hostile page discovered
+    // mid-crawl (a link, a redirect, a resource fetch) is checked exactly like the
+    // original start URL, not just validated once up front.
+    await installSsrfGuard(context);
 
     while (queue.length > 0 && visited.size < MAX_PAGES) {
       const url = queue.shift()!;
@@ -45,14 +56,10 @@ export async function crawlClientSite(
 
       const page = await context.newPage();
       try {
-        await page.goto(url, { waitUntil: "networkidle", timeout: PAGE_TIMEOUT_MS });
+        await gotoAndSettle(page, url, PAGE_TIMEOUT_MS);
         const extracted = await extractPageData(page);
 
-        const slug = slugFor(url, visited.size);
-        const screenshotPath = path.join(screenshotsDir, `${slug}.png`);
-        await page.screenshot({ path: screenshotPath, fullPage: true });
-
-        const record: PageExtraction = { url, ...extracted, screenshotPath };
+        const record: PageExtraction = { url, ...extracted };
         pageRecords.push(record);
 
         await prisma.crawledPage.create({
@@ -61,7 +68,6 @@ export async function crawlClientSite(
             url,
             title: extracted.title,
             textContent: extracted.text.slice(0, 20_000),
-            screenshotPath: path.relative(process.cwd(), screenshotPath),
           },
         });
 
@@ -75,7 +81,17 @@ export async function crawlClientSite(
           }
         }
       } catch (err) {
-        console.error(`[crawl] failed to load ${url}:`, err);
+        // A download-triggering link (vCard exporters, direct file downloads) throws
+        // here even with acceptDownloads: false and the isCrawlableLink pre-filter — a
+        // link neither catches can still slip through. This is an expected, page-level
+        // skip, not a crawl failure, so it gets a one-line log instead of the full
+        // Playwright call-log dump every other page-load error gets.
+        const message = err instanceof Error ? err.message : String(err);
+        if (/download is starting/i.test(message)) {
+          console.error(`[crawl] skipped ${url}: triggers a download, not a page`);
+        } else {
+          console.error(`[crawl] failed to load ${url}:`, err);
+        }
       } finally {
         await page.close();
       }
@@ -89,6 +105,16 @@ export async function crawlClientSite(
     }
   } finally {
     await browser.close();
+  }
+
+  // A per-page failure (one bad URL) is expected and handled above by skipping that
+  // page and continuing. Zero pages captured means even the start URL never loaded —
+  // that's a total failure, not a small/empty site, and letting it through silently
+  // would produce a "successful" analysis with no content and no indication anything
+  // was wrong. Throwing here routes it through the same failure path as any other
+  // analysis failure (status -> ANALYSIS_FAILED).
+  if (pageRecords.length === 0) {
+    throw new Error(`Crawl failed: could not successfully load any page from ${startUrl}`);
   }
 
   return { pages: pageRecords, truncated: visited.size >= MAX_PAGES && queue.length > 0 };

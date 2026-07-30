@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { moveToTrash } from "@/lib/actions/trash";
@@ -8,12 +8,10 @@ import { moveToTrash } from "@/lib/actions/trash";
 type SidebarClient = { id: string; name: string; status: string };
 
 const STATUS_DOT: Record<string, string> = {
-  DRAFT: "bg-neutral-600",
-  AUDITING: "bg-yellow-400",
-  AUDIT_READY: "bg-blue-400",
-  GENERATING: "bg-yellow-400",
+  NEW: "bg-neutral-600",
+  ANALYZING: "bg-yellow-400",
+  ANALYSIS_FAILED: "bg-red-400",
   READY_FOR_REVIEW: "bg-green-400",
-  EXPORTED: "bg-green-600",
 };
 
 const PAGE_SIZE = 10;
@@ -71,13 +69,15 @@ function TrashIcon() {
 
 export function Sidebar({ clients }: { clients: SidebarClient[] }) {
   const pathname = usePathname();
-  const [collapsed, setCollapsed] = useState(false);
+  // A lazy initializer reads localStorage during the initial client render instead of
+  // an effect that calls setState after mount — avoids both the extra render pass and
+  // a visible flash of the default (expanded) state before the stored preference loads.
+  const [collapsed, setCollapsed] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem(COLLAPSE_KEY) === "1";
+  });
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (localStorage.getItem(COLLAPSE_KEY) === "1") setCollapsed(true);
-  }, []);
 
   function toggleCollapsed() {
     setCollapsed((c) => {
