@@ -4,7 +4,7 @@
 # build/start the Next.js app the way it would by default.
 [build]
 builder = "NIXPACKS"
-buildCommand = "npm install && npx playwright install --with-deps chromium"
+buildCommand = "npm install && npx prisma generate && npx playwright install --with-deps chromium"
 
 [deploy]
 startCommand = "npm run worker:prod"
