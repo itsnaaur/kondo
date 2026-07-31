@@ -40,5 +40,5 @@ jobs:
           fi
           echo "Bundle is clean of known secret patterns."
 
-      - name: npm audit (high/critical)
-        run: npm audit --audit-level=high
+      - name: npm audit (high/critical, excluding documented no-fix-available findings)
+        run: node scripts/check-audit.mjs
