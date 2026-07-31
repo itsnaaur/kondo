@@ -1,0 +1,12 @@
+# Config for the background worker service only (scripts/worker.ts) — the Next.js app
+# itself is deployed on Vercel, not Railway. This file tells Railway to install
+# Playwright's Chromium during build and run the worker's poll loop instead of trying to
+# build/start the Next.js app the way it would by default.
+[build]
+builder = "NIXPACKS"
+buildCommand = "npm install && npx playwright install --with-deps chromium"
+
+[deploy]
+startCommand = "npm run worker"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
