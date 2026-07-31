@@ -4,7 +4,12 @@
 // NEXT_PUBLIC_SUPABASE_URL, and SUPABASE_SECRET_KEY as the main app, plus Playwright's
 // Chromium installed (`npx playwright install --with-deps chromium`).
 //
-// Run with: npx tsx --env-file=.env scripts/worker.ts  (or `npm run worker`)
+// Local dev: npx tsx --env-file=.env scripts/worker.ts (or `npm run worker`) — loads
+// vars from a real .env file on disk. In production (Railway, Fly, etc.), the host
+// injects env vars directly into the container's process environment — there's no .env
+// file to load there, and `--env-file` errors out hard if the file doesn't exist. Use
+// `npm run worker:prod` (plain `tsx scripts/worker.ts`, no --env-file flag) instead —
+// see railway.toml.
 import { claimNextJob, completeJob, failJob, reclaimOrphanedJobs, type ClaimedJob } from "@/lib/jobs/queue";
 import { runAnalysisInBackground } from "@/lib/content/run-analysis";
 
