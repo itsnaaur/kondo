@@ -50,8 +50,14 @@ export default function MfaForm() {
         return;
       }
 
+      // issuer is explicit here rather than left to Supabase's own fallback — without it,
+      // the name an authenticator app (Microsoft/Google Authenticator, 1Password, etc.)
+      // shows for this account is derived from project config, not the app's actual name,
+      // and doesn't change on its own just because the app gets deployed somewhere else —
+      // confirmed live: it was showing "localhost:3000" even in production.
       let { data: enrollData, error: enrollError } = await supabase.auth.mfa.enroll({
         factorType: "totp",
+        issuer: "Kondo",
       });
       if (cancelled) return;
 
@@ -72,7 +78,10 @@ export default function MfaForm() {
           return;
         }
         if (cancelled) return;
-        ({ data: enrollData, error: enrollError } = await supabase.auth.mfa.enroll({ factorType: "totp" }));
+        ({ data: enrollData, error: enrollError } = await supabase.auth.mfa.enroll({
+          factorType: "totp",
+          issuer: "Kondo",
+        }));
         if (cancelled) return;
       }
 
