@@ -96,6 +96,9 @@ export default async function ClientWorkspacePage({ params }: { params: Promise<
             <form action={startAnalysis.bind(null, client.id)}>
               <ConfirmSubmitButton
                 confirmText="This re-crawls the site and replaces the current content record, including any edits you've made. Published concepts are unaffected."
+                confirmLabel="Re-analyse site"
+                variant="neutral"
+                pendingLabel="Starting..."
                 className="rounded-lg border border-neutral-700 px-4 py-2 text-sm text-neutral-300 transition hover:bg-neutral-900"
               >
                 Re-analyse site

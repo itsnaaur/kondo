@@ -53,6 +53,9 @@ export default async function TrashPage() {
                 <form action={permanentlyDeleteClient.bind(null, client.id)}>
                   <ConfirmSubmitButton
                     confirmText={`Permanently delete "${client.name}"? This cannot be undone.`}
+                    confirmLabel="Delete permanently"
+                    variant="danger"
+                    pendingLabel="Deleting..."
                     className="rounded-lg border border-red-900 px-3 py-1.5 text-sm text-red-400 transition hover:border-red-700 hover:text-red-300"
                   >
                     Delete permanently

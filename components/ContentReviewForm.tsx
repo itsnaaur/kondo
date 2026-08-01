@@ -227,6 +227,9 @@ export function ContentReviewForm({
           <ConfirmSubmitButton
             formAction={approveContentRecord.bind(null, clientId)}
             confirmText="Approve this content? It will unlock Choose Template — make sure everything looks right first."
+            confirmLabel="Approve & continue"
+            variant="primary"
+            pendingLabel="Approving..."
             className="rounded-lg bg-yellow-400 px-5 py-2.5 font-medium text-neutral-900 transition hover:bg-yellow-300"
           >
             Approve & continue
