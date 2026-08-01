@@ -25,7 +25,23 @@ const SHELL_CSS = `
   }
 `;
 
-export function renderShell({ title, css, bodyHtml }: { title: string; css: string; bodyHtml: string }): string {
+export function renderShell({
+  title,
+  css,
+  bodyHtml,
+  bodyClass,
+  headExtra,
+}: {
+  title: string;
+  css: string;
+  bodyHtml: string;
+  // Both optional and unused by saas/local-service — added for ledger, which scopes all
+  // of its CSS under body.tpl-ledger and needs a Google Fonts <link> in <head>. A
+  // template-specific body class/head snippet is trusted, template-author-controlled
+  // content (not prospect data), so it's injected as-is, not escaped like the title is.
+  bodyClass?: string;
+  headExtra?: string;
+}): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -35,10 +51,11 @@ export function renderShell({ title, css, bodyHtml }: { title: string; css: stri
      meta tag travels with the HTML itself, including in the downloaded file. -->
 <meta name="robots" content="noindex, nofollow" />
 <title>${escapeHtml(title || "Concept preview")}</title>
+${headExtra ?? ""}
 <style>${SHELL_CSS}
 ${css}</style>
 </head>
-<body>
+<body${bodyClass ? ` class="${escapeHtml(bodyClass)}"` : ""}>
 ${bodyHtml}
 <footer class="jrny-disclosure">${escapeHtml(DISCLOSURE_TEXT)}</footer>
 </body>

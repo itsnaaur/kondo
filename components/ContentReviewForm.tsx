@@ -5,7 +5,13 @@ import { SubmitButton } from "@/components/SubmitButton";
 import { ConfirmSubmitButton } from "@/components/ConfirmSubmitButton";
 import { ConfidenceBadge } from "@/components/ConfidenceBadge";
 import { AssetDropzone } from "@/components/AssetDropzone";
-import { updateContentRecord, approveContentRecord, removeContentImage, replaceContentImage } from "@/lib/actions/content";
+import {
+  updateContentRecord,
+  approveContentRecord,
+  removeContentImage,
+  replaceContentImage,
+  updateImageRole,
+} from "@/lib/actions/content";
 import type { ContentColor, ContentImage, ContentService, ContentTestimonial, FieldFlags } from "@/lib/content/types";
 
 const CARD_CLASS = "rounded-lg border border-neutral-800 bg-neutral-950 px-4 py-4";
@@ -14,6 +20,66 @@ const INPUT_CLASS =
   "w-full rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm text-neutral-100 outline-none focus:border-yellow-400";
 
 type ImageWithUrl = ContentImage & { url: string | null };
+
+const REASSIGNABLE_ROLES = new Set<ContentImage["role"]>(["gallery", "partner-logo"]);
+
+// Shared between the main Logo & images grid and the Partner logos card below — same
+// remove/replace/reclassify actions apply in both places, and duplicating this per-card
+// JSX would be exactly the kind of drift that lets one of the two get an edit the other
+// doesn't.
+function ImageCard({ clientId, img }: { clientId: string; img: ImageWithUrl }) {
+  return (
+    <div className="space-y-2 rounded-lg border border-neutral-800 p-3">
+      {img.url ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={img.url} alt={img.role} className="aspect-video w-full rounded object-cover" />
+      ) : (
+        <div className="flex aspect-video w-full items-center justify-center rounded bg-neutral-900 text-xs text-neutral-600">
+          No preview
+        </div>
+      )}
+      <div className="flex items-center justify-between text-xs text-neutral-500">
+        <span className="capitalize">{img.role.replace("-", " ")}</span>
+        <ConfidenceBadge flagged={img.flagged} flagReason={img.flagReason} />
+      </div>
+      <div className="flex items-center justify-between gap-2">
+        <form action={removeContentImage.bind(null, clientId, img.assetId)}>
+          <button type="submit" className="text-xs text-neutral-500 hover:text-red-400">
+            Remove
+          </button>
+        </form>
+        {REASSIGNABLE_ROLES.has(img.role) && (
+          <form action={updateImageRole.bind(null, clientId, img.assetId)}>
+            <select
+              name="role"
+              defaultValue={img.role}
+              onChange={(e) => e.currentTarget.form?.requestSubmit()}
+              className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-300 outline-none focus:border-yellow-400"
+            >
+              <option value="gallery">Gallery</option>
+              <option value="partner-logo">Partner logo</option>
+            </select>
+          </form>
+        )}
+      </div>
+      {img.flagged && (
+        // No encType here — React sets it automatically for a function `action`
+        // (a Server Action) and warns/overrides if you specify one yourself. It
+        // correctly detects the file input below and submits as multipart/form-data.
+        <form action={replaceContentImage.bind(null, clientId)} className="space-y-1">
+          <input type="hidden" name="assetId" value={img.assetId} />
+          <AssetDropzone label="Replace with a better image" name="file" multiple={false} />
+          <SubmitButton
+            pendingLabel="Uploading..."
+            className="w-full rounded-lg border border-neutral-700 px-3 py-1.5 text-xs text-neutral-300 hover:bg-neutral-900"
+          >
+            Upload replacement
+          </SubmitButton>
+        </form>
+      )}
+    </div>
+  );
+}
 
 type ContentReviewFormProps = {
   clientId: string;
@@ -50,6 +116,8 @@ export function ContentReviewForm({
   );
 
   const colorByRole = (role: ContentColor["role"]) => brandColors.find((c) => c.role === role);
+  const mainImages = images.filter((img) => img.role !== "partner-logo");
+  const partnerLogoImages = images.filter((img) => img.role === "partner-logo");
 
   return (
     <div className="space-y-6">
@@ -240,45 +308,26 @@ export function ContentReviewForm({
       <section className={CARD_CLASS}>
         <h3 className="mb-3 text-xs font-medium uppercase tracking-wide text-neutral-500">Logo &amp; images</h3>
         <div className="grid gap-4 sm:grid-cols-3">
-          {images.map((img) => (
-            <div key={img.assetId} className="space-y-2 rounded-lg border border-neutral-800 p-3">
-              {img.url ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={img.url} alt={img.role} className="aspect-video w-full rounded object-cover" />
-              ) : (
-                <div className="flex aspect-video w-full items-center justify-center rounded bg-neutral-900 text-xs text-neutral-600">
-                  No preview
-                </div>
-              )}
-              <div className="flex items-center justify-between text-xs text-neutral-500">
-                <span className="capitalize">{img.role}</span>
-                <ConfidenceBadge flagged={img.flagged} flagReason={img.flagReason} />
-              </div>
-              <div className="flex items-center gap-2">
-                <form action={removeContentImage.bind(null, clientId, img.assetId)}>
-                  <button type="submit" className="text-xs text-neutral-500 hover:text-red-400">
-                    Remove
-                  </button>
-                </form>
-              </div>
-              {img.flagged && (
-                // No encType here — React sets it automatically for a function `action`
-                // (a Server Action) and warns/overrides if you specify one yourself. It
-                // correctly detects the file input below and submits as multipart/form-data.
-                <form action={replaceContentImage.bind(null, clientId)} className="space-y-1">
-                  <input type="hidden" name="assetId" value={img.assetId} />
-                  <AssetDropzone label="Replace with a better image" name="file" multiple={false} />
-                  <SubmitButton
-                    pendingLabel="Uploading..."
-                    className="w-full rounded-lg border border-neutral-700 px-3 py-1.5 text-xs text-neutral-300 hover:bg-neutral-900"
-                  >
-                    Upload replacement
-                  </SubmitButton>
-                </form>
-              )}
-            </div>
+          {mainImages.map((img) => (
+            <ImageCard key={img.assetId} clientId={clientId} img={img} />
           ))}
-          {images.length === 0 && <p className="text-sm text-neutral-500">No images found on the crawled site.</p>}
+          {mainImages.length === 0 && <p className="text-sm text-neutral-500">No images found on the crawled site.</p>}
+        </div>
+      </section>
+
+      <section className={CARD_CLASS}>
+        <h3 className="mb-1 text-xs font-medium uppercase tracking-wide text-neutral-500">Partner logos</h3>
+        <p className="mb-3 text-xs text-neutral-500">
+          Health-fund, insurer, or accreditation logos — shown as a trust strip, not the main photo gallery.
+          Move an image here (or back) using the dropdown on its card if it was bucketed wrong.
+        </p>
+        <div className="grid gap-4 sm:grid-cols-3">
+          {partnerLogoImages.map((img) => (
+            <ImageCard key={img.assetId} clientId={clientId} img={img} />
+          ))}
+          {partnerLogoImages.length === 0 && (
+            <p className="text-sm text-neutral-500">None detected.</p>
+          )}
         </div>
       </section>
     </div>

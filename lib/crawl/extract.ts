@@ -13,9 +13,30 @@ export async function extractPageData(page: Page) {
     const links = Array.from(document.querySelectorAll("a[href]")).map(
       (a) => (a as HTMLAnchorElement).href
     );
-    const images = Array.from(document.querySelectorAll("img[src]")).map(
-      (img) => (img as HTMLImageElement).src
-    );
+    // Nearest ancestor with actual text, walked up a bounded number of levels — a bare
+    // wrapper <div> around just the image has empty textContent, so this keeps climbing
+    // until it hits a container that has some (e.g. a "We accept" heading sitting next to
+    // a row of logos), capped so it can't walk all the way to a large section/the body.
+    // Inlined directly in the map callback rather than a separate named const/function —
+    // see the note at the top of this file on why that breaks under page.evaluate().
+    const images = Array.from(document.querySelectorAll("img[src]")).map((el) => {
+      const img = el as HTMLImageElement;
+      const alt = img.getAttribute("alt") || "";
+      let ancestorText = "";
+      let ancestor = img.parentElement;
+      let depth = 0;
+      while (ancestor && depth < 4) {
+        const t = (ancestor.textContent || "").trim();
+        if (t.length > 10) {
+          ancestorText = t.slice(0, 500);
+          break;
+        }
+        ancestor = ancestor.parentElement;
+        depth++;
+      }
+      const nearbyText = [alt, ancestorText].filter(Boolean).join(" ");
+      return { src: img.src, nearbyText };
+    });
 
     const logoCandidate =
       Array.from(document.querySelectorAll("img[src]"))

@@ -18,7 +18,15 @@ export type TemplateContent = {
   // template must degrade gracefully here (a gradient/color-block treatment built from
   // brandColors), not assume a photo is always available.
   heroImageUrl: string | null;
-  galleryImages: { url: string }[];
+  // widthPx/heightPx let a template tell a landscape photo from a near-square one instead
+  // of force-cropping every gallery image to the same ratio — optional since they're only
+  // populated from crawl-derived images (a manually-uploaded replacement image may not
+  // have gone through the same dimension check).
+  galleryImages: { url: string; widthPx?: number; heightPx?: number }[];
+  // Insurer/health-fund/partner logos — a distinct bucket from galleryImages, never a
+  // hero candidate. Optional so saas/local-service (which don't render it) don't need any
+  // changes; a template that wants the "accepted here" trust strip reads this directly.
+  partnerLogos?: { url: string }[];
 };
 
 export type TemplateMeta = {

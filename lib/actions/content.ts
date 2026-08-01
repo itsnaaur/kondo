@@ -207,6 +207,34 @@ export async function removeContentImage(clientId: string, assetId: string) {
   revalidatePath(`/clients/${clientId}`);
 }
 
+const REASSIGNABLE_ROLES = new Set(["gallery", "partner-logo"]);
+
+// The escape hatch for lib/content/classify-partner-logos.ts getting it wrong in either
+// direction — a reviewer moving an image between the two peer buckets it could plausibly
+// belong to. Deliberately doesn't allow reassigning to/from "logo"/"hero": those are
+// singular, structurally different roles (repointing a hero needs the old one un-set,
+// promoting something to logo needs ContentRecord.logoAssetId updated too), not a same-
+// shape swap the way gallery/partner-logo are.
+export async function updateImageRole(clientId: string, assetId: string, formData: FormData) {
+  await requireUser();
+  const role = String(formData.get("role") ?? "");
+  if (!REASSIGNABLE_ROLES.has(role)) throw new Error("Invalid image role");
+
+  const record = await prisma.contentRecord.findUniqueOrThrow({ where: { clientId } });
+  const images = (record.images as unknown as ContentImage[] | null) ?? [];
+  const next = images.map((img) =>
+    img.assetId === assetId && REASSIGNABLE_ROLES.has(img.role)
+      ? { ...img, role: role as ContentImage["role"], flagged: false, flagReason: undefined }
+      : img
+  );
+
+  await prisma.contentRecord.update({
+    where: { clientId },
+    data: { images: next as unknown as Prisma.InputJsonValue },
+  });
+  revalidatePath(`/clients/${clientId}`);
+}
+
 // The AssetDropzone escape hatch for a flagged (low-resolution, or simply wrong) logo or
 // hero image — uploads the replacement to Supabase Storage via the same shared path the
 // crawler uses, then repoints the ContentRecord entry at the new Asset and clears the

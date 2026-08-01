@@ -24,11 +24,25 @@ export function toTemplateContent(contentRecord: ContentRecord, assets: Asset[])
   const heroCandidate = images.find((img) => img.role === "hero" && !img.flagged) ?? null;
   const heroImageUrl = heroCandidate ? (assetById.get(heroCandidate.assetId)?.url ?? null) : null;
 
+  // widthPx/heightPx pass through so a template can distinguish a landscape photo from a
+  // near-square one instead of force-cropping every gallery image to the same ratio.
   const galleryImages = images
     .filter((img) => img.role === "gallery")
-    .map((img) => assetById.get(img.assetId)?.url)
-    .filter((url): url is string => !!url)
-    .map((url) => ({ url }));
+    .flatMap((img) => {
+      const url = assetById.get(img.assetId)?.url;
+      return url ? [{ url, widthPx: img.widthPx, heightPx: img.heightPx }] : [];
+    });
+
+  // Partner/insurer logos are their own bucket, never hero and never gallery — they were
+  // never eligible for either once lib/content/classify-partner-logos.ts assigns this role
+  // (both those filters check for "hero"/"gallery" specifically), so no separate exclusion
+  // check is needed here beyond the role filter itself.
+  const partnerLogos = images
+    .filter((img) => img.role === "partner-logo")
+    .flatMap((img) => {
+      const url = assetById.get(img.assetId)?.url;
+      return url ? [{ url }] : [];
+    });
 
   return {
     businessName: contentRecord.businessName ?? "",
@@ -43,5 +57,6 @@ export function toTemplateContent(contentRecord: ContentRecord, assets: Asset[])
     brandColors: brandColors.map((c) => ({ hex: c.hex, role: c.role })),
     heroImageUrl,
     galleryImages,
+    partnerLogos,
   };
 }

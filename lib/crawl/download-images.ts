@@ -7,7 +7,7 @@ import { checkUrlIsSafe } from "@/lib/security/ssrf";
 type AssetTypeValue = (typeof AssetType)[keyof typeof AssetType];
 
 export type DownloadedAsset = { asset: Asset; buffer: Buffer };
-export type DownloadedCandidate = DownloadedAsset & { fromHomepage: boolean };
+export type DownloadedCandidate = DownloadedAsset & { fromHomepage: boolean; nearbyText: string };
 
 // Total across every source page combined, not per-page — previously this was "5 images
 // from the homepage only," which meant a real hero photo living on an /about or
@@ -167,12 +167,16 @@ export async function downloadCrawlImages(
 
   const homepageUrl = candidateSourcePages[0]?.url;
   const seen = new Set<string>();
-  const orderedCandidateUrls: { url: string; fromHomepage: boolean }[] = [];
+  const orderedCandidateUrls: { url: string; fromHomepage: boolean; nearbyText: string }[] = [];
   for (const page of candidateSourcePages) {
-    for (const src of page.images) {
-      if (src.startsWith("data:") || seen.has(src)) continue;
-      seen.add(src);
-      orderedCandidateUrls.push({ url: src, fromHomepage: page.url === homepageUrl });
+    for (const img of page.images) {
+      if (img.src.startsWith("data:") || seen.has(img.src)) continue;
+      seen.add(img.src);
+      orderedCandidateUrls.push({
+        url: img.src,
+        fromHomepage: page.url === homepageUrl,
+        nearbyText: img.nearbyText,
+      });
       if (orderedCandidateUrls.length >= MAX_CANDIDATE_IMAGES) break;
     }
     if (orderedCandidateUrls.length >= MAX_CANDIDATE_IMAGES) break;
@@ -180,9 +184,9 @@ export async function downloadCrawlImages(
 
   const candidates: DownloadedCandidate[] = [];
   for (let i = 0; i < orderedCandidateUrls.length; i++) {
-    const { url, fromHomepage } = orderedCandidateUrls[i];
+    const { url, fromHomepage, nearbyText } = orderedCandidateUrls[i];
     const saved = await saveAsset(clientId, AssetType.IMAGE, url, `site-image-${i + 1}`);
-    if (saved) candidates.push({ ...saved, fromHomepage });
+    if (saved) candidates.push({ ...saved, fromHomepage, nearbyText });
   }
 
   return { logo, candidates };

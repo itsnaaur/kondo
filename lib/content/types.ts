@@ -45,7 +45,7 @@ export type ContentColor = {
 
 export type ContentImage = {
   assetId: string;
-  role: "logo" | "hero" | "gallery";
+  role: "logo" | "hero" | "gallery" | "partner-logo";
   widthPx: number;
   heightPx: number;
   flagged: boolean;

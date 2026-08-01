@@ -4,6 +4,7 @@ import { crawlClientSite } from "@/lib/crawl/crawler";
 import { downloadCrawlImages } from "@/lib/crawl/download-images";
 import { extractDominantColors, DEFAULT_NEUTRAL_PALETTE } from "./extract-colors";
 import { flagLowQualityImages } from "./assess-image-quality";
+import { classifyPartnerLogos } from "./classify-partner-logos";
 import { selectHeroAssetId } from "./select-hero-image";
 import { extractContactDetails } from "./contact-extraction";
 import { structureAndRewriteContent } from "./structure-and-rewrite";
@@ -61,9 +62,11 @@ export async function runAnalysisInBackground(clientId: string, siteUrl: string)
         .filter((img) => img.role === "gallery")
         .map((img) => ({ image: img, fromHomepage: fromHomepageByAssetId.get(img.assetId) ?? false }))
     );
-    const contentImages: ContentImage[] = flaggedImages.map((img) =>
+    const heroAssigned: ContentImage[] = flaggedImages.map((img) =>
       img.assetId === heroAssetId ? { ...img, role: "hero" } : img
     );
+    const nearbyTextByAssetId = new Map(candidates.map((c) => [c.asset.id, c.nearbyText]));
+    const contentImages = classifyPartnerLogos(heroAssigned, nearbyTextByAssetId);
 
     const colorSourceBuffer =
       logo?.buffer ?? candidates.find((c) => c.asset.id === heroAssetId)?.buffer ?? candidates[0]?.buffer ?? null;
