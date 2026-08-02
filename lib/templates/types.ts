@@ -13,11 +13,17 @@ export type TemplateContent = {
   contactAddress: string | null;
   logoUrl: string | null;
   brandColors: { hex: string; role: "primary" | "secondary" | "accent" }[];
-  // null when no unflagged "hero"-role image qualifies — a prospect with no usable
-  // photography is the normal case this tool exists for, not a rare failure. Every
-  // template must degrade gracefully here (a gradient/color-block treatment built from
-  // brandColors), not assume a photo is always available.
+  // null when neither an extracted hero candidate nor a promotable gallery photo
+  // qualifies (see lib/content/to-template-content.ts's fallback chain) — a prospect with
+  // no usable photography at all is the normal case this tool exists for, not a rare
+  // failure. Every template must degrade gracefully here (a gradient/color-block
+  // treatment built from brandColors), not assume a photo is always available.
   heroImageUrl: string | null;
+  // "extracted" = a real role:"hero" candidate; "promoted" = no hero candidate existed,
+  // so the best qualifying gallery photo was promoted instead (and removed from
+  // galleryImages so it doesn't render twice). null alongside heroImageUrl: null.
+  // Templates don't read this — it's for the review screen and the suitability scorer.
+  heroImageSource: "extracted" | "promoted" | null;
   // widthPx/heightPx let a template tell a landscape photo from a near-square one instead
   // of force-cropping every gallery image to the same ratio — optional since they're only
   // populated from crawl-derived images (a manually-uploaded replacement image may not
@@ -27,6 +33,10 @@ export type TemplateContent = {
   // hero candidate. Optional so saas/local-service (which don't render it) don't need any
   // changes; a template that wants the "accepted here" trust strip reads this directly.
   partnerLogos?: { url: string }[];
+  // Carried through only for lib/templates/suitability.ts's "recommended" tier — no
+  // template reads it for rendering, same as heroImageSource above. Kept here rather than
+  // threading a second parameter through every scoreTemplate/pickDefaultTemplate call site.
+  detectedIndustry: string | null;
 };
 
 export type TemplateMeta = {
@@ -35,6 +45,12 @@ export type TemplateMeta = {
   // Matched (case-insensitively, substring) against ContentRecord.detectedIndustry to
   // pre-select a template in the gallery. See lib/templates/registry.ts::pickDefaultTemplate.
   industries: string[];
+  // Things the template genuinely can't do well without — see lib/templates/suitability.ts.
+  // Keep this list short: a requirement that's never violated in practice is noise, not
+  // signal. Absent/false means "not required."
+  requires?: { heroImage?: boolean; phone?: boolean; minServices?: number };
+  // Things that make the template better but aren't blocking.
+  prefers?: { testimonials?: boolean; minGallery?: number };
 };
 
 // Returns the <body> content as an HTML string, not JSX — react-dom/server can't be

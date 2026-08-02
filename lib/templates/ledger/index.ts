@@ -72,10 +72,19 @@ export function renderLedger(c: TemplateContent): { body: string; css: string } 
     ? `<img class="tl-nav__logo" src="${esc(c.logoUrl)}" alt="${esc(c.businessName)}">`
     : `<span class="tl-nav__name">${esc(c.businessName)}</span>`;
 
+  // Links point at sections that genuinely exist on the page — never a dead
+  // link to a page that was never built.
+  const navLinks: string[] = [];
+  if (services.length) navLinks.push('<a href="#services">Services</a>');
+  if (c.aboutCopy) navLinks.push('<a href="#about">About</a>');
+  if (quotes.length) navLinks.push('<a href="#reviews">Reviews</a>');
+  navLinks.push('<a href="#contact">Contact</a>');
+
   const nav = `
 <header class="tl-nav">
   <div class="tl-wrap tl-nav__in">
     <div class="tl-nav__mark">${mark}</div>
+    <nav class="tl-nav__links" aria-label="Sections">${navLinks.join("")}</nav>
     <div class="tl-nav__side">
       ${c.contactPhone ? `<a class="tl-nav__tel" href="${esc(telHref(c.contactPhone))}">${esc(c.contactPhone)}</a>` : ""}
       <a class="tl-btn tl-btn--solid" href="#contact">Book a visit</a>
@@ -93,10 +102,8 @@ export function renderLedger(c: TemplateContent): { body: string; css: string } 
 
   const hero = hasHero
     ? `<section class="tl-hero tl-hero--split">
-  <div class="tl-wrap tl-hero__in">
-    ${heroCopy}
-    <div class="tl-hero__shot"><img src="${esc(c.heroImageUrl)}" alt=""></div>
-  </div>
+  ${heroCopy}
+  <div class="tl-hero__media"><img src="${esc(c.heroImageUrl)}" alt=""></div>
 </section>`
     : `<section class="tl-hero tl-hero--plain">
   <div class="tl-hero__field"></div>
@@ -119,7 +126,7 @@ export function renderLedger(c: TemplateContent): { body: string; css: string } 
   // ---- statement band
   const statement = c.aboutCopy
     ? `
-<section class="tl-statement">
+<section class="tl-statement" id="about">
   <div class="tl-wrap tl-statement__in tl-statement__grid">
     <div>
       <p class="tl-eyebrow">Who we are</p>
@@ -191,7 +198,7 @@ export function renderLedger(c: TemplateContent): { body: string; css: string } 
   // ---- testimonials
   const quotesSection = quotes.length
     ? `
-<section class="tl-quotes">
+<section class="tl-quotes" id="reviews">
   <div class="tl-wrap tl-quotes__in">
     <p class="tl-eyebrow">In their words</p>
     <h2 class="tl-h2">What people <span class="tl-em">tell us</span></h2>

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { toTemplateContent } from "@/lib/content/to-template-content";
-import { TEMPLATE_LIST, renderTemplateToHtml, pickDefaultTemplate } from "@/lib/templates/registry";
+import { TEMPLATE_LIST, renderTemplateToHtml, pickDefaultTemplate, scoreAllTemplates } from "@/lib/templates/registry";
 import { TemplateGallery } from "@/components/TemplateGallery";
 
 // Requires contentRecord.reviewedAt != null (not Client.status — see the Kondo rebuild
@@ -22,12 +22,16 @@ export default async function ChooseTemplatePage({ params }: { params: Promise<{
   if (!client.contentRecord?.reviewedAt) redirect(`/clients/${id}`);
 
   const templateContent = toTemplateContent(client.contentRecord, client.assets);
-  const defaultKey = pickDefaultTemplate(client.contentRecord.detectedIndustry);
+  const defaultKey = pickDefaultTemplate(templateContent);
+  const scores = scoreAllTemplates(templateContent);
+  const scoreByKey = new Map(scores.map((s) => [s.key, s]));
 
   const templates = TEMPLATE_LIST.map((meta) => ({
     key: meta.key,
     label: meta.label,
     html: renderTemplateToHtml(meta.key, templateContent),
+    status: scoreByKey.get(meta.key)?.status ?? ("works" as const),
+    reason: scoreByKey.get(meta.key)?.reason,
   }));
 
   return (

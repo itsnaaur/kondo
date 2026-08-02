@@ -17,17 +17,61 @@ export function toTemplateContent(contentRecord: ContentRecord, assets: Asset[])
 
   const logoUrl = contentRecord.logoAssetId ? (assetById.get(contentRecord.logoAssetId)?.url ?? null) : null;
 
-  // The hero is the one place flagged images are excluded even from approved content —
-  // a low-res photo blown up to hero size looks broken regardless of whether a human
-  // got around to removing it during review, so this always prefers the gradient/color-
-  // block fallback (heroImageUrl: null) over a flagged candidate.
-  const heroCandidate = images.find((img) => img.role === "hero" && !img.flagged) ?? null;
-  const heroImageUrl = heroCandidate ? (assetById.get(heroCandidate.assetId)?.url ?? null) : null;
+  // Hero fallback chain. Tier 1 (extracted): the one place flagged images are excluded
+  // even from approved content — a low-res photo blown up to hero size looks broken
+  // regardless of whether a human got around to removing it during review, so this always
+  // prefers falling through rather than using a flagged candidate.
+  const tier1 = images.find((img) => img.role === "hero" && !img.flagged) ?? null;
+
+  let heroImageUrl: string | null = null;
+  let heroImageSource: "extracted" | "promoted" | null = null;
+  let promotedAssetId: string | null = null;
+
+  if (tier1) {
+    const url = assetById.get(tier1.assetId)?.url;
+    if (url) {
+      heroImageUrl = url;
+      heroImageSource = "extracted";
+    }
+  }
+
+  if (!heroImageUrl) {
+    // Tier 2 (promoted): no extracted hero candidate — confirmed live on BC Security that
+    // this left three genuinely good, unflagged 980×500 photos sitting unused in
+    // galleryImages while the page rendered with no hero at all, because the role:"hero"
+    // candidate was a flagged 300×47 wordmark the picker never looked past. Aspect range
+    // 1.2–2.6 excludes squares/avatars at the low end and wide banner strips at the high
+    // end; among survivors, largest area wins.
+    const MIN_PROMOTABLE_WIDTH_PX = 800;
+    const MIN_PROMOTABLE_ASPECT = 1.2;
+    const MAX_PROMOTABLE_ASPECT = 2.6;
+
+    const promotable = images
+      .filter((img) => img.role === "gallery" && !img.flagged && img.widthPx >= MIN_PROMOTABLE_WIDTH_PX)
+      .filter((img) => {
+        if (img.heightPx <= 0) return false;
+        const ratio = img.widthPx / img.heightPx;
+        return ratio >= MIN_PROMOTABLE_ASPECT && ratio <= MAX_PROMOTABLE_ASPECT;
+      })
+      .sort((a, b) => b.widthPx * b.heightPx - a.widthPx * a.heightPx);
+
+    const best = promotable[0];
+    const url = best ? assetById.get(best.assetId)?.url : undefined;
+    if (best && url) {
+      heroImageUrl = url;
+      heroImageSource = "promoted";
+      promotedAssetId = best.assetId;
+    }
+  }
+  // Tier 3: heroImageUrl/heroImageSource stay null — templates' existing gradient/
+  // color-block fallback is the safety net, not something this chain replaces.
 
   // widthPx/heightPx pass through so a template can distinguish a landscape photo from a
-  // near-square one instead of force-cropping every gallery image to the same ratio.
+  // near-square one instead of force-cropping every gallery image to the same ratio. A
+  // promoted image is excluded here — it's already the hero, so it doesn't also render in
+  // the gallery grid.
   const galleryImages = images
-    .filter((img) => img.role === "gallery")
+    .filter((img) => img.role === "gallery" && img.assetId !== promotedAssetId)
     .flatMap((img) => {
       const url = assetById.get(img.assetId)?.url;
       return url ? [{ url, widthPx: img.widthPx, heightPx: img.heightPx }] : [];
@@ -56,7 +100,9 @@ export function toTemplateContent(contentRecord: ContentRecord, assets: Asset[])
     logoUrl,
     brandColors: brandColors.map((c) => ({ hex: c.hex, role: c.role })),
     heroImageUrl,
+    heroImageSource,
     galleryImages,
     partnerLogos,
+    detectedIndustry: contentRecord.detectedIndustry,
   };
 }

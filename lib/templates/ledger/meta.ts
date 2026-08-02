@@ -4,10 +4,8 @@ export const meta: TemplateMeta = {
   key: "ledger",
   label: "Ledger — Modern Editorial",
   /**
-   * Deliberately broad. Ledger's quality comes from type and band rhythm rather
-   * than imagery, so it holds up across industries — unlike `saas`, which needs
-   * a strong hero image to work. Listed for the industries where a long,
-   * scannable services index is the natural shape of the page.
+   * Deliberately broad. Listed for the industries where a long, scannable
+   * services index is the natural shape of the page.
    */
   industries: [
     "medical",
@@ -30,4 +28,9 @@ export const meta: TemplateMeta = {
     "technology",
     "education",
   ],
+  // Verified across every real client's rendered output during Ledger's own build: the
+  // photo-present split hero and the no-photo dark fallback are not equally good — the
+  // latter is a real, working degradation path, not a design defect, but it's noticeably
+  // plainer. Worth calling out as a requirement rather than leaving it implicit.
+  requires: { heroImage: true },
 };

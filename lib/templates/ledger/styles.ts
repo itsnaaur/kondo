@@ -13,8 +13,9 @@ export function ledgerStyles(p: Palette): string {
   --ink-muted: ${p.inkMuted};
   --line: ${p.line};
   --paper: ${p.paper};
-  --gutter: clamp(20px, 5vw, 64px);
-  --band: clamp(64px, 9vw, 128px);
+  --maxw: 1280px;
+  --gutter: clamp(18px, 3.4vw, 44px);
+  --band: clamp(60px, 8vw, 112px);
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -37,7 +38,7 @@ body.tpl-ledger {
 
 .tl-wrap {
   width: 100%;
-  max-width: 1160px;
+  max-width: var(--maxw);
   margin: 0 auto;
   padding-left: var(--gutter);
   padding-right: var(--gutter);
@@ -148,7 +149,26 @@ body.tpl-ledger {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.tl-nav__side { display: flex; align-items: center; gap: 20px; flex: none; }
+.tl-nav__links {
+  display: flex;
+  align-items: center;
+  gap: clamp(18px, 2.2vw, 34px);
+  margin-left: auto;
+}
+.tl-nav__links a {
+  font-size: 0.94rem;
+  font-weight: 500;
+  letter-spacing: -0.012em;
+  text-decoration: none;
+  color: var(--ink);
+  padding: 6px 0;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.15s ease;
+  white-space: nowrap;
+}
+.tl-nav__links a:hover { border-bottom-color: var(--accent); }
+
+.tl-nav__side { display: flex; align-items: center; gap: 20px; flex: none; margin-left: clamp(20px, 3vw, 44px); }
 .tl-nav__tel {
   font-weight: 600;
   font-size: 0.95rem;
@@ -159,30 +179,85 @@ body.tpl-ledger {
 /* ---------- hero ---------- */
 
 .tl-hero { position: relative; overflow: hidden; background: var(--mist); }
-.tl-hero__in { padding-top: clamp(58px, 8vw, 104px); padding-bottom: clamp(58px, 8vw, 104px); }
-.tl-hero__copy { max-width: 22ch; }
-.tl-hero .tl-lede { max-width: 52ch; }
 
-.tl-hero--split .tl-hero__in {
+/* With a photo: full-bleed split. Copy stays aligned to the container's left
+   edge, the image runs to the right edge of the viewport, and the two meet
+   through a gradient rather than a hard seam. */
+.tl-hero--split {
+  /* Where the photo begins, as a share of the viewport. Raise to push the
+     image further right, lower to widen it. 54% sits just past centre. */
+  --hero-split: 62%;
+  /* How far the photo reaches back to the LEFT, past the column boundary and
+     under the text. This is what physically moves the image left and makes it
+     wider — the split above only sets where the text column ends. */
+  --hero-reach: 2vw;
+  /* How much of the photo's left edge dissolves. Shorter = more photo visible
+     and a crisper edge; longer = softer blend but eats picture. */
+  --hero-fade: 30%;
+  /* Pans the photo inside its frame. Lower slides the picture RIGHT, higher
+     slides it LEFT. Independent of --hero-split, which sets the frame. */
+  --hero-pan: 18%;
   display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
-  gap: clamp(32px, 5vw, 72px);
+  grid-template-columns: var(--hero-split) minmax(0, 1fr);
   align-items: center;
+  min-height: min(76vh, 700px);
 }
-.tl-hero--split .tl-hero__copy { max-width: none; }
-
-.tl-hero__shot {
-  border-radius: 3px;
-  overflow: hidden;
-  border: 1px solid var(--line);
-  box-shadow: 0 30px 60px -30px rgb(0 0 0 / 0.3);
+.tl-hero__copy {
+  padding-block: clamp(52px, 7vw, 92px);
+  padding-right: clamp(28px, 3.6vw, 60px);
+  padding-left: max(var(--gutter), calc((100vw - var(--maxw)) / 2 + var(--gutter)));
+  position: relative;
+  z-index: 2;
 }
-.tl-hero__shot img { width: 100%; height: 100%; object-fit: cover; aspect-ratio: 4 / 3; }
+.tl-hero__copy .tl-lede { max-width: 46ch; }
 
-/* No-photo fallback. Most prospects have no usable hero image — this has to
-   read as a deliberate treatment, not a hole. Concentric arcs in the brand hue. */
+.tl-hero__media {
+  position: relative;
+  align-self: stretch;
+  min-height: 340px;
+  margin-left: calc(var(--hero-reach) * -1);
+  z-index: 1; /* sits under .tl-hero__copy, which is z-index 2 */
+}
+.tl-hero__media img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: var(--hero-pan) center;
+  /* The seam. The image itself dissolves at its left edge, revealing the band
+     behind it — masking, not overlaying. An overlay paints a strip of the
+     background colour ON TOP of the photo, which reads as a pale vertical line
+     rather than a fade. */
+  -webkit-mask-image: linear-gradient(to right,
+    rgba(0,0,0,0) 0%,
+    rgba(0,0,0,0.03) calc(var(--hero-fade) * 0.2),
+    rgba(0,0,0,0.11) calc(var(--hero-fade) * 0.4),
+    rgba(0,0,0,0.28) calc(var(--hero-fade) * 0.6),
+    rgba(0,0,0,0.6) calc(var(--hero-fade) * 0.8),
+    rgba(0,0,0,0.88) calc(var(--hero-fade) * 0.93),
+    #000 var(--hero-fade));
+  mask-image: linear-gradient(to right,
+    rgba(0,0,0,0) 0%,
+    rgba(0,0,0,0.03) calc(var(--hero-fade) * 0.2),
+    rgba(0,0,0,0.11) calc(var(--hero-fade) * 0.4),
+    rgba(0,0,0,0.28) calc(var(--hero-fade) * 0.6),
+    rgba(0,0,0,0.6) calc(var(--hero-fade) * 0.8),
+    rgba(0,0,0,0.88) calc(var(--hero-fade) * 0.93),
+    #000 var(--hero-fade));
+}
+
+/* Without a photo — the common case. Dark band with a soft field in the brand
+   hue, meant to read as a deliberate treatment rather than a hole. */
 .tl-hero--plain { background: var(--deep); color: var(--paper); }
-.tl-hero--plain .tl-lede { color: rgb(255 255 255 / 0.62); }
+.tl-hero--plain .tl-hero__in {
+  padding-top: clamp(66px, 9vw, 116px);
+  padding-bottom: clamp(66px, 9vw, 116px);
+  position: relative;
+  z-index: 1;
+}
+.tl-hero--plain .tl-hero__copy { padding: 0; max-width: 30ch; }
+.tl-hero--plain .tl-lede { color: rgb(255 255 255 / 0.62); max-width: 52ch; }
 .tl-hero--plain .tl-em { color: var(--paper); opacity: 0.92; }
 .tl-hero--plain .tl-btn--ghost { color: var(--paper); }
 .tl-hero--plain .tl-btn--ghost:hover { background: var(--paper); color: var(--deep); border-color: var(--paper); }
@@ -196,7 +271,6 @@ body.tpl-ledger {
   opacity: 0.85;
   pointer-events: none;
 }
-.tl-hero--plain .tl-hero__in { position: relative; z-index: 1; }
 
 /* ---------- trust strip ---------- */
 
@@ -400,9 +474,22 @@ body.tpl-ledger {
 
 /* ---------- responsive ---------- */
 
+@media (max-width: 1040px) {
+  .tl-nav__links { display: none; }
+}
+
 @media (max-width: 860px) {
-  .tl-hero--split .tl-hero__in { grid-template-columns: minmax(0, 1fr); }
-  .tl-hero--split .tl-hero__shot { order: -1; }
+  .tl-hero--split { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+  .tl-hero--split { --hero-split: 100%; }
+  .tl-hero__media { order: -1; min-height: 0; aspect-ratio: 16 / 10; }
+  .tl-hero__media img {
+    -webkit-mask-image: linear-gradient(to bottom, #000 58%, rgba(0,0,0,0.6) 84%, transparent 100%);
+    mask-image: linear-gradient(to bottom, #000 58%, rgba(0,0,0,0.6) 84%, transparent 100%);
+  }
+  .tl-hero__copy {
+    padding-inline: var(--gutter);
+    padding-block: clamp(30px, 6vw, 52px) clamp(44px, 8vw, 72px);
+  }
   .tl-statement__grid { grid-template-columns: minmax(0, 1fr); }
   .tl-statement__body { max-width: none; }
   .tl-row { grid-template-columns: minmax(0, 1fr); gap: 7px; padding: 20px 4px; }
