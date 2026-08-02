@@ -37,13 +37,19 @@ export function TemplateGallery({ clientId, templates, defaultKey }: TemplateGal
           }`}
         >
           <div className="relative h-56 overflow-hidden bg-white">
+            {/* Width is a percentage of the card, not a fixed px, so the scaled-down page
+                always fills the card exactly regardless of the grid column's actual
+                rendered width (a fixed 1200px/scale(0.3) only fills a 360px-wide card —
+                any wider column, e.g. a 2-up grid inside max-w-5xl, left visible blank
+                space down the right side). 333.3334% == 100% / 0.3, so after the scale
+                it's back to exactly 100% of the card's own width. */}
             <iframe
               srcDoc={t.html}
               sandbox=""
               scrolling="no"
               title={t.label}
               style={{
-                width: "1200px",
+                width: "333.3334%",
                 height: "1800px",
                 transform: "scale(0.3)",
                 transformOrigin: "top left",

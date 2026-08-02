@@ -30,8 +30,8 @@ export type TemplateContent = {
   // have gone through the same dimension check).
   galleryImages: { url: string; widthPx?: number; heightPx?: number }[];
   // Insurer/health-fund/partner logos — a distinct bucket from galleryImages, never a
-  // hero candidate. Optional so saas/local-service (which don't render it) don't need any
-  // changes; a template that wants the "accepted here" trust strip reads this directly.
+  // hero candidate. Optional so a future template that has no use for a trust strip
+  // doesn't need any changes; ledger and showcase both read this directly.
   partnerLogos?: { url: string }[];
   // Carried through only for lib/templates/suitability.ts's "recommended" tier — no
   // template reads it for rendering, same as heroImageSource above. Kept here rather than
@@ -48,7 +48,7 @@ export type TemplateMeta = {
   // Things the template genuinely can't do well without — see lib/templates/suitability.ts.
   // Keep this list short: a requirement that's never violated in practice is noise, not
   // signal. Absent/false means "not required."
-  requires?: { heroImage?: boolean; phone?: boolean; minServices?: number };
+  requires?: { heroImage?: boolean; phone?: boolean; minServices?: number; minGallery?: number };
   // Things that make the template better but aren't blocking.
   prefers?: { testimonials?: boolean; minGallery?: number };
 };

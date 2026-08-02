@@ -35,10 +35,11 @@ export function renderShell({
   title: string;
   css: string;
   bodyHtml: string;
-  // Both optional and unused by saas/local-service — added for ledger, which scopes all
-  // of its CSS under body.tpl-ledger and needs a Google Fonts <link> in <head>. A
-  // template-specific body class/head snippet is trusted, template-author-controlled
-  // content (not prospect data), so it's injected as-is, not escaped like the title is.
+  // Both templates currently in use (ledger, showcase) set these — each scopes its CSS
+  // under its own body class and needs a Google Fonts <link> in <head>. Stay optional for
+  // a future template that doesn't need either. A template-specific body class/head
+  // snippet is trusted, template-author-controlled content (not prospect data), so it's
+  // injected as-is, not escaped like the title is.
   bodyClass?: string;
   headExtra?: string;
 }): string {
