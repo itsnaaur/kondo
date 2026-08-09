@@ -10,6 +10,7 @@ import type {
   ContentProcessStep,
 } from "./types";
 import type { TemplateContent } from "@/lib/templates/types";
+import { isDecorativePhoto } from "./filter-junk-images";
 
 // Resolves a ContentRecord + its Client's Assets into the flat, template-author-facing
 // shape — Asset ids become URLs, and all confidence/flagged review metadata is stripped
@@ -30,11 +31,26 @@ export function toTemplateContent(contentRecord: ContentRecord, assets: Asset[])
 
   const logoUrl = contentRecord.logoAssetId ? (assetById.get(contentRecord.logoAssetId)?.url ?? null) : null;
 
+  // Real photos only, for every hero/gallery decision below — this used to be a
+  // template-local guard (built for Atlas, see lib/content/content-guards.ts's
+  // sceneImages) before confirming live that Showcase and Ledger had the identical bug:
+  // Propell's brand SVGs rendering as garbled tiles, Princeton's logo re-appearing as a
+  // "gallery" photo. Presentability is a property of the data, not of any one template,
+  // so this runs once here instead of once per template. logo/partner-logo roles are
+  // untouched — an SVG logo is exactly what it should be, just never eligible to become a
+  // hero or gallery photo in the first place.
+  const logoImage = images.find((img) => img.role === "logo") ?? null;
+  const realImages = images.filter((img) => {
+    if (img.role !== "gallery" && img.role !== "hero") return true;
+    const isSvg = assetById.get(img.assetId)?.mimeType === "image/svg+xml";
+    return !isDecorativePhoto(img, isSvg, logoImage);
+  });
+
   // Hero fallback chain. Tier 1 (extracted): the one place flagged images are excluded
   // even from approved content — a low-res photo blown up to hero size looks broken
   // regardless of whether a human got around to removing it during review, so this always
   // prefers falling through rather than using a flagged candidate.
-  const tier1 = images.find((img) => img.role === "hero" && !img.flagged) ?? null;
+  const tier1 = realImages.find((img) => img.role === "hero" && !img.flagged) ?? null;
 
   let heroImageUrl: string | null = null;
   let heroImageSource: "extracted" | "promoted" | null = null;
@@ -58,7 +74,7 @@ export function toTemplateContent(contentRecord: ContentRecord, assets: Asset[])
     const MIN_PROMOTABLE_ASPECT = 1.2;
     const MAX_PROMOTABLE_ASPECT = 2.6;
 
-    const promotable = images
+    const promotable = realImages
       .filter((img) => img.role === "gallery" && !img.flagged && img.widthPx >= MIN_PROMOTABLE_WIDTH_PX)
       .filter((img) => {
         if (img.heightPx <= 0) return false;
@@ -86,7 +102,7 @@ export function toTemplateContent(contentRecord: ContentRecord, assets: Asset[])
   // (see lib/templates/ledger/index.ts), or build your own hero+gallery pool that dedupes
   // by URL as it goes (see lib/templates/showcase/index.ts's allocateImages). Skip this
   // and the hero photo renders twice on the page.
-  const galleryImages = images
+  const galleryImages = realImages
     .filter((img) => img.role === "gallery" || img.role === "hero")
     .flatMap((img) => {
       const url = assetById.get(img.assetId)?.url;

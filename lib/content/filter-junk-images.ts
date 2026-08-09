@@ -28,3 +28,24 @@ const MAX_JUNK_DIMENSION_PX = 200;
 export function isJunkBySize(widthPx: number, heightPx: number): boolean {
   return widthPx < MAX_JUNK_DIMENSION_PX && heightPx < MAX_JUNK_DIMENSION_PX;
 }
+
+// Runs later than the two filters above — these two signals (AI subject classification,
+// and comparison against the logo's own dimensions) don't exist yet at crawl/download
+// time, only once lib/content/to-template-content.ts assembles the full picture. This was
+// originally a template-local guard (lib/content/content-guards.ts's sceneImages, built
+// for Atlas) — moved here and applied to every template's galleryImages because it's a
+// property of the data, not of any one template. Confirmed live across all 8 real
+// clients: 3 have AI-classified "abstract" decorative images (brand SVGs, graphic
+// patterns) and 4 have a "gallery" image whose dimensions exactly match the logo's —
+// almost always the same logo image re-appearing in the crawled photo list, not a real
+// second photo that coincidentally shares its exact pixel dimensions.
+export function isDecorativePhoto(
+  img: { subject?: "people" | "place" | "work" | "product" | "abstract" | "unknown"; widthPx: number; heightPx: number },
+  isSvg: boolean,
+  logo: { widthPx: number; heightPx: number } | null
+): boolean {
+  if (img.subject === "abstract") return true;
+  if (isSvg) return true;
+  if (logo && img.widthPx === logo.widthPx && img.heightPx === logo.heightPx) return true;
+  return false;
+}
