@@ -84,6 +84,23 @@ export function teamFromCaptions(images: TemplateImage[]) {
   return team;
 }
 
+/**
+ * Buckets images by aspect ratio so a template's allocator can ask for the
+ * shape a slot actually needs instead of taking whatever's next in the pool.
+ * Propell's 1600×2000 portrait headshots forced into Showcase's 4/3 and 16/9
+ * mosaic tiles cropped a head off in one and left the subject stranded in
+ * the other — a slot built for a landscape photo doesn't get a fairer result
+ * just because it's set to object-fit: cover.
+ */
+export function byOrientation(images: TemplateImage[]) {
+  const ratio = (i: TemplateImage) => (i.widthPx ?? 1) / (i.heightPx ?? 1);
+  return {
+    landscape: images.filter((i) => ratio(i) >= 1.2),
+    portrait: images.filter((i) => ratio(i) <= 0.85),
+    square: images.filter((i) => ratio(i) > 0.85 && ratio(i) < 1.2),
+  };
+}
+
 /** Photos that can carry a section: real scenes, not logos or icons. */
 export function sceneImages(images: TemplateImage[]) {
   return (images || []).filter((i) => {

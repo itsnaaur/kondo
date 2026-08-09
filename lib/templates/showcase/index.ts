@@ -1,7 +1,15 @@
-import type { TemplateContent } from "../types";
+import type { TemplateContent, TemplateImage } from "../types";
 import { buildPalette } from "../../content/normalize-brand-colors";
+import { byOrientation } from "../../content/content-guards";
 import { escapeHtml as esc } from "../escape-html";
 import { showcaseStyles } from "./styles";
+
+// Face-forward crop instead of a dead-center one — the difference between a headshot
+// cropped at the eyebrows and one that reads correctly. Only applied to subject:"people"
+// images; a place/work/product photo has no face to protect and center-cropping is fine.
+function imgAttrs(img: TemplateImage): string {
+  return img.subject === "people" ? ' style="object-position:center 30%"' : "";
+}
 
 function splitTagline(tagline: string): { head: string; tail: string } {
   const t = (tagline || "").trim();
@@ -37,31 +45,76 @@ function telHref(phone: string): string {
  * Priority is deliberate — the hero and the service tiles carry most of the
  * visual weight, so they're fed first. The mosaic is last because it's the
  * section a page can most comfortably do without.
+ *
+ * Orientation-aware, not just count-aware — confirmed live that Propell's portrait
+ * headshots (1600×2000) forced into hero/tiles/feature's landscape-shaped slots
+ * cropped a head off. hero/tiles/feature only draw from landscape+square; pair is the
+ * one slot actually shaped for portraits (5/4 and 1/1, both close to square) and draws
+ * from portrait first. Mosaic is the deliberate exception: one of its four repeating
+ * slot shapes (nth-child(4n+2)) is itself portrait-ratio, so it's the only place a
+ * leftover portrait is allowed to fill a landscape-preferring slot rather than being
+ * left unplaced.
  */
 type Slots = {
-  hero: string | null;
-  tiles: string[]; // 0 or 3+
-  feature: string | null;
-  pair: string[]; // 0 or 2
-  mosaic: string[]; // 0 or 3+
+  hero: TemplateImage | null;
+  tiles: TemplateImage[]; // 0 or 3+
+  feature: TemplateImage | null;
+  pair: TemplateImage[]; // 0 or 2
+  mosaic: TemplateImage[]; // 0 or 3+
 };
 
-function allocateImages(hero: string | null, gallery: { url: string }[]): Slots {
-  const pool: string[] = [];
-  if (hero) pool.push(hero);
-  for (const g of gallery) if (g.url && !pool.includes(g.url)) pool.push(g.url);
+function allocateImages(hero: TemplateImage | null, gallery: TemplateImage[]): Slots {
+  let pool: TemplateImage[] = [];
+  const seen = new Set<string>();
+  const pushUnique = (img: TemplateImage | null | undefined) => {
+    if (img?.url && !seen.has(img.url)) {
+      seen.add(img.url);
+      pool.push(img);
+    }
+  };
+  pushUnique(hero);
+  for (const g of gallery) pushUnique(g);
 
-  const take = (n: number): string[] => pool.splice(0, n);
+  const removeFromPool = (imgs: TemplateImage[]) => {
+    const urls = new Set(imgs.map((i) => i.url));
+    pool = pool.filter((i) => !urls.has(i.url));
+  };
+  const wideAvailable = () => {
+    const { landscape, square } = byOrientation(pool);
+    return [...landscape, ...square];
+  };
+  const tallAvailable = () => byOrientation(pool).portrait;
+
   const slots: Slots = { hero: null, tiles: [], feature: null, pair: [], mosaic: [] };
 
-  slots.hero = pool.length ? take(1)[0] : null;
+  const wideForHero = wideAvailable();
+  if (wideForHero.length) {
+    slots.hero = wideForHero[0];
+    removeFromPool([slots.hero]);
+  }
 
   // Tiles need at least 3 to read as a grid; with 1–2 spare the services
   // render as a ruled list instead, which looks deliberate rather than sparse.
-  if (pool.length >= 3) slots.tiles = take(3);
-  if (pool.length >= 1) slots.feature = take(1)[0];
-  if (pool.length >= 2) slots.pair = take(2);
-  if (pool.length >= 3) slots.mosaic = take(Math.min(pool.length, 7));
+  const wideForTiles = wideAvailable();
+  if (wideForTiles.length >= 3) {
+    slots.tiles = wideForTiles.slice(0, 3);
+    removeFromPool(slots.tiles);
+  }
+
+  const wideForFeature = wideAvailable();
+  if (wideForFeature.length >= 1) {
+    slots.feature = wideForFeature[0];
+    removeFromPool([slots.feature]);
+  }
+
+  const tallForPair = tallAvailable();
+  if (tallForPair.length >= 2) {
+    slots.pair = tallForPair.slice(0, 2);
+    removeFromPool(slots.pair);
+  }
+
+  const restForMosaic = [...wideAvailable(), ...tallAvailable()];
+  if (restForMosaic.length >= 3) slots.mosaic = restForMosaic.slice(0, Math.min(restForMosaic.length, 7));
 
   return slots;
 }
@@ -72,7 +125,11 @@ export function renderShowcase(c: TemplateContent): { body: string; css: string 
   const services = c.services || [];
   const quotes = c.testimonials || [];
   const partners = c.partnerLogos || [];
-  const img = allocateImages(c.heroImageUrl, c.galleryImages || []);
+  // galleryImages already includes whatever heroImageUrl points at (see
+  // to-template-content.ts) — look it up there for its width/height/subject instead of
+  // passing a bare URL, so allocateImages can weigh it by orientation like everything else.
+  const heroCandidate = (c.galleryImages || []).find((i) => i.url === c.heroImageUrl) ?? null;
+  const img = allocateImages(heroCandidate, c.galleryImages || []);
 
   const primaryCta = c.contactPhone
     ? `<a class="sc-btn sc-btn--solid" href="${esc(telHref(c.contactPhone))}">Call ${esc(c.contactPhone)}</a>`
@@ -108,7 +165,7 @@ export function renderShowcase(c: TemplateContent): { body: string; css: string 
   // ---- hero
   const hero = `
 <section class="sc-hero${img.hero ? "" : " sc-hero--noimg"}">
-  ${img.hero ? `<div class="sc-hero__bg"><img src="${esc(img.hero)}" alt=""></div>` : ""}
+  ${img.hero ? `<div class="sc-hero__bg"><img src="${esc(img.hero.url)}" alt=""${imgAttrs(img.hero)}></div>` : ""}
   <div class="sc-wrap sc-hero__in">
     <div class="sc-hero__copy">
       <h1 class="sc-display">${esc(head)}${tail ? ` <span class="sc-em">${esc(tail)}</span>` : ""}</h1>
@@ -138,7 +195,7 @@ export function renderShowcase(c: TemplateContent): { body: string; css: string 
         ? `<div class="sc-tiles__grid">${tiled
             .map(
               (s, i) => `<article class="sc-tile">
-        <div class="sc-tile__img"><img src="${esc(img.tiles[i])}" alt=""></div>
+        <div class="sc-tile__img"><img src="${esc(img.tiles[i].url)}" alt=""${imgAttrs(img.tiles[i])}></div>
         <h3>${esc(s.name)}</h3>
         ${s.description ? `<p>${esc(s.description)}</p>` : ""}
       </article>`,
@@ -173,7 +230,7 @@ export function renderShowcase(c: TemplateContent): { body: string; css: string 
     img.feature && featureQuote
       ? `
 <section class="sc-feature">
-  <img src="${esc(img.feature)}" alt="">
+  <img src="${esc(img.feature.url)}" alt=""${imgAttrs(img.feature)}>
   <div class="sc-wrap sc-feature__in">
     <p class="sc-eyebrow">${quotes.length ? "In their words" : "Who we are"}</p>
     <blockquote>${esc(featureQuote.text)}</blockquote>
@@ -196,8 +253,8 @@ export function renderShowcase(c: TemplateContent): { body: string; css: string 
       ${
         img.pair.length === 2
           ? `<div class="sc-pair__stack">
-        <figure><img src="${esc(img.pair[0])}" alt=""></figure>
-        <figure><img src="${esc(img.pair[1])}" alt=""></figure>
+        <figure><img src="${esc(img.pair[0].url)}" alt=""${imgAttrs(img.pair[0])}></figure>
+        <figure><img src="${esc(img.pair[1].url)}" alt=""${imgAttrs(img.pair[1])}></figure>
       </div>`
           : ""
       }
@@ -216,7 +273,7 @@ export function renderShowcase(c: TemplateContent): { body: string; css: string 
       <h2 class="sc-h2">See it <span class="sc-em">for yourself</span></h2>
     </div>
     <div class="sc-mosaic__grid">
-      ${img.mosaic.map((u) => `<figure><img src="${esc(u)}" alt=""></figure>`).join("")}
+      ${img.mosaic.map((m) => `<figure><img src="${esc(m.url)}" alt=""${imgAttrs(m)}></figure>`).join("")}
     </div>
   </div>
 </section>`

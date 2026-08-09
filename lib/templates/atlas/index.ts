@@ -27,6 +27,13 @@ function firstSentence(text: string): string {
 
 function telHref(p: string): string { return "tel:" + p.replace(/[^\d+]/g, ""); }
 
+// Face-forward crop instead of a dead-center one — the difference between a headshot
+// cropped at the eyebrows and one that reads correctly. Only applied to subject:"people"
+// images; a place/work/product photo has no face to protect and center-cropping is fine.
+function imgAttrs(img: { subject?: string } | null | undefined): string {
+  return img?.subject === "people" ? ' style="object-position:center 30%"' : "";
+}
+
 export function renderAtlas(c: TemplateContent): { body: string; css: string } {
   const p = buildPalette(c.brandColors || []);
   const { hero, scenes, team, stats, faqs } = prepare(c);
@@ -73,7 +80,7 @@ export function renderAtlas(c: TemplateContent): { body: string; css: string } {
   const heroSection = hero
     ? `<section class="at-hero"><div class="at-wrap at-hero__in">
     ${heroCopy}
-    <figure class="at-hero__shot" style="margin:0"><img src="${esc(hero.url)}" alt="">${
+    <figure class="at-hero__shot" style="margin:0"><img src="${esc(hero.url)}" alt=""${imgAttrs(hero)}>${
       hero.caption ? `<figcaption>${esc(hero.caption)}</figcaption>` : ""
     }</figure>
   </div></section>`
@@ -143,13 +150,15 @@ export function renderAtlas(c: TemplateContent): { body: string; css: string } {
   // The right column takes team cards when captions yielded names, otherwise
   // scene photos, otherwise nothing — and the grid collapses to one column.
   const aside = team.length
-    ? `<div class="at-team">${team.slice(0, 4).map((t) => `<figure>
-      <img src="${esc(t.url)}" alt="">
+    ? // Every team entry is subject:"people" by construction (see content-guards.ts's
+      // teamFromCaptions), so this doesn't need the imgAttrs() subject check others do.
+      `<div class="at-team">${team.slice(0, 4).map((t) => `<figure>
+      <img src="${esc(t.url)}" alt="" style="object-position:center 30%">
       <figcaption><b>${esc(t.name)}</b><span>${esc(t.role)}</span></figcaption>
     </figure>`).join("")}</div>`
     : scenes.length
       ? `<div class="at-scenes">${scenes.slice(0, 4).map((s) => `<figure>
-      <img src="${esc(s.url)}" alt="">${s.caption ? `<figcaption>${esc(s.caption)}</figcaption>` : ""}
+      <img src="${esc(s.url)}" alt=""${imgAttrs(s)}>${s.caption ? `<figcaption>${esc(s.caption)}</figcaption>` : ""}
     </figure>`).join("")}</div>`
       : "";
 

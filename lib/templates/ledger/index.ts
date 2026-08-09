@@ -50,6 +50,13 @@ function telHref(phone: string): string {
   return "tel:" + phone.replace(/[^\d+]/g, "");
 }
 
+// Face-forward crop instead of a dead-center one — the difference between a headshot
+// cropped at the eyebrows and one that reads correctly. Only applied to subject:"people"
+// images; a place/work/product photo has no face to protect and center-cropping is fine.
+function imgAttrs(img: { subject?: string } | null | undefined): string {
+  return img?.subject === "people" ? ' style="object-position:center 30%"' : "";
+}
+
 export function renderLedger(c: TemplateContent): { body: string; css: string } {
   const p = buildPalette(c.brandColors || []);
   const { head, tail } = splitTagline(c.tagline);
@@ -59,6 +66,7 @@ export function renderLedger(c: TemplateContent): { body: string; css: string } 
   // in lib/templates/types.ts) so a template can make its own hero decision — Ledger
   // doesn't, so it filters that one image back out to avoid showing it twice.
   const gallery = (c.galleryImages || []).filter((img) => img.url !== c.heroImageUrl);
+  const heroImage = (c.galleryImages || []).find((img) => img.url === c.heroImageUrl) ?? null;
   const partners = (c as { partnerLogos?: { url: string }[] }).partnerLogos || [];
   const hasHero = Boolean(c.heroImageUrl);
 
@@ -106,7 +114,7 @@ export function renderLedger(c: TemplateContent): { body: string; css: string } 
   const hero = hasHero
     ? `<section class="tl-hero tl-hero--split">
   ${heroCopy}
-  <div class="tl-hero__media"><img src="${esc(c.heroImageUrl)}" alt=""></div>
+  <div class="tl-hero__media"><img src="${esc(c.heroImageUrl)}" alt=""${imgAttrs(heroImage)}></div>
 </section>`
     : `<section class="tl-hero tl-hero--plain">
   <div class="tl-hero__field"></div>
@@ -189,7 +197,7 @@ export function renderLedger(c: TemplateContent): { body: string; css: string } 
       gallery.length
         ? `<div class="tl-gallery">${gallery
             .slice(0, 4)
-            .map((g) => `<figure><img src="${esc(g.url)}" alt=""></figure>`)
+            .map((g) => `<figure><img src="${esc(g.url)}" alt=""${imgAttrs(g)}></figure>`)
             .join("")}</div>`
         : ""
     }
