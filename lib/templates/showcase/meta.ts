@@ -35,4 +35,7 @@ export const meta: TemplateMeta = {
     "tourism",
   ],
   requires: { minGallery: 3 },
+  // No stats/differentiators/process/faqs section exists in this template at all — see
+  // lib/templates/registry.ts::sectionCoverage.
+  rendersSections: ["services", "testimonials", "gallery", "partnerLogos"],
 };

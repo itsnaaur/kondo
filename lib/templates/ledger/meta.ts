@@ -33,4 +33,8 @@ export const meta: TemplateMeta = {
   // latter is a real, working degradation path, not a design defect, but it's noticeably
   // plainer. Worth calling out as a requirement rather than leaving it implicit.
   requires: { heroImage: true },
+  // No stats/differentiators/process/faqs section exists in this template at all — see
+  // lib/templates/registry.ts::sectionCoverage, which uses this list to break suitability
+  // ties by how much of a client's actual content a template would show.
+  rendersSections: ["services", "testimonials", "gallery", "partnerLogos"],
 };

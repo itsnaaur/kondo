@@ -55,7 +55,10 @@ export function renderLedger(c: TemplateContent): { body: string; css: string } 
   const { head, tail } = splitTagline(c.tagline);
   const services = c.services || [];
   const quotes = c.testimonials || [];
-  const gallery = c.galleryImages || [];
+  // galleryImages now includes whatever heroImageUrl points at (see the field's comment
+  // in lib/templates/types.ts) so a template can make its own hero decision — Ledger
+  // doesn't, so it filters that one image back out to avoid showing it twice.
+  const gallery = (c.galleryImages || []).filter((img) => img.url !== c.heroImageUrl);
   const partners = (c as { partnerLogos?: { url: string }[] }).partnerLogos || [];
   const hasHero = Boolean(c.heroImageUrl);
 

@@ -1,10 +1,12 @@
 import { renderShell } from "./shell";
-import type { TemplateContent, TemplateMeta } from "./types";
+import type { TemplateContent, TemplateMeta, TemplateSection } from "./types";
 import { scoreTemplate, type SuitabilityResult } from "./suitability";
 import { renderLedger } from "./ledger";
 import { meta as ledgerMeta } from "./ledger/meta";
 import { renderShowcase } from "./showcase";
 import { meta as showcaseMeta } from "./showcase/meta";
+import { renderAtlas } from "./atlas";
+import { meta as atlasMeta } from "./atlas/meta";
 
 type RenderResult = { body: string; css: string };
 
@@ -15,11 +17,11 @@ type TemplateEntry = {
   headExtra?: string;
 };
 
-// Ledger and Showcase both use Google Fonts (Instrument Sans + Newsreader) — without this
-// link tag they silently fall back to system faces, the same class of failure as the
-// img-src CSP gap hit earlier. next.config.ts's CSP must allow fonts.googleapis.com
-// (style-src) and fonts.gstatic.com (font-src) for these to actually load, not just be
-// requested.
+// Ledger, Showcase, and Atlas all use Google Fonts (Instrument Sans + Newsreader) —
+// without this link tag they silently fall back to system faces, the same class of
+// failure as the img-src CSP gap hit earlier. next.config.ts's CSP must allow
+// fonts.googleapis.com (style-src) and fonts.gstatic.com (font-src) for these to actually
+// load, not just be requested.
 const GOOGLE_FONT_LINKS = `<link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=Newsreader:ital,opsz,wght@1,6..72,400&display=swap" rel="stylesheet">`;
@@ -37,6 +39,12 @@ const TEMPLATES: Record<string, TemplateEntry> = {
     render: renderShowcase,
     meta: showcaseMeta,
     bodyClass: "tpl-showcase",
+    headExtra: GOOGLE_FONT_LINKS,
+  },
+  [atlasMeta.key]: {
+    render: renderAtlas,
+    meta: atlasMeta,
+    bodyClass: "tpl-atlas",
     headExtra: GOOGLE_FONT_LINKS,
   },
 };
@@ -75,11 +83,43 @@ const FALLBACK_TEMPLATE_KEY = ledgerMeta.key;
 
 const STATUS_RANK: Record<SuitabilityResult["status"], number> = { recommended: 0, works: 1, "not-suited": 2 };
 
-// Tie-break priority when two templates land on the same status — this is a judgment
-// call the suitability spec doesn't cover (its rules describe a single template's score,
-// not how to rank two that tie). Ranked by how hard each template's requirement is to
-// earn: showcase (3+ real photos, the narrower bar) first, then ledger (one hero photo).
-const TIE_BREAK_PRIORITY = [showcaseMeta.key, ledgerMeta.key];
+const META_BY_KEY: Record<string, TemplateMeta> = Object.fromEntries(
+  Object.values(TEMPLATES).map((t) => [t.meta.key, t.meta])
+);
+
+// How many of this client's actual content types a template has a section for at all
+// (lib/templates/types.ts's rendersSections) — NOT whether that section survives a
+// template's own internal filtering (e.g. atlas's content-guards.ts::usableFaqs). Checking
+// raw record presence rather than simulating each template's render is the deliberate
+// "interim, simple" scope of this fix: it's measurable straight off TemplateContent, no
+// template-specific logic has to leak into the scorer. Known limitation this accepts: a
+// client with FAQ rows that all get filtered out by usableFaqs still counts as "has FAQs"
+// here, so atlas's coverage score can be very slightly inflated in that specific case.
+// Checked against real data before shipping this: it doesn't currently flip any actual
+// pickDefaultTemplate outcome, but a future client could hit it.
+function sectionCoverage(meta: TemplateMeta, content: TemplateContent): number {
+  const has: Record<TemplateSection, boolean> = {
+    services: content.services.length > 0,
+    testimonials: content.testimonials.length > 0,
+    stats: content.stats.length > 0,
+    differentiators: content.differentiators.length > 0,
+    process: content.process.length > 0,
+    faqs: content.faqs.length > 0,
+    gallery: content.galleryImages.length > 0,
+    partnerLogos: (content.partnerLogos?.length ?? 0) > 0,
+  };
+  return (meta.rendersSections ?? []).filter((s) => has[s]).length;
+}
+
+// Static tie-break priority — the LAST resort, only reached when status AND section
+// coverage are both equal (e.g. ledger vs showcase, which declare the identical
+// rendersSections list, so coverage can never separate them). Ranked by how hard each
+// template's requirement is to earn: showcase (3+ real photos) first, then ledger (one
+// hero photo), then atlas (no requires at all — see atlas/meta.ts). This mechanical rule
+// used to be the ONLY tie-break, which is what let local-service-shaped ties reward
+// whichever template simply declared the most constraints regardless of fit — see
+// sectionCoverage above, which now runs first and settles most real ties on merit.
+const TIE_BREAK_PRIORITY = [showcaseMeta.key, ledgerMeta.key, atlasMeta.key];
 
 // Every template scored against this client's actual content — the one call site both
 // the gallery (for sorting/labels) and pickDefaultTemplate (below) need, so scoring logic
@@ -102,6 +142,11 @@ export function pickDefaultTemplate(content: TemplateContent): string {
   const scored = scoreAllTemplates(content).sort((a, b) => {
     const statusDiff = STATUS_RANK[a.status] - STATUS_RANK[b.status];
     if (statusDiff !== 0) return statusDiff;
+    // Section coverage before the static priority list — a template that actually shows
+    // more of what this specific client has (testimonials, stats, process, ...) wins the
+    // tie on merit, not on which template happened to declare the narrowest requirement.
+    const coverageDiff = sectionCoverage(META_BY_KEY[b.key], content) - sectionCoverage(META_BY_KEY[a.key], content);
+    if (coverageDiff !== 0) return coverageDiff;
     return TIE_BREAK_PRIORITY.indexOf(a.key) - TIE_BREAK_PRIORITY.indexOf(b.key);
   });
   const best = scored[0];

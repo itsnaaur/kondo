@@ -1,3 +1,17 @@
+// A gallery/hero-pool image as templates see it — Asset ids and confidence are already
+// resolved/stripped by to-template-content.ts. caption/subject/suitableAsHero come from
+// the AI image-classification step (lib/content/structure-and-rewrite.ts) and are
+// optional: the logo never goes through that classification, and a manually-uploaded
+// replacement image may not have either.
+export type TemplateImage = {
+  url: string;
+  widthPx?: number;
+  heightPx?: number;
+  caption?: string;
+  subject?: "people" | "place" | "work" | "product" | "abstract" | "unknown";
+  suitableAsHero?: boolean;
+};
+
 // The flat, template-author-facing content shape — deliberately separate from the Prisma
 // ContentRecord/Json shapes in lib/content/types.ts. Template authors never touch
 // confidence/flagged metadata or Asset ids; lib/content/to-template-content.ts resolves
@@ -8,6 +22,13 @@ export type TemplateContent = {
   aboutCopy: string;
   services: { name: string; description: string }[];
   testimonials: { quote: string; author: string; role?: string }[];
+  // Extraction-expansion fields (lib/content/structure-and-rewrite.ts) — each defaults to
+  // [] the same way services/testimonials do; an empty array is the normal, common
+  // outcome for stats/faqs/differentiators/process, not a missing-data state.
+  differentiators: { title: string; description: string }[];
+  process: { title: string; description: string }[];
+  stats: { value: string; label: string }[];
+  faqs: { question: string; answer: string }[];
   contactEmail: string | null;
   contactPhone: string | null;
   contactAddress: string | null;
@@ -17,27 +38,45 @@ export type TemplateContent = {
   // qualifies (see lib/content/to-template-content.ts's fallback chain) — a prospect with
   // no usable photography at all is the normal case this tool exists for, not a rare
   // failure. Every template must degrade gracefully here (a gradient/color-block
-  // treatment built from brandColors), not assume a photo is always available.
+  // treatment built from brandColors), not assume a photo is always available. This is
+  // the crawler's own best guess — a template that wants the AI's suitableAsHero
+  // judgement instead (see lib/content/content-guards.ts::pickHero) can override it using
+  // galleryImages, which now includes this same image as one of its candidates.
   heroImageUrl: string | null;
   // "extracted" = a real role:"hero" candidate; "promoted" = no hero candidate existed,
-  // so the best qualifying gallery photo was promoted instead (and removed from
-  // galleryImages so it doesn't render twice). null alongside heroImageUrl: null.
-  // Templates don't read this — it's for the review screen and the suitability scorer.
+  // so the best qualifying gallery photo was promoted instead. null alongside
+  // heroImageUrl: null. Templates don't read this — it's for the review screen and the
+  // suitability scorer.
   heroImageSource: "extracted" | "promoted" | null;
-  // widthPx/heightPx let a template tell a landscape photo from a near-square one instead
-  // of force-cropping every gallery image to the same ratio — optional since they're only
-  // populated from crawl-derived images (a manually-uploaded replacement image may not
-  // have gone through the same dimension check).
-  galleryImages: { url: string; widthPx?: number; heightPx?: number }[];
+  // Every non-logo, non-partner-logo image, hero-role included — deliberately NOT
+  // deduplicated against heroImageUrl here, so a template can make its own hero decision
+  // (e.g. by suitableAsHero) instead of inheriting the crawler's tier1/tier2 pick. A
+  // template that just wants "the gallery, minus whatever I'm using as hero" filters
+  // heroImageUrl out itself (see lib/templates/ledger/index.ts); one that builds its own
+  // pool from hero + gallery already dedupes by URL (see lib/templates/showcase/index.ts).
+  galleryImages: TemplateImage[];
   // Insurer/health-fund/partner logos — a distinct bucket from galleryImages, never a
   // hero candidate. Optional so a future template that has no use for a trust strip
-  // doesn't need any changes; ledger and showcase both read this directly.
+  // doesn't need any changes; ledger, showcase, and atlas all read this directly.
   partnerLogos?: { url: string }[];
   // Carried through only for lib/templates/suitability.ts's "recommended" tier — no
   // template reads it for rendering, same as heroImageSource above. Kept here rather than
   // threading a second parameter through every scoreTemplate/pickDefaultTemplate call site.
   detectedIndustry: string | null;
 };
+
+// The content types a template has a section for at all — used only for the tie-break
+// coverage score in lib/templates/registry.ts::pickDefaultTemplate, not for rendering
+// itself (each template's own render function already checks its own content directly).
+export type TemplateSection =
+  | "services"
+  | "testimonials"
+  | "stats"
+  | "differentiators"
+  | "process"
+  | "faqs"
+  | "gallery"
+  | "partnerLogos";
 
 export type TemplateMeta = {
   key: string;
@@ -51,6 +90,12 @@ export type TemplateMeta = {
   requires?: { heroImage?: boolean; phone?: boolean; minServices?: number; minGallery?: number };
   // Things that make the template better but aren't blocking.
   prefers?: { testimonials?: boolean; minGallery?: number };
+  // Which content types this template has a section for at all, regardless of whether
+  // this specific client happens to have populated them. Drives the tie-break coverage
+  // score: when two templates land on the same suitability status for a client, the one
+  // that would actually show more of what that client has wins, rather than an arbitrary
+  // priority order. See lib/templates/registry.ts::sectionCoverage.
+  rendersSections?: TemplateSection[];
 };
 
 // Returns the <body> content as an HTML string, not JSX — react-dom/server can't be
