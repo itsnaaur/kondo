@@ -139,6 +139,10 @@ export default async function ClientWorkspacePage({ params }: { params: Promise<
               contactAddress={contentRecord.contactAddress}
               services={(contentRecord.services as never) ?? []}
               testimonials={(contentRecord.testimonials as never) ?? []}
+              stats={(contentRecord.stats as never) ?? []}
+              faqs={(contentRecord.faqs as never) ?? []}
+              differentiators={(contentRecord.differentiators as never) ?? []}
+              process={(contentRecord.process as never) ?? []}
               brandColors={(contentRecord.brandColors as never) ?? []}
               images={images}
               fieldFlags={((contentRecord.fieldFlags as unknown as FieldFlags | null) ?? {}) as FieldFlags}

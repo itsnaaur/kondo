@@ -118,6 +118,15 @@ model ContentRecord {
   brandColors  Json // ContentColor[]
   images       Json // ContentImage[] (references Asset ids)
 
+  // Extraction expansion — the trust-band/proof content templates need beyond services
+  // and testimonials. @default("[]") both backfills existing rows at migration time and
+  // means an empty array (a normal, common outcome — see structure-and-rewrite.ts) is
+  // never a missing-data state to special-case.
+  stats           Json @default("[]") // ContentStat[]
+  faqs            Json @default("[]") // ContentFaq[]
+  differentiators Json @default("[]") // ContentDifferentiator[]
+  process         Json @default("[]") // ContentProcessStep[]
+
   contactEmail   String?
   contactPhone   String?
   contactAddress String?

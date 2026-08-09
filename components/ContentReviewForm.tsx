@@ -12,7 +12,17 @@ import {
   replaceContentImage,
   updateImageRole,
 } from "@/lib/actions/content";
-import type { ContentColor, ContentImage, ContentService, ContentTestimonial, FieldFlags } from "@/lib/content/types";
+import type {
+  ContentColor,
+  ContentImage,
+  ContentService,
+  ContentTestimonial,
+  ContentStat,
+  ContentFaq,
+  ContentDifferentiator,
+  ContentProcessStep,
+  FieldFlags,
+} from "@/lib/content/types";
 
 const CARD_CLASS = "rounded-lg border border-neutral-800 bg-neutral-950 px-4 py-4";
 const LABEL_CLASS = "mb-1 flex items-center gap-2 text-sm font-medium text-neutral-300";
@@ -42,6 +52,21 @@ function ImageCard({ clientId, img }: { clientId: string; img: ImageWithUrl }) {
         <span className="capitalize">{img.role.replace("-", " ")}</span>
         <ConfidenceBadge flagged={img.flagged} flagReason={img.flagReason} />
       </div>
+      {/* AI-classified from alt/surrounding text only, not vision (see
+          lib/content/structure-and-rewrite.ts) — display-only for now, no template reads
+          this yet. "unknown" is the common, correct answer, so it renders quietly rather
+          than as a warning. */}
+      {(img.caption || (img.subject && img.subject !== "unknown")) && (
+        <div className="space-y-0.5 text-xs">
+          {img.caption && <p className="text-neutral-400">&ldquo;{img.caption}&rdquo;</p>}
+          {img.subject && img.subject !== "unknown" && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-neutral-700 px-2 py-0.5 text-neutral-500">
+              {img.subject}
+              {img.suitableAsHero ? " · hero-suitable" : ""}
+            </span>
+          )}
+        </div>
+      )}
       <div className="flex items-center justify-between gap-2">
         <form action={removeContentImage.bind(null, clientId, img.assetId)}>
           <button type="submit" className="text-xs text-neutral-500 hover:text-red-400">
@@ -91,6 +116,10 @@ type ContentReviewFormProps = {
   contactAddress: string | null;
   services: ContentService[];
   testimonials: ContentTestimonial[];
+  stats: ContentStat[];
+  faqs: ContentFaq[];
+  differentiators: ContentDifferentiator[];
+  process: ContentProcessStep[];
   brandColors: ContentColor[];
   images: ImageWithUrl[];
   fieldFlags: FieldFlags;
@@ -106,6 +135,10 @@ export function ContentReviewForm({
   contactAddress,
   services,
   testimonials,
+  stats,
+  faqs,
+  differentiators,
+  process,
   brandColors,
   images,
   fieldFlags,
@@ -114,6 +147,12 @@ export function ContentReviewForm({
   const [testimonialRows, setTestimonialRows] = useState(
     testimonials.map((t, i) => ({ ...t, key: `t-${i}` }))
   );
+  const [statRows, setStatRows] = useState(stats.map((s, i) => ({ ...s, key: `st-${i}` })));
+  const [faqRows, setFaqRows] = useState(faqs.map((f, i) => ({ ...f, key: `f-${i}` })));
+  const [differentiatorRows, setDifferentiatorRows] = useState(
+    differentiators.map((d, i) => ({ ...d, key: `d-${i}` }))
+  );
+  const [processRows, setProcessRows] = useState(process.map((p, i) => ({ ...p, key: `p-${i}` })));
 
   const colorByRole = (role: ContentColor["role"]) => brandColors.find((c) => c.role === role);
   const mainImages = images.filter((img) => img.role !== "partner-logo");
@@ -194,6 +233,136 @@ export function ContentReviewForm({
           </div>
         </section>
 
+        {/* Stats first among the new sections — a wrong number in a prospect-facing
+            mockup costs more credibility than any other extraction here, so it gets
+            reviewed before anything else new. No auto-clear-on-edit exemption: like every
+            other field, a human editing a row unflags it — the AI-side "always flagged"
+            default (structure-and-rewrite.ts) only applies before a human has looked. */}
+        <section className={CARD_CLASS}>
+          <h3 className="mb-3 text-xs font-medium uppercase tracking-wide text-neutral-500">Stats</h3>
+          <div className="space-y-3">
+            {statRows.map((row) => (
+              <div key={row.key} className="flex gap-2">
+                <input type="hidden" name="statId" value={row.id} />
+                <div className="flex flex-1 gap-2">
+                  <input name="statValue" defaultValue={row.value} placeholder="25+" className={`${INPUT_CLASS} max-w-[8rem]`} />
+                  <input name="statLabel" defaultValue={row.label} placeholder="Years in business" className={INPUT_CLASS} />
+                </div>
+                <div className="flex flex-col items-end gap-2">
+                  <ConfidenceBadge confidence={row.confidence} flagged={row.flagged} flagReason={row.flagReason} />
+                  <button
+                    type="button"
+                    onClick={() => setStatRows((rows) => rows.filter((r) => r.key !== row.key))}
+                    className="text-xs text-neutral-500 hover:text-red-400"
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={() =>
+                setStatRows((rows) => [
+                  ...rows,
+                  { id: "", value: "", label: "", confidence: "high", flagged: false, key: `st-new-${rows.length}-${Date.now()}` },
+                ])
+              }
+              className="rounded-lg border border-dashed border-neutral-700 px-4 py-2 text-sm text-neutral-400 transition hover:border-neutral-500 hover:text-neutral-200"
+            >
+              + Add stat
+            </button>
+          </div>
+        </section>
+
+        <section className={CARD_CLASS}>
+          <h3 className="mb-3 text-xs font-medium uppercase tracking-wide text-neutral-500">Differentiators</h3>
+          <p className="mb-3 text-xs text-neutral-500">&quot;Why choose us&quot; points — distinct from services.</p>
+          <div className="space-y-3">
+            {differentiatorRows.map((row) => (
+              <div key={row.key} className="flex gap-2">
+                <input type="hidden" name="differentiatorId" value={row.id} />
+                <div className="flex-1 space-y-2">
+                  <input name="differentiatorTitle" defaultValue={row.title} placeholder="Title" className={INPUT_CLASS} />
+                  <textarea
+                    name="differentiatorDescription"
+                    defaultValue={row.description}
+                    placeholder="Description"
+                    rows={2}
+                    className={INPUT_CLASS}
+                  />
+                </div>
+                <div className="flex flex-col items-end gap-2">
+                  <ConfidenceBadge confidence={row.confidence} flagged={row.flagged} flagReason={row.flagReason} />
+                  <button
+                    type="button"
+                    onClick={() => setDifferentiatorRows((rows) => rows.filter((r) => r.key !== row.key))}
+                    className="text-xs text-neutral-500 hover:text-red-400"
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={() =>
+                setDifferentiatorRows((rows) => [
+                  ...rows,
+                  { id: "", title: "", description: "", confidence: "high", flagged: false, key: `d-new-${rows.length}-${Date.now()}` },
+                ])
+              }
+              className="rounded-lg border border-dashed border-neutral-700 px-4 py-2 text-sm text-neutral-400 transition hover:border-neutral-500 hover:text-neutral-200"
+            >
+              + Add differentiator
+            </button>
+          </div>
+        </section>
+
+        <section className={CARD_CLASS}>
+          <h3 className="mb-3 text-xs font-medium uppercase tracking-wide text-neutral-500">Process</h3>
+          <p className="mb-3 text-xs text-neutral-500">&quot;How it works&quot; steps. Not every site has these — empty is normal.</p>
+          <div className="space-y-3">
+            {processRows.map((row) => (
+              <div key={row.key} className="flex gap-2">
+                <input type="hidden" name="processId" value={row.id} />
+                <div className="flex-1 space-y-2">
+                  <input name="processTitle" defaultValue={row.title} placeholder="Step title" className={INPUT_CLASS} />
+                  <textarea
+                    name="processDescription"
+                    defaultValue={row.description}
+                    placeholder="Description"
+                    rows={2}
+                    className={INPUT_CLASS}
+                  />
+                </div>
+                <div className="flex flex-col items-end gap-2">
+                  <ConfidenceBadge confidence={row.confidence} flagged={row.flagged} flagReason={row.flagReason} />
+                  <button
+                    type="button"
+                    onClick={() => setProcessRows((rows) => rows.filter((r) => r.key !== row.key))}
+                    className="text-xs text-neutral-500 hover:text-red-400"
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={() =>
+                setProcessRows((rows) => [
+                  ...rows,
+                  { id: "", title: "", description: "", confidence: "high", flagged: false, key: `p-new-${rows.length}-${Date.now()}` },
+                ])
+              }
+              className="rounded-lg border border-dashed border-neutral-700 px-4 py-2 text-sm text-neutral-400 transition hover:border-neutral-500 hover:text-neutral-200"
+            >
+              + Add step
+            </button>
+          </div>
+        </section>
+
         <section className={CARD_CLASS}>
           <h3 className="mb-3 text-xs font-medium uppercase tracking-wide text-neutral-500">Testimonials</h3>
           <div className="space-y-3">
@@ -236,6 +405,49 @@ export function ContentReviewForm({
               className="rounded-lg border border-dashed border-neutral-700 px-4 py-2 text-sm text-neutral-400 transition hover:border-neutral-500 hover:text-neutral-200"
             >
               + Add testimonial
+            </button>
+          </div>
+        </section>
+
+        <section className={CARD_CLASS}>
+          <h3 className="mb-3 text-xs font-medium uppercase tracking-wide text-neutral-500">FAQs</h3>
+          <div className="space-y-3">
+            {faqRows.map((row) => (
+              <div key={row.key} className="flex gap-2">
+                <input type="hidden" name="faqId" value={row.id} />
+                <div className="flex-1 space-y-2">
+                  <input name="faqQuestion" defaultValue={row.question} placeholder="Question" className={INPUT_CLASS} />
+                  <textarea
+                    name="faqAnswer"
+                    defaultValue={row.answer}
+                    placeholder="Answer"
+                    rows={2}
+                    className={INPUT_CLASS}
+                  />
+                </div>
+                <div className="flex flex-col items-end gap-2">
+                  <ConfidenceBadge confidence={row.confidence} flagged={row.flagged} flagReason={row.flagReason} />
+                  <button
+                    type="button"
+                    onClick={() => setFaqRows((rows) => rows.filter((r) => r.key !== row.key))}
+                    className="text-xs text-neutral-500 hover:text-red-400"
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={() =>
+                setFaqRows((rows) => [
+                  ...rows,
+                  { id: "", question: "", answer: "", confidence: "high", flagged: false, key: `f-new-${rows.length}-${Date.now()}` },
+                ])
+              }
+              className="rounded-lg border border-dashed border-neutral-700 px-4 py-2 text-sm text-neutral-400 transition hover:border-neutral-500 hover:text-neutral-200"
+            >
+              + Add FAQ
             </button>
           </div>
         </section>

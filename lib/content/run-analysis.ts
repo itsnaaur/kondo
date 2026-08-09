@@ -9,6 +9,7 @@ import { selectHeroAssetId } from "./select-hero-image";
 import { extractContactDetails } from "./contact-extraction";
 import { structureAndRewriteContent } from "./structure-and-rewrite";
 import { selectRelevantPages } from "./select-relevant-pages";
+import { isJunkBySize } from "./filter-junk-images";
 import type { ConfidenceLevel, ContentImage, FieldFlag, FieldFlags } from "./types";
 import type { Prisma } from "@/app/generated/prisma/client";
 
@@ -54,7 +55,15 @@ export async function runAnalysisInBackground(clientId: string, siteUrl: string)
       ...(logo ? [{ assetId: logo.asset.id, role: "logo" as const, buffer: logo.buffer }] : []),
       ...candidates.map((c) => ({ assetId: c.asset.id, role: "gallery" as ContentImage["role"], buffer: c.buffer })),
     ];
-    const flaggedImages = await flagLowQualityImages(imageInputs);
+    const flaggedImagesRaw = await flagLowQualityImages(imageInputs);
+
+    // Deterministic junk filter, size-based half — the URL/alt-text half already ran at
+    // download time (lib/crawl/download-images.ts), before any upload. This half catches
+    // whatever slipped past that (a tiny icon with an innocuous filename/alt) now that real
+    // dimensions are known. Never applied to the logo — a small square logo is normal.
+    const flaggedImages = flaggedImagesRaw.filter(
+      (img) => img.role !== "gallery" || !isJunkBySize(img.widthPx, img.heightPx)
+    );
 
     const fromHomepageByAssetId = new Map(candidates.map((c) => [c.asset.id, c.fromHomepage]));
     const heroAssetId = selectHeroAssetId(
@@ -81,9 +90,30 @@ export async function runAnalysisInBackground(clientId: string, siteUrl: string)
     const combinedText = pages.map((p) => p.text).join("\n");
     const contact = extractContactDetails(allLinks, combinedText, siteUrl);
 
+    // Only gallery/hero images get offered for AI captioning — partner logos are trust-
+    // strip marks, not content photos, and classifyPartnerLogos has already pulled them
+    // out of this pool above.
+    const imageCandidatesForAi = contentImages
+      .filter((img) => img.role === "gallery" || img.role === "hero")
+      .map((img) => ({ assetId: img.assetId, nearbyText: nearbyTextByAssetId.get(img.assetId) ?? "" }));
+
     const structured = await structureAndRewriteContent(
-      selectedPages.map((p) => ({ url: p.url, title: p.title, text: p.text }))
+      selectedPages.map((p) => ({ url: p.url, title: p.title, text: p.text })),
+      imageCandidatesForAi
     );
+
+    const imageClassificationByAssetId = new Map(structured.images.map((i) => [i.assetId, i]));
+    const contentImagesWithCaptions: ContentImage[] = contentImages.map((img) => {
+      const classification = imageClassificationByAssetId.get(img.assetId);
+      if (!classification) return img;
+      return {
+        ...img,
+        caption: classification.caption ?? undefined,
+        subject: classification.subject,
+        suitableAsHero: classification.suitableAsHero,
+        subjectConfidence: classification.confidence,
+      };
+    });
 
     const fieldFlags: FieldFlags = {};
     const businessNameFlag = flagFor(structured.businessNameConfidence, "AI-extracted from crawled site text");
@@ -99,6 +129,10 @@ export async function runAnalysisInBackground(clientId: string, siteUrl: string)
 
     const services = structured.services.map((s) => ({ ...s, id: randomUUID() }));
     const testimonials = structured.testimonials.map((t) => ({ ...t, id: randomUUID() }));
+    const stats = structured.stats.map((s) => ({ ...s, id: randomUUID() }));
+    const faqs = structured.faqs.map((f) => ({ ...f, id: randomUUID() }));
+    const differentiators = structured.differentiators.map((d) => ({ ...d, id: randomUUID() }));
+    const process = structured.process.map((p) => ({ ...p, id: randomUUID() }));
 
     await prisma.contentRecord.upsert({
       where: { clientId },
@@ -109,8 +143,12 @@ export async function runAnalysisInBackground(clientId: string, siteUrl: string)
         aboutCopy: structured.aboutCopy,
         services: services as unknown as Prisma.InputJsonValue,
         testimonials: testimonials as unknown as Prisma.InputJsonValue,
+        stats: stats as unknown as Prisma.InputJsonValue,
+        faqs: faqs as unknown as Prisma.InputJsonValue,
+        differentiators: differentiators as unknown as Prisma.InputJsonValue,
+        process: process as unknown as Prisma.InputJsonValue,
         brandColors: brandColors as unknown as Prisma.InputJsonValue,
-        images: contentImages as unknown as Prisma.InputJsonValue,
+        images: contentImagesWithCaptions as unknown as Prisma.InputJsonValue,
         contactEmail: contact.email,
         contactPhone: contact.phone,
         contactAddress: structured.contactAddress,
@@ -129,8 +167,12 @@ export async function runAnalysisInBackground(clientId: string, siteUrl: string)
         aboutCopy: structured.aboutCopy,
         services: services as unknown as Prisma.InputJsonValue,
         testimonials: testimonials as unknown as Prisma.InputJsonValue,
+        stats: stats as unknown as Prisma.InputJsonValue,
+        faqs: faqs as unknown as Prisma.InputJsonValue,
+        differentiators: differentiators as unknown as Prisma.InputJsonValue,
+        process: process as unknown as Prisma.InputJsonValue,
         brandColors: brandColors as unknown as Prisma.InputJsonValue,
-        images: contentImages as unknown as Prisma.InputJsonValue,
+        images: contentImagesWithCaptions as unknown as Prisma.InputJsonValue,
         contactEmail: contact.email,
         contactPhone: contact.phone,
         contactAddress: structured.contactAddress,

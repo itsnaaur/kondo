@@ -20,6 +20,10 @@ import type {
   ContentImage,
   ContentService,
   ContentTestimonial,
+  ContentStat,
+  ContentFaq,
+  ContentDifferentiator,
+  ContentProcessStep,
   FieldFlags,
 } from "@/lib/content/types";
 
@@ -96,6 +100,122 @@ function rebuildTestimonials(formData: FormData, existing: ContentTestimonial[])
   return result;
 }
 
+function rebuildStats(formData: FormData, existing: ContentStat[]): ContentStat[] {
+  const ids = formData.getAll("statId").map(String);
+  const values = formData.getAll("statValue").map(String);
+  const labels = formData.getAll("statLabel").map(String);
+  const existingById = new Map(existing.map((s) => [s.id, s]));
+
+  const result: ContentStat[] = [];
+  for (let i = 0; i < values.length; i++) {
+    const value = shortTextSchema.safeParse(values[i]).success ? shortTextSchema.parse(values[i]) : "";
+    const label = shortTextSchema.safeParse(labels[i] ?? "").success ? shortTextSchema.parse(labels[i] ?? "") : "";
+    if (!value && !label) continue;
+
+    const id = ids[i] || randomUUID();
+    const prior = existingById.get(id);
+    const changed = !prior || prior.value !== value || prior.label !== label;
+
+    result.push({
+      id,
+      value,
+      label,
+      confidence: changed ? "high" : prior.confidence,
+      flagged: changed ? false : prior.flagged,
+      ...(changed ? {} : { flagReason: prior.flagReason }),
+    });
+  }
+  return result;
+}
+
+function rebuildFaqs(formData: FormData, existing: ContentFaq[]): ContentFaq[] {
+  const ids = formData.getAll("faqId").map(String);
+  const questions = formData.getAll("faqQuestion").map(String);
+  const answers = formData.getAll("faqAnswer").map(String);
+  const existingById = new Map(existing.map((f) => [f.id, f]));
+
+  const result: ContentFaq[] = [];
+  for (let i = 0; i < questions.length; i++) {
+    const question = shortTextSchema.safeParse(questions[i]).success ? shortTextSchema.parse(questions[i]) : "";
+    const answer = mediumTextSchema.safeParse(answers[i] ?? "").success ? mediumTextSchema.parse(answers[i] ?? "") : "";
+    if (!question && !answer) continue;
+
+    const id = ids[i] || randomUUID();
+    const prior = existingById.get(id);
+    const changed = !prior || prior.question !== question || prior.answer !== answer;
+
+    result.push({
+      id,
+      question,
+      answer,
+      confidence: changed ? "high" : prior.confidence,
+      flagged: changed ? false : prior.flagged,
+      ...(changed ? {} : { flagReason: prior.flagReason }),
+    });
+  }
+  return result;
+}
+
+function rebuildDifferentiators(formData: FormData, existing: ContentDifferentiator[]): ContentDifferentiator[] {
+  const ids = formData.getAll("differentiatorId").map(String);
+  const titles = formData.getAll("differentiatorTitle").map(String);
+  const descriptions = formData.getAll("differentiatorDescription").map(String);
+  const existingById = new Map(existing.map((d) => [d.id, d]));
+
+  const result: ContentDifferentiator[] = [];
+  for (let i = 0; i < titles.length; i++) {
+    const title = shortTextSchema.safeParse(titles[i]).success ? shortTextSchema.parse(titles[i]) : "";
+    const description = mediumTextSchema.safeParse(descriptions[i] ?? "").success
+      ? mediumTextSchema.parse(descriptions[i] ?? "")
+      : "";
+    if (!title && !description) continue;
+
+    const id = ids[i] || randomUUID();
+    const prior = existingById.get(id);
+    const changed = !prior || prior.title !== title || prior.description !== description;
+
+    result.push({
+      id,
+      title,
+      description,
+      confidence: changed ? "high" : prior.confidence,
+      flagged: changed ? false : prior.flagged,
+      ...(changed ? {} : { flagReason: prior.flagReason }),
+    });
+  }
+  return result;
+}
+
+function rebuildProcess(formData: FormData, existing: ContentProcessStep[]): ContentProcessStep[] {
+  const ids = formData.getAll("processId").map(String);
+  const titles = formData.getAll("processTitle").map(String);
+  const descriptions = formData.getAll("processDescription").map(String);
+  const existingById = new Map(existing.map((p) => [p.id, p]));
+
+  const result: ContentProcessStep[] = [];
+  for (let i = 0; i < titles.length; i++) {
+    const title = shortTextSchema.safeParse(titles[i]).success ? shortTextSchema.parse(titles[i]) : "";
+    const description = mediumTextSchema.safeParse(descriptions[i] ?? "").success
+      ? mediumTextSchema.parse(descriptions[i] ?? "")
+      : "";
+    if (!title && !description) continue;
+
+    const id = ids[i] || randomUUID();
+    const prior = existingById.get(id);
+    const changed = !prior || prior.title !== title || prior.description !== description;
+
+    result.push({
+      id,
+      title,
+      description,
+      confidence: changed ? "high" : prior.confidence,
+      flagged: changed ? false : prior.flagged,
+      ...(changed ? {} : { flagReason: prior.flagReason }),
+    });
+  }
+  return result;
+}
+
 function rebuildColors(formData: FormData, existing: ContentColor[]): ContentColor[] {
   const roles: ContentColor["role"][] = ["primary", "secondary", "accent"];
   const result: ContentColor[] = [];
@@ -125,6 +245,10 @@ async function applyContentUpdate(clientId: string, formData: FormData) {
 
   const existingServices = (record.services as unknown as ContentService[] | null) ?? [];
   const existingTestimonials = (record.testimonials as unknown as ContentTestimonial[] | null) ?? [];
+  const existingStats = (record.stats as unknown as ContentStat[] | null) ?? [];
+  const existingFaqs = (record.faqs as unknown as ContentFaq[] | null) ?? [];
+  const existingDifferentiators = (record.differentiators as unknown as ContentDifferentiator[] | null) ?? [];
+  const existingProcess = (record.process as unknown as ContentProcessStep[] | null) ?? [];
   const existingColors = (record.brandColors as unknown as ContentColor[] | null) ?? [];
   const existingFlags = (record.fieldFlags as unknown as FieldFlags | null) ?? {};
 
@@ -148,6 +272,10 @@ async function applyContentUpdate(clientId: string, formData: FormData) {
 
   const services = rebuildServices(formData, existingServices);
   const testimonials = rebuildTestimonials(formData, existingTestimonials);
+  const stats = rebuildStats(formData, existingStats);
+  const faqs = rebuildFaqs(formData, existingFaqs);
+  const differentiators = rebuildDifferentiators(formData, existingDifferentiators);
+  const process = rebuildProcess(formData, existingProcess);
   const brandColors = rebuildColors(formData, existingColors);
 
   // Images aren't edited as text here — removal and the flagged-image replacement
@@ -165,6 +293,10 @@ async function applyContentUpdate(clientId: string, formData: FormData) {
       contactAddress,
       services: services as unknown as Prisma.InputJsonValue,
       testimonials: testimonials as unknown as Prisma.InputJsonValue,
+      stats: stats as unknown as Prisma.InputJsonValue,
+      faqs: faqs as unknown as Prisma.InputJsonValue,
+      differentiators: differentiators as unknown as Prisma.InputJsonValue,
+      process: process as unknown as Prisma.InputJsonValue,
       brandColors: brandColors as unknown as Prisma.InputJsonValue,
       fieldFlags: fieldFlags as unknown as Prisma.InputJsonValue,
     },

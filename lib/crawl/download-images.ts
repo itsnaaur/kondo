@@ -3,6 +3,7 @@ import { uploadAssetToStorage } from "@/lib/storage/upload-asset";
 import { AssetType, type Asset } from "@/app/generated/prisma/client";
 import type { PageExtraction } from "./types";
 import { checkUrlIsSafe } from "@/lib/security/ssrf";
+import { isJunkByUrlOrText } from "@/lib/content/filter-junk-images";
 
 type AssetTypeValue = (typeof AssetType)[keyof typeof AssetType];
 
@@ -172,6 +173,9 @@ export async function downloadCrawlImages(
     for (const img of page.images) {
       if (img.src.startsWith("data:") || seen.has(img.src)) continue;
       seen.add(img.src);
+      // Rejected before download — a cookie-consent icon or tracking pixel costs a wasted
+      // Supabase upload if this check runs after, not before. See filter-junk-images.ts.
+      if (isJunkByUrlOrText(img.src, img.nearbyText)) continue;
       orderedCandidateUrls.push({
         url: img.src,
         fromHomepage: page.url === homepageUrl,
