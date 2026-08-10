@@ -55,6 +55,27 @@ function hsl(h: number, s: number, l: number): string {
   return `hsl(${Math.round(h)} ${Math.round(s)}% ${Math.round(l)}%)`;
 }
 
+/** WCAG relative luminance, from HSL. */
+function luminance(h: number, s: number, l: number): number {
+  const S = s / 100, L = l / 100;
+  const c = (1 - Math.abs(2 * L - 1)) * S;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = L - c / 2;
+  const [r1, g1, b1] =
+    h < 60 ? [c, x, 0] : h < 120 ? [x, c, 0] : h < 180 ? [0, c, x]
+    : h < 240 ? [0, x, c] : h < 300 ? [x, 0, c] : [c, 0, x];
+  const lin = (v: number) => {
+    const n = v + m;
+    return n <= 0.03928 ? n / 12.92 : Math.pow((n + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * lin(r1) + 0.7152 * lin(g1) + 0.0722 * lin(b1);
+}
+
+function contrast(a: number, b: number): number {
+  const [hi, lo] = a > b ? [a, b] : [b, a];
+  return (hi + 0.05) / (lo + 0.05);
+}
+
 /**
  * Pick the most usable hue from the extracted colours.
  * A colour is usable if it carries real chroma and isn't nearly black or white.
@@ -84,12 +105,25 @@ export function buildPalette(brandColors: { hex: string }[]): Palette {
   // Yellows and yellow-greens read as low-contrast at mid lightness, so they
   // get pulled darker. Everything else sits in a consistent band.
   const isYellowish = hue >= 45 && hue <= 95;
-  const accentL = isYellowish ? 32 : 41;
+  let accentL = isYellowish ? 32 : 41;
   const accentS = isYellowish ? 62 : 58;
+  const darkInk = hsl(hue, 24, 12);
+
+  // Action fills should carry white labels. High-luminance hues (greens) at L≈41
+  // fail white AA, and picking dark ink instead produces dark-on-dark buttons —
+  // deepen the fill until white clears, rather than flipping the text colour.
+  if (!isYellowish) {
+    while (contrast(luminance(hue, accentS, accentL), 1) < 4.5 && accentL > 24) {
+      accentL -= 2;
+    }
+  }
+
+  const onWhite = contrast(luminance(hue, accentS, accentL), 1);
+  const accentInk = onWhite >= 4.5 ? "#ffffff" : darkInk;
 
   return {
     accent: hsl(hue, accentS, accentL),
-    accentInk: "#ffffff",
+    accentInk,
     accentSoft: hsl(hue, 42, 95),
     deep: hsl(hue, 28, 9),
     deepSoft: hsl(hue, 20, 15),

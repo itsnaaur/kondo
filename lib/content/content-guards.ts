@@ -101,6 +101,10 @@ export function byOrientation(images: TemplateImage[]) {
   };
 }
 
+export function ratioOf(i: TemplateImage): number {
+  return (i.widthPx ?? 1) / (i.heightPx ?? 1);
+}
+
 /** Photos that can carry a section: real scenes, not logos or icons. */
 export function sceneImages(images: TemplateImage[]) {
   return (images || []).filter((i) => {
@@ -119,15 +123,27 @@ export function sceneImages(images: TemplateImage[]) {
  */
 export function pickHero(images: TemplateImage[], fallback: string | null): TemplateImage | null {
   const scenes = sceneImages(images);
-  const landscape = (i: TemplateImage) => (i.widthPx ?? 0) / (i.heightPx ?? 1) >= 1.25;
+  const wideEnough = (i: TemplateImage) => ratioOf(i) >= 1.25;
 
-  const flagged = scenes.filter((i) => i.suitableAsHero && landscape(i));
+  const flagged = scenes.filter((i) => i.suitableAsHero && wideEnough(i));
   if (flagged.length) return flagged.sort((a, b) => (b.widthPx ?? 0) - (a.widthPx ?? 0))[0];
 
-  const wide = scenes.filter(landscape);
+  const wide = scenes.filter(wideEnough);
   if (wide.length) return wide.sort((a, b) => (b.widthPx ?? 0) - (a.widthPx ?? 0))[0];
 
-  return fallback ? { url: fallback } : null;
+  // Deliberately no bare-URL fallback below "wide enough" scenes. Returning the crawler's
+  // hero guess with no dimensions attached let a portrait photo land in a 16:10 slot and
+  // get cropped through someone's face — the exact failure this module exists to prevent.
+  // A template with no landscape candidate renders its no-photo path instead (atlas does).
+  // The fallback URL is still consulted, but only if it turns out to be a
+  // real, sufficiently wide photo that sceneImages() excluded for some other reason (e.g.
+  // just under the 600px sceneImages width floor while still comfortably hero-sized).
+  const known = new Set(scenes.map((i) => i.url));
+  if (fallback && !known.has(fallback)) {
+    const raw = (images || []).find((i) => i.url === fallback);
+    if (raw && wideEnough(raw)) return raw;
+  }
+  return null;
 }
 
 export type Prepared = {
