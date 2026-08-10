@@ -4,13 +4,28 @@ import { prepare } from "../../content/content-guards";
 import { escapeHtml as esc } from "../escape-html";
 import { atlasStyles } from "./styles";
 
+// A punctuation split is only worth taking if the two halves are comparable. Propell's
+// tagline breaks on its em-dash into 4 words and 11 — the accent clause ran four lines
+// against a one-line head and swallowed the headline.
+function balanced(head: string, tail: string): boolean {
+  return tail.split(/\s+/).length <= head.split(/\s+/).length * 1.6;
+}
+
 function splitTagline(tagline: string): { head: string; tail: string } {
   const t = (tagline || "").trim();
   if (!t) return { head: "", tail: "" };
   const dash = t.search(/\s[—–-]\s/);
-  if (dash > 8 && dash < t.length - 8) return { head: t.slice(0, dash).trim(), tail: t.slice(dash + 3).trim() };
+  if (dash > 8 && dash < t.length - 8) {
+    const head = t.slice(0, dash).trim();
+    const tail = t.slice(dash + 3).trim();
+    if (balanced(head, tail)) return { head, tail };
+  }
   const colon = t.indexOf(": ");
-  if (colon > 8 && colon < t.length - 8) return { head: t.slice(0, colon).trim(), tail: t.slice(colon + 2).trim() };
+  if (colon > 8 && colon < t.length - 8) {
+    const head = t.slice(0, colon).trim();
+    const tail = t.slice(colon + 2).trim();
+    if (balanced(head, tail)) return { head, tail };
+  }
   const w = t.split(/\s+/);
   if (w.length < 5) return { head: t, tail: "" };
   const cut = Math.ceil(w.length * 0.58);
@@ -71,31 +86,28 @@ export function renderAtlas(c: TemplateContent): { body: string; css: string } {
   </div>
 </div></header>`;
 
-  const heroCopy = `<div class="at-hero__copy">
-    <h1 class="at-display">${esc(head)}${tail ? ` <span class="at-em">${esc(tail)}</span>` : ""}</h1>
-    ${c.aboutCopy ? `<p class="at-lede">${esc(firstSentence(c.aboutCopy))}</p>` : ""}
-    <div class="at-actions">${cta1}${cta2}</div>
-  </div>`;
-
-  const heroSection = hero
-    ? `<section class="at-hero"><div class="at-wrap at-hero__in">
-    ${heroCopy}
-    <figure class="at-hero__shot" style="margin:0"><img src="${esc(hero.url)}" alt=""${imgAttrs(hero)}>${
-      hero.caption ? `<figcaption>${esc(hero.caption)}</figcaption>` : ""
-    }</figure>
-  </div></section>`
-    : `<section class="at-hero at-hero--plain"><div class="at-hero__field"></div>
-  <div class="at-wrap at-hero__in">${heroCopy}</div></section>`;
-
-  // Stats sit directly under the hero; partner logos get their own strip lower
-  // down. Both are trust signals but they aren't interchangeable — a dental
-  // clinic's health-fund logos carry more weight than any number it publishes,
-  // so suppressing one for the other loses the stronger signal.
-  const strip = stats.length
-    ? `<section class="at-strip"><div class="at-wrap at-strip__in">
-    <dl class="at-stats">${stats.map((s) => `<div><dt>${esc(s.value)}</dt><dd>${esc(s.label)}</dd></div>`).join("")}</dl>
-  </div></section>`
+  // No hero photo. A hero image only works when someone chose it to be one — pickHero picks
+  // the widest unflagged file a crawl happened to return, which on one client was a team
+  // photo in football jerseys and on another a reception desk. Neither said anything about
+  // the business. The tagline does, so it leads, and the stat rail that used to sit alone in
+  // its own strip below now anchors the same band.
+  const statRail = stats.length
+    ? `<dl class="at-hero__stats">${stats
+        .map((st) => `<div><dt>${esc(st.value)}</dt><dd>${esc(st.label)}</dd></div>`)
+        .join("")}</dl>`
     : "";
+
+  const heroSection = `<section class="at-hero${statRail ? "" : " at-hero--bare"}">
+  <div class="at-hero__field"></div>
+  <div class="at-wrap at-hero__in">
+    <div class="at-hero__copy">
+      <h1 class="at-display">${esc(head)}${tail ? ` <span class="at-em">${esc(tail)}</span>` : ""}</h1>
+      ${c.aboutCopy ? `<p class="at-lede">${esc(firstSentence(c.aboutCopy))}</p>` : ""}
+      <div class="at-actions">${cta1}${cta2}</div>
+    </div>
+    ${statRail}
+  </div>
+</section>`;
 
   const partnerStrip = partners.length
     ? `<section class="at-strip" style="border-top:1px solid var(--line)"><div class="at-wrap at-strip__in">
@@ -147,8 +159,13 @@ export function renderAtlas(c: TemplateContent): { body: string; css: string } {
   </div></section>`
     : "";
 
-  // The right column takes team cards when captions yielded names, otherwise
-  // scene photos, otherwise nothing — and the grid collapses to one column.
+  // The right column takes team cards when captions yielded names, otherwise scene photos,
+  // otherwise nothing — and the grid collapses to one column. pickHero's choice is no longer
+  // used for an actual hero image (see heroSection above), so it rejoins the scene pool here
+  // rather than being dropped — on a client where it was the only decent photo, that's the
+  // difference between it appearing somewhere on the page and not appearing at all.
+  const asidePool = hero ? [hero, ...scenes] : scenes;
+
   const aside = team.length
     ? // Every team entry is subject:"people" by construction (see content-guards.ts's
       // teamFromCaptions), so this doesn't need the imgAttrs() subject check others do.
@@ -156,8 +173,8 @@ export function renderAtlas(c: TemplateContent): { body: string; css: string } {
       <img src="${esc(t.url)}" alt="" style="object-position:center 30%">
       <figcaption><b>${esc(t.name)}</b><span>${esc(t.role)}</span></figcaption>
     </figure>`).join("")}</div>`
-    : scenes.length
-      ? `<div class="at-scenes">${scenes.slice(0, 4).map((s) => `<figure>
+    : asidePool.length
+      ? `<div class="at-scenes">${asidePool.slice(0, 4).map((s) => `<figure>
       <img src="${esc(s.url)}" alt=""${imgAttrs(s)}>${s.caption ? `<figcaption>${esc(s.caption)}</figcaption>` : ""}
     </figure>`).join("")}</div>`
       : "";
@@ -200,10 +217,34 @@ export function renderAtlas(c: TemplateContent): { body: string; css: string } {
   </div></section>`
     : "";
 
-  const cta = `<section class="at-cta" id="contact"><div class="at-wrap at-cta__in">
-  <h2 class="at-h2">Ready when you are.</h2>
-  <div class="at-actions">${cta1}${c.contactEmail ? `<a class="at-btn at-btn--ghost" href="mailto:${esc(c.contactEmail)}">Send us a message</a>` : ""}</div>
-</div></section>`;
+  // Contact details as the CTA's content, not a colour stripe with a heading and two
+  // buttons — that layout had no hierarchy and sat directly above the dark footer, ending
+  // the page on two heavy bands in a row. Every row here is an extracted field, so a client
+  // missing one simply has one fewer row rather than a placeholder. This duplicates the
+  // contact rows already in the footer, deliberately — the CTA is where a prospect decides
+  // to act and the footer is where they look afterwards, and neither reliably gets read.
+  const ctaFacts: string[] = [];
+  if (c.contactPhone)
+    ctaFacts.push(`<div><dt>Phone</dt><dd><a href="${esc(telHref(c.contactPhone))}">${esc(c.contactPhone)}</a></dd></div>`);
+  if (c.contactEmail)
+    ctaFacts.push(`<div><dt>Email</dt><dd><a href="mailto:${esc(c.contactEmail)}">${esc(c.contactEmail)}</a></dd></div>`);
+  if (c.contactAddress)
+    ctaFacts.push(`<div><dt>Where to find us</dt><dd>${esc(c.contactAddress)}</dd></div>`);
+
+  const cta = `<section class="at-cta${ctaFacts.length ? "" : " at-cta--slim"}" id="contact">
+  <div class="at-wrap at-cta__in">
+    <div>
+      <h2 class="at-h2">Ready when you are.</h2>
+      <p class="at-cta__note">No obligation and no pitch — just a conversation about what you're after.</p>
+      <div class="at-actions">${cta1}${
+        c.contactEmail
+          ? `<a class="at-btn at-btn--ghost" href="mailto:${esc(c.contactEmail)}">Send us a message</a>`
+          : ""
+      }</div>
+    </div>
+    ${ctaFacts.length ? `<dl class="at-cta__facts">${ctaFacts.join("")}</dl>` : ""}
+  </div>
+</section>`;
 
   const hasContact = Boolean(c.contactPhone || c.contactEmail || c.contactAddress);
   const foot = `<footer class="at-foot"><div class="at-wrap at-foot__in">
@@ -217,6 +258,6 @@ export function renderAtlas(c: TemplateContent): { body: string; css: string } {
 
   return {
     css: atlasStyles(p),
-    body: [nav, heroSection, strip, why, servicesSection, processSection, about, reviews, faqSection, partnerStrip, cta, foot].join("\n"),
+    body: [nav, heroSection, why, servicesSection, processSection, about, reviews, faqSection, partnerStrip, cta, foot].join("\n"),
   };
 }

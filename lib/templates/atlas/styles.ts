@@ -97,55 +97,51 @@ body.tpl-atlas {
 .at-nav__side { display: flex; align-items: center; gap: 18px; flex: none; margin-left: clamp(18px, 2.6vw, 40px); }
 .at-nav__tel { font-weight: 600; font-size: 0.94rem; text-decoration: none; }
 
-/* ---------- hero ---------- */
+/* ---------- hero ----------
+   No photograph. A hero image only works when someone chose it to be one — we
+   pick the widest unflagged file a crawl happened to return, which on one
+   client was a team photo in football jerseys and on another a reception desk.
+   Neither said anything about the business. The tagline does, so it leads, and
+   the stat rail that used to sit lonely in its own strip below now anchors the
+   same band. */
 
 .at-hero { background: var(--mist); position: relative; overflow: hidden; }
-.at-hero__in {
-  padding-block: clamp(56px, 7.5vw, 108px);
-  display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
-  gap: clamp(30px, 4.5vw, 68px);
-  align-items: center;
-}
-.at-hero__copy .at-display { max-width: min(100%, 620px); }
-.at-hero__shot { position: relative; border-radius: 3px; overflow: hidden; }
-.at-hero__shot img { width: 100%; aspect-ratio: 5 / 4; object-fit: cover; }
-.at-hero__shot figcaption {
-  position: absolute; left: 0; right: 0; bottom: 0;
-  padding: 42px 20px 16px;
-  font-size: 0.82rem; color: var(--paper);
-  background: linear-gradient(to top, rgb(0 0 0 / 0.62), transparent);
-}
-.at-hero--plain { background: var(--deep); color: var(--paper); }
-.at-hero--plain .at-hero__in { grid-template-columns: minmax(0, 1fr); }
-.at-hero--plain .at-lede { color: rgb(255 255 255 / 0.66); }
-.at-hero--plain .at-em { color: var(--paper); opacity: 0.9; }
-.at-hero--plain .at-btn--ghost { color: var(--paper); }
-.at-hero--plain .at-btn--ghost:hover { background: var(--paper); color: var(--deep); border-color: var(--paper); }
+.at-hero__in { padding-block: clamp(58px, 7.5vw, 104px) 0; position: relative; z-index: 1; }
+.at-hero__copy { max-width: min(100%, 940px); }
+.at-hero .at-display { max-width: min(100%, 880px); }
+.at-hero .at-lede { max-width: min(100%, 620px); }
 .at-hero__field {
   position: absolute; inset: 0; pointer-events: none;
   background:
-    radial-gradient(110% 85% at 88% 14%, color-mix(in srgb, var(--accent) 52%, transparent) 0%, transparent 60%),
-    radial-gradient(75% 65% at 96% 95%, color-mix(in srgb, var(--accent) 30%, transparent) 0%, transparent 64%);
+    radial-gradient(58% 62% at 88% 6%, color-mix(in srgb, var(--accent) 22%, transparent) 0%, transparent 64%),
+    radial-gradient(44% 50% at 4% 92%, color-mix(in srgb, var(--accent) 13%, transparent) 0%, transparent 68%);
 }
+
+/* Stat rail anchored to the base of the hero band. Oversized numerals on the
+   bare ground — no cards, hairline dividers only. */
+.at-hero__stats {
+  margin-top: clamp(44px, 5.5vw, 78px);
+  border-top: 1px solid var(--line);
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
+}
+.at-hero__stats > div { padding: clamp(24px, 3vw, 38px) clamp(14px, 1.8vw, 26px) clamp(28px, 3.4vw, 44px); position: relative; }
+.at-hero__stats > div:first-child { padding-left: 0; }
+.at-hero__stats > div + div::before {
+  content: ""; position: absolute; left: 0; top: 22%; bottom: 26%; width: 1px; background: var(--line);
+}
+.at-hero__stats dt {
+  font-size: clamp(2rem, 4vw, 3rem); font-weight: 600;
+  letter-spacing: -0.042em; line-height: 0.96; color: var(--accent);
+}
+.at-hero__stats dd { margin: 12px 0 0; font-size: 0.87rem; color: var(--ink-muted); line-height: 1.42; max-width: 24ch; }
+
+/* No stats — the band simply ends after the buttons. */
+.at-hero--bare .at-hero__in { padding-bottom: clamp(58px, 7.5vw, 104px); }
 
 /* ---------- stat / partner strip ---------- */
 
 .at-strip { border-bottom: 1px solid var(--line); background: var(--paper); }
 .at-strip__in { padding-block: clamp(30px, 3.6vw, 46px); }
-.at-stats {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
-  gap: clamp(20px, 3vw, 44px);
-}
-.at-stats div { text-align: left; }
-.at-stats dt {
-  font-size: clamp(1.9rem, 3.4vw, 2.7rem); font-weight: 600;
-  letter-spacing: -0.035em; line-height: 1; color: var(--accent);
-}
-.at-stats dd {
-  margin: 9px 0 0; font-size: 0.87rem; color: var(--ink-muted);
-  line-height: 1.4; letter-spacing: 0.005em;
-}
 .at-partners { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: clamp(24px, 5vw, 56px); }
 .at-partners img { max-height: 34px; width: auto; filter: grayscale(1); opacity: 0.6; }
 .at-strip__label {
@@ -297,18 +293,43 @@ body.tpl-atlas {
 .at-faq details[open] summary::after { transform: rotate(-135deg); margin-top: -2px; }
 .at-faq details p { margin: 0 0 24px; color: var(--ink-muted); font-size: 0.97rem; line-height: 1.62; max-width: 70ch; }
 
-/* ---------- cta + footer ---------- */
+/* ---------- cta + footer ----------
+   The CTA carries the contact details rather than a heading and two buttons on
+   a colour stripe. Everything in it comes from extracted fields, so the band
+   ends up being the section a prospect actually needs instead of decoration
+   before the footer. */
 
 .at-cta { background: var(--accent); color: var(--accent-ink); }
 .at-cta__in {
-  padding-block: clamp(50px, 7vw, 90px);
-  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 26px;
+  padding-block: clamp(50px, 6.5vw, 88px);
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 0.92fr);
+  gap: clamp(30px, 4.5vw, 64px); align-items: start;
 }
-.at-cta .at-h2 { max-width: 18ch; }
+.at-cta .at-h2 { max-width: 15ch; }
+.at-cta__note { margin: 16px 0 0; max-width: 42ch; opacity: 0.82; font-size: 0.96rem; line-height: 1.58; }
+.at-cta .at-actions { margin-top: 26px; }
 .at-cta .at-btn--solid { background: var(--paper); color: var(--ink); }
 .at-cta .at-btn--ghost { color: currentColor; }
 .at-cta .at-btn--ghost:hover { background: var(--accent-ink); color: var(--accent); border-color: var(--accent-ink); }
-.at-cta .at-actions { margin-top: 0; }
+
+/* Contact facts, ruled rather than boxed — the accent ground is already doing
+   enough work without cards on top of it. */
+.at-cta__facts { margin: 0; }
+.at-cta__facts > div {
+  display: grid; grid-template-columns: 82px minmax(0, 1fr); gap: 16px;
+  padding: 14px 0; border-top: 1px solid color-mix(in srgb, var(--accent-ink) 26%, transparent);
+}
+.at-cta__facts > div:last-child {
+  border-bottom: 1px solid color-mix(in srgb, var(--accent-ink) 26%, transparent);
+}
+.at-cta__facts dt { font-size: 0.78rem; opacity: 0.66; letter-spacing: 0.04em; padding-top: 2px; }
+.at-cta__facts dd { margin: 0; font-size: 0.95rem; font-weight: 500; line-height: 1.5; }
+.at-cta__facts a { text-decoration: none; }
+.at-cta__facts a:hover { text-decoration: underline; }
+
+/* Only a heading and buttons survive — centre it rather than leaving a hole
+   where the facts column would have been. */
+.at-cta--slim .at-cta__in { grid-template-columns: minmax(0, 1fr); justify-items: start; }
 
 .at-foot { background: var(--deep); color: rgb(255 255 255 / 0.72); }
 .at-foot__in {
@@ -331,8 +352,6 @@ body.tpl-atlas {
   .at-says__grid { columns: 2; }
 }
 @media (max-width: 860px) {
-  .at-hero__in { grid-template-columns: minmax(0, 1fr); }
-  .at-hero__shot { order: -1; }
   .at-about__grid { grid-template-columns: minmax(0, 1fr); }
   .at-svc__index { columns: 1; }
   .at-says__grid { columns: 1; }
@@ -340,10 +359,13 @@ body.tpl-atlas {
   .at-proc__step p { grid-column: 2; }
   .at-nav__tel { display: none; }
 }
+@media (max-width: 860px) {
+  .at-cta__in { grid-template-columns: minmax(0, 1fr); gap: 30px; }
+}
 @media (max-width: 520px) {
   body.tpl-atlas { font-size: 16px; }
   .at-actions .at-btn { flex: 1 1 auto; justify-content: center; }
-  .at-cta__in { flex-direction: column; align-items: flex-start; }
+  .at-cta__facts > div { grid-template-columns: minmax(0, 1fr); gap: 4px; }
 }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
