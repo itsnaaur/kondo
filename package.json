@@ -11,7 +11,8 @@
     "start": "next start",
     "lint": "eslint",
     "worker": "tsx --env-file=.env scripts/worker.ts",
-    "worker:prod": "tsx scripts/worker.ts"
+    "worker:prod": "tsx scripts/worker.ts",
+    "check-extraction": "tsx --env-file=.env scripts/check-extraction.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.113.0",
