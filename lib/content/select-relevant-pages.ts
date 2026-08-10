@@ -111,6 +111,31 @@ function keywordScore(page: PageExtraction): number {
   return score;
 }
 
+// The same content reachable at two different paths (confirmed live: one client's case-study
+// section existed at both "/x-case-study/" and "/case-studies/x-case-study/" for every entry —
+// 94 pages, 47 exact-duplicate pairs, 332k chars of pure duplication) wastes selection budget
+// twice over and inflates that page's category score in aggregate with no signal gained.
+// Anchors are unconditional (see below), so an unlucky client shaped like this could see its
+// "40k budget" balloon past 200k on duplicate text alone before the budget check ever runs.
+// Keeps the first-seen URL per distinct text block. pages[0] (the homepage) is always first in
+// crawl order, so it can never be dropped as a "later duplicate" of itself.
+function dedupeByContent(pages: PageExtraction[]): PageExtraction[] {
+  const seen = new Set<string>();
+  const out: PageExtraction[] = [];
+  for (const page of pages) {
+    const text = page.text.trim();
+    // Below this length, treating two short pages (e.g. a bare "Coming soon") as duplicates
+    // risks discarding a real distinct page that just happens to be thin, for no real budget
+    // savings — the whole point is filtering out the big, wasteful chunks.
+    if (text.length > 200) {
+      if (seen.has(text)) continue;
+      seen.add(text);
+    }
+    out.push(page);
+  }
+  return out;
+}
+
 // pages[0] is always the homepage — crawlClientSite (lib/crawl/crawler.ts) seeds its BFS
 // queue with the start URL before anything else is discovered, so nothing else can ever
 // be visited first.
@@ -120,7 +145,8 @@ export function selectRelevantPages(
 ): PageExtraction[] {
   if (pages.length === 0) return [];
 
-  const [homepage, ...rest] = pages;
+  const deduped = dedupeByContent(pages);
+  const [homepage, ...rest] = deduped;
   const keywordScored = rest.map((page) => ({ page, score: keywordScore(page) }));
 
   // Anchors — homepage plus every page that reads as a category hub by name — are

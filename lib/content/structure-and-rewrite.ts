@@ -11,9 +11,21 @@ import type {
   ConfidenceLevel,
   ImageSubject,
 } from "./types";
+import { ANALYSIS_CHAR_BUDGET } from "./select-relevant-pages";
 
 const TOOL_NAME = "structure_site_content";
 const MAX_ATTEMPTS = 3;
+// Raised from 8192 after adding serviceAreas/hours/offers/credentials on top of an already
+// large schema (services/testimonials/stats/faqs/differentiators/process) — Princeton alone
+// now returns 16 full-length service descriptions, and a bigger client with offers and
+// credentials too has real headroom to hit the old ceiling. A truncated tool response fails
+// validateShape and burns a retry, same failure class as the omitted-empty-key issue this
+// schema already worked around once.
+const MAX_OUTPUT_TOKENS = 16_000;
+// Not a hard cutoff — just a signal to watch for once real clients start exercising the
+// bigger schema, so a truncation risk shows up in logs before it shows up as a client
+// stuck on ANALYSIS_FAILED.
+const NEAR_LIMIT_WARN_THRESHOLD = 0.9;
 
 const CONFIDENCE_ENUM = ["low", "medium", "high"] as const;
 const IMAGE_SUBJECT_ENUM = ["people", "place", "work", "product", "abstract", "unknown"] as const;
@@ -86,28 +98,6 @@ const STRUCTURE_TOOL_BASE_PROPERTIES: ToolProperties = {
   },
   contactAddress: { type: ["string", "null"], description: "Street address if present anywhere in the crawled text, else null. Do not guess." },
   contactAddressConfidence: { type: "string", enum: CONFIDENCE_ENUM },
-  services: {
-    type: "array",
-    description:
-      "The distinct services/products offered. Rewrite descriptions to be punchy, not copy-pasted. " +
-      "If a service is only named in the source (e.g. a menu/nav listing) with no real description " +
-      "anywhere in the text, still write one short, genuine line inferred from the service name and " +
-      "general industry context — never leave description blank or a bare restatement of the name. " +
-      "A reviewer editing a plausible draft is a much lower bar than a reviewer writing from scratch. " +
-      "Still mark it low confidence and flagged: true with flagReason noting the description is inferred, " +
-      "not sourced, so the reviewer knows to verify it.",
-    items: {
-      type: "object",
-      required: ["name", "description", "confidence", "flagged"],
-      properties: {
-        name: { type: "string" },
-        description: { type: "string" },
-        confidence: { type: "string", enum: CONFIDENCE_ENUM },
-        flagged: { type: "boolean" },
-        flagReason: { type: "string" },
-      },
-    },
-  },
   testimonials: {
     type: "array",
     description: "Genuine customer testimonials/reviews found in the text. Do not invent any. Flag anything that might actually be a staff bio, a case study blurb, or otherwise not a real customer quote.",
@@ -193,6 +183,39 @@ const STRUCTURE_TOOL_BASE_PROPERTIES: ToolProperties = {
       },
     },
   },
+  // services deliberately comes LAST, not first. Confirmed live against Princeton Dental: with
+  // services positioned before the other array fields, a forced tool call correctly filled all 16
+  // services but returned every other array — testimonials/stats/faqs/differentiators/process —
+  // completely empty, even though the source text plainly contained stats ("25+ Years serving
+  // Kenmore families", "5 Star Google review rating") and six FAQ questions. Not a token-limit
+  // truncation (stop_reason was "tool_use", output nowhere near max_tokens) — services is simply the
+  // biggest, most effortful array to fill, and coming first it seems to exhaust whatever attention
+  // the model has left for the smaller trust-signal fields that follow. Moving services to the end
+  // fixed it completely on the same input: stats/faqs/differentiators all came back correctly
+  // populated, services stayed at 16/16. If a future schema addition reintroduces this failure mode,
+  // check field order before assuming it's a token-budget or page-selection problem.
+  services: {
+    type: "array",
+    description:
+      "The distinct services/products offered. Rewrite descriptions to be punchy, not copy-pasted. " +
+      "If a service is only named in the source (e.g. a menu/nav listing) with no real description " +
+      "anywhere in the text, still write one short, genuine line inferred from the service name and " +
+      "general industry context — never leave description blank or a bare restatement of the name. " +
+      "A reviewer editing a plausible draft is a much lower bar than a reviewer writing from scratch. " +
+      "Still mark it low confidence and flagged: true with flagReason noting the description is inferred, " +
+      "not sourced, so the reviewer knows to verify it.",
+    items: {
+      type: "object",
+      required: ["name", "description", "confidence", "flagged"],
+      properties: {
+        name: { type: "string" },
+        description: { type: "string" },
+        confidence: { type: "string", enum: CONFIDENCE_ENUM },
+        flagged: { type: "boolean" },
+        flagReason: { type: "string" },
+      },
+    },
+  },
 };
 
 function buildStructureTool(imageCandidates: ImageCandidateInput[]): Anthropic.Tool {
@@ -214,12 +237,12 @@ function buildStructureTool(imageCandidates: ImageCandidateInput[]): Anthropic.T
         "detectedIndustry",
         "contactAddress",
         "contactAddressConfidence",
-        "services",
         "testimonials",
         "stats",
         "faqs",
         "differentiators",
         "process",
+        "services",
         ...(imageCandidates.length > 0 ? ["images"] : []),
       ],
       properties: {
@@ -402,10 +425,16 @@ export async function structureAndRewriteContent(
 ): Promise<StructuredContentResult> {
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+  // select-relevant-pages.ts already spent a 40k-char budget choosing which pages to
+  // include — this used to independently re-clip the combined result down to 15k
+  // regardless, silently throwing away everything that budget deliberately selected (most
+  // individual service pages on a site of any size). The +8k here is headroom for the
+  // "--- title (url) ---\n" header/join overhead per page, not a second content budget —
+  // this should essentially never trigger under normal selection.
   const combinedText = pageTexts
     .map((p) => `--- ${p.title || p.url} (${p.url}) ---\n${p.text}`)
     .join("\n\n")
-    .slice(0, 15_000);
+    .slice(0, ANALYSIS_CHAR_BUDGET + 8_000);
 
   const imagesBlock =
     imageCandidates.length > 0
@@ -425,7 +454,7 @@ export async function structureAndRewriteContent(
       const result = await withTransientRetry(`structure-and-rewrite attempt ${attempt}`, async () => {
         const stream = anthropic.messages.stream({
           model: "claude-sonnet-5",
-          max_tokens: 8192,
+          max_tokens: MAX_OUTPUT_TOKENS,
           output_config: { effort: "high" },
           system: SYSTEM_PROMPT,
           tools: [structureTool],
@@ -450,8 +479,18 @@ export async function structureAndRewriteContent(
         return stream.finalMessage();
       });
 
+      console.log(
+        `[structure-and-rewrite] attempt ${attempt}: stop_reason=${result.stop_reason} ` +
+        `output_tokens=${result.usage.output_tokens}/${MAX_OUTPUT_TOKENS}`
+      );
       if (result.stop_reason === "max_tokens") {
         throw new Error("Content structuring was cut off by the token limit.");
+      }
+      if (result.usage.output_tokens >= MAX_OUTPUT_TOKENS * NEAR_LIMIT_WARN_THRESHOLD) {
+        console.warn(
+          `[structure-and-rewrite] output tokens near limit: ${result.usage.output_tokens}/${MAX_OUTPUT_TOKENS} ` +
+          `— a client with a slightly larger response would truncate here.`
+        );
       }
 
       const toolUse = result.content.find(
