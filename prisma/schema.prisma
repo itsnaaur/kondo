@@ -112,6 +112,8 @@ model ContentRecord {
   businessName String?
   tagline      String?
   aboutCopy    String? // AI-rewritten, punchier version — the only version stored
+  ctaLabel     String? // the site's own recurring CTA phrase, e.g. "Book an appointment" —
+                        // null when nothing recurs clearly enough to trust as their actual wording
 
   services     Json // ContentService[]
   testimonials Json // ContentTestimonial[]
@@ -126,6 +128,14 @@ model ContentRecord {
   faqs            Json @default("[]") // ContentFaq[]
   differentiators Json @default("[]") // ContentDifferentiator[]
   process         Json @default("[]") // ContentProcessStep[]
+
+  // Second extraction expansion — fields that don't reliably appear at all rather than
+  // just being thin (see structure-and-rewrite.ts's system prompt for what each one is and
+  // isn't allowed to infer). Same @default("[]") reasoning as above.
+  serviceAreas Json @default("[]") // ContentServiceArea[]
+  hours        Json @default("[]") // ContentHours[]
+  offers       Json @default("[]") // ContentOffer[]
+  credentials  Json @default("[]") // ContentCredential[]
 
   contactEmail   String?
   contactPhone   String?

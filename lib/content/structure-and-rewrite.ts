@@ -8,6 +8,10 @@ import type {
   ContentFaq,
   ContentDifferentiator,
   ContentProcessStep,
+  ContentServiceArea,
+  ContentHours,
+  ContentOffer,
+  ContentCredential,
   ConfidenceLevel,
   ImageSubject,
 } from "./types";
@@ -98,6 +102,15 @@ const STRUCTURE_TOOL_BASE_PROPERTIES: ToolProperties = {
   },
   contactAddress: { type: ["string", "null"], description: "Street address if present anywhere in the crawled text, else null. Do not guess." },
   contactAddressConfidence: { type: "string", enum: CONFIDENCE_ENUM },
+  ctaLabel: {
+    type: ["string", "null"],
+    description:
+      "The site's own recurring call-to-action button/link label, in their words — \"Book an appointment\", " +
+      "\"Request a quote\", \"Get started\". Only return one if it clearly recurs across the site (their " +
+      "actual button text), not your own generic phrasing and not a one-off link caption you're not " +
+      "confident represents their standard CTA. Null is the correct answer when nothing recurs clearly.",
+  },
+  ctaLabelConfidence: { type: "string", enum: CONFIDENCE_ENUM },
   testimonials: {
     type: "array",
     description: "Genuine customer testimonials/reviews found in the text. Do not invent any. Flag anything that might actually be a staff bio, a case study blurb, or otherwise not a real customer quote.",
@@ -183,6 +196,80 @@ const STRUCTURE_TOOL_BASE_PROPERTIES: ToolProperties = {
       },
     },
   },
+  serviceAreas: {
+    type: "array",
+    description:
+      "Suburbs/cities/regions the business explicitly says it serves — \"servicing Brisbane, Gold Coast and " +
+      "Logan\", a coverage map's labelled areas, a list of branch locations. One entry per named area. Do " +
+      "NOT infer a service area from the business's own street address alone — only areas the source text " +
+      "actually names as covered or served. Empty array is correct if the site never names one.",
+    items: {
+      type: "object",
+      required: ["name", "confidence", "flagged"],
+      properties: {
+        name: { type: "string", description: "The area as named, e.g. \"Gold Coast\", \"Brisbane and surrounds\"." },
+        confidence: { type: "string", enum: CONFIDENCE_ENUM },
+        flagged: { type: "boolean", description: "Always true — see stats above for the reasoning." },
+        flagReason: { type: "string" },
+      },
+    },
+  },
+  hours: {
+    type: "array",
+    description:
+      "Opening hours / availability if the source states them — a table, a line like \"Mon-Fri 9am-5pm\", or " +
+      "\"By appointment only\" / \"Open 24/7\". One entry per distinct day or day-range as stated. Never " +
+      "invent a schedule the source doesn't give.",
+    items: {
+      type: "object",
+      required: ["days", "hours", "confidence", "flagged"],
+      properties: {
+        days: { type: "string", description: "e.g. \"Mon–Fri\", \"Saturday\", \"Public holidays\"." },
+        hours: { type: "string", description: "e.g. \"8:00am–5:00pm\", \"Closed\", \"By appointment\"." },
+        confidence: { type: "string", enum: CONFIDENCE_ENUM },
+        flagged: { type: "boolean", description: "Always true — see stats above for the reasoning." },
+        flagReason: { type: "string" },
+      },
+    },
+  },
+  offers: {
+    type: "array",
+    description:
+      "Specific priced offers/packages/promotions found in the text — \"$199 new patient check-up\", " +
+      "\"free quote\", \"10% off first service\". Only ones with an actual price or concrete deal stated; a " +
+      "service that merely sounds good value is a service, not an offer — don't duplicate the services list " +
+      "here. Never invent a price.",
+    items: {
+      type: "object",
+      required: ["name", "price", "confidence", "flagged"],
+      properties: {
+        name: { type: "string", description: "What the offer is, e.g. \"New patient check-up\"." },
+        price: { type: "string", description: "The price/deal as stated, e.g. \"$199\", \"Free\", \"10% off\"." },
+        confidence: { type: "string", enum: CONFIDENCE_ENUM },
+        flagged: { type: "boolean", description: "Always true — a wrong price is worse than no price." },
+        flagReason: { type: "string" },
+      },
+    },
+  },
+  credentials: {
+    type: "array",
+    description:
+      "Licenses, registrations, certifications, or accreditation memberships explicitly stated in the text — " +
+      "\"AHPRA registered\", \"certified Gallagher partner\", \"registered NDIS provider\". The text form of a " +
+      "trust badge, for a site with no partner logos to crawl. Do NOT infer a credential from the business " +
+      "type or industry norms (e.g. don't assume \"AHPRA registered\" just because it's a dental clinic) — " +
+      "only ones the source explicitly states.",
+    items: {
+      type: "object",
+      required: ["label", "confidence", "flagged"],
+      properties: {
+        label: { type: "string" },
+        confidence: { type: "string", enum: CONFIDENCE_ENUM },
+        flagged: { type: "boolean", description: "Always true — see stats above for the reasoning." },
+        flagReason: { type: "string" },
+      },
+    },
+  },
   // services deliberately comes LAST, not first. Confirmed live against Princeton Dental: with
   // services positioned before the other array fields, a forced tool call correctly filled all 16
   // services but returned every other array — testimonials/stats/faqs/differentiators/process —
@@ -237,11 +324,17 @@ function buildStructureTool(imageCandidates: ImageCandidateInput[]): Anthropic.T
         "detectedIndustry",
         "contactAddress",
         "contactAddressConfidence",
+        "ctaLabel",
+        "ctaLabelConfidence",
         "testimonials",
         "stats",
         "faqs",
         "differentiators",
         "process",
+        "serviceAreas",
+        "hours",
+        "offers",
+        "credentials",
         "services",
         ...(imageCandidates.length > 0 ? ["images"] : []),
       ],
@@ -271,12 +364,18 @@ export type StructuredContentResult = {
   detectedIndustry: string;
   contactAddress: string | null;
   contactAddressConfidence: ConfidenceLevel;
+  ctaLabel: string | null;
+  ctaLabelConfidence: ConfidenceLevel;
   services: Omit<ContentService, "id">[];
   testimonials: Omit<ContentTestimonial, "id">[];
   stats: Omit<ContentStat, "id">[];
   faqs: Omit<ContentFaq, "id">[];
   differentiators: Omit<ContentDifferentiator, "id">[];
   process: Omit<ContentProcessStep, "id">[];
+  serviceAreas: Omit<ContentServiceArea, "id">[];
+  hours: Omit<ContentHours, "id">[];
+  offers: Omit<ContentOffer, "id">[];
+  credentials: Omit<ContentCredential, "id">[];
   images: StructuredImageResult[];
 };
 
@@ -306,6 +405,8 @@ function validateShape(input: unknown): { valid: true; value: Record<string, unk
   if (typeof v.detectedIndustry !== "string" || !v.detectedIndustry.trim()) return { valid: false, reason: "missing detectedIndustry" };
   if (v.contactAddress !== null && typeof v.contactAddress !== "string") return { valid: false, reason: "contactAddress must be string or null" };
   if (!isConfidence(v.contactAddressConfidence)) return { valid: false, reason: "missing/invalid contactAddressConfidence" };
+  if (v.ctaLabel !== null && typeof v.ctaLabel !== "string") return { valid: false, reason: "ctaLabel must be string or null" };
+  if (!isConfidence(v.ctaLabelConfidence)) return { valid: false, reason: "missing/invalid ctaLabelConfidence" };
 
   // services/testimonials are deliberately NOT hard-required here, despite being in the
   // tool's `required` list — confirmed live that once the schema grew to include several
@@ -316,7 +417,10 @@ function validateShape(input: unknown): { valid: true; value: Record<string, unk
   // a correctly-empty array wastes all 3 retry attempts on an unfixable "error" and often
   // still fails at the end. resolveStructuredContent() below coerces a missing/malformed
   // array to [] for every array field, services/testimonials included — the same
-  // leniency stats/faqs/differentiators/process/images already had.
+  // leniency stats/faqs/differentiators/process/images already had. serviceAreas/hours/
+  // offers/credentials get the identical leniency: all four are commonly empty (a SaaS
+  // company has no "hours", plenty of sites name no service area), same as
+  // stats/faqs/differentiators/process before them.
 
   return { valid: true, value: v };
 }
@@ -351,6 +455,12 @@ function resolveStructuredContent(raw: Record<string, unknown>, imageCandidates:
   const faqs = coerceTextArray<Omit<ContentFaq, "id">>(raw.faqs, ["question", "answer"]);
   const differentiators = coerceTextArray<Omit<ContentDifferentiator, "id">>(raw.differentiators, ["title", "description"]);
   const process = coerceTextArray<Omit<ContentProcessStep, "id">>(raw.process, ["title", "description"]);
+  // Forced flagged: true on all four, same as stats — new-field territory, unproven
+  // against real data yet, so every entry gets a human's eyes before it ships.
+  const serviceAreas = coerceTextArray<Omit<ContentServiceArea, "id">>(raw.serviceAreas, ["name"], true);
+  const hours = coerceTextArray<Omit<ContentHours, "id">>(raw.hours, ["days", "hours"], true);
+  const offers = coerceTextArray<Omit<ContentOffer, "id">>(raw.offers, ["name", "price"], true);
+  const credentials = coerceTextArray<Omit<ContentCredential, "id">>(raw.credentials, ["label"], true);
 
   const byIndex = new Map<number, Record<string, unknown>>();
   if (Array.isArray(raw.images)) {
@@ -382,12 +492,18 @@ function resolveStructuredContent(raw: Record<string, unknown>, imageCandidates:
     detectedIndustry: raw.detectedIndustry as string,
     contactAddress: (raw.contactAddress as string | null) ?? null,
     contactAddressConfidence: raw.contactAddressConfidence as ConfidenceLevel,
+    ctaLabel: (raw.ctaLabel as string | null) ?? null,
+    ctaLabelConfidence: raw.ctaLabelConfidence as ConfidenceLevel,
     services,
     testimonials,
     stats,
     faqs,
     differentiators,
     process,
+    serviceAreas,
+    hours,
+    offers,
+    credentials,
     images,
   };
 }
@@ -417,7 +533,21 @@ the correct, expected answer when the text gives you nothing to go on — it is 
 failure to avoid. Never invent a caption the text doesn't support.
 - Differentiators are "why choose us" points, not a restatement of services. Process steps \
 are a "how it works" sequence. Both are commonly absent — empty arrays are normal, correct \
-answers, not missed extractions.`;
+answers, not missed extractions.
+- Service areas are places the business explicitly says it serves (e.g. "servicing \
+Brisbane, Gold Coast and Logan") — never infer these from a street address alone; a clinic \
+at one address doesn't imply it "serves" that suburb in the marketing sense.
+- Hours are only ones actually stated — a table, a line of text, or "by appointment only" \
+— never invent a schedule the source doesn't give.
+- Offers must have an actual price or concrete deal stated in the text; a service \
+description that merely sounds like good value is not an offer, and shouldn't appear in \
+both services and offers.
+- Credentials/certifications/registrations must be explicitly stated in the text — never \
+infer one from the business type or industry norms, even when it would almost certainly be \
+true (e.g. don't assume "AHPRA registered" just because it's a dental clinic).
+- ctaLabel is the site's own recurring call-to-action phrasing (their actual button text), \
+not a generic one you'd write yourself — null is correct when nothing recurs clearly \
+enough to be confident it's their standard phrase rather than a one-off link caption.`;
 
 export async function structureAndRewriteContent(
   pageTexts: { url: string; title: string; text: string }[],

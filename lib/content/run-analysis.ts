@@ -120,10 +120,12 @@ export async function runAnalysisInBackground(clientId: string, siteUrl: string)
     const taglineFlag = flagFor(structured.taglineConfidence, "AI-rewritten from crawled site text");
     const aboutCopyFlag = flagFor(structured.aboutCopyConfidence, "AI-rewritten from crawled site text");
     const contactAddressFlag = flagFor(structured.contactAddressConfidence, "AI-extracted from crawled site text");
+    const ctaLabelFlag = flagFor(structured.ctaLabelConfidence, "AI-extracted from crawled site text");
     if (businessNameFlag) fieldFlags.businessName = businessNameFlag;
     if (taglineFlag) fieldFlags.tagline = taglineFlag;
     if (aboutCopyFlag) fieldFlags.aboutCopy = aboutCopyFlag;
     if (contactAddressFlag) fieldFlags.contactAddress = contactAddressFlag;
+    if (ctaLabelFlag) fieldFlags.ctaLabel = ctaLabelFlag;
     if (contact.emailFlag) fieldFlags.contactEmail = contact.emailFlag;
     if (contact.phoneFlag) fieldFlags.contactPhone = contact.phoneFlag;
 
@@ -133,6 +135,10 @@ export async function runAnalysisInBackground(clientId: string, siteUrl: string)
     const faqs = structured.faqs.map((f) => ({ ...f, id: randomUUID() }));
     const differentiators = structured.differentiators.map((d) => ({ ...d, id: randomUUID() }));
     const process = structured.process.map((p) => ({ ...p, id: randomUUID() }));
+    const serviceAreas = structured.serviceAreas.map((s) => ({ ...s, id: randomUUID() }));
+    const hours = structured.hours.map((h) => ({ ...h, id: randomUUID() }));
+    const offers = structured.offers.map((o) => ({ ...o, id: randomUUID() }));
+    const credentials = structured.credentials.map((c) => ({ ...c, id: randomUUID() }));
 
     await prisma.contentRecord.upsert({
       where: { clientId },
@@ -141,12 +147,17 @@ export async function runAnalysisInBackground(clientId: string, siteUrl: string)
         businessName: structured.businessName,
         tagline: structured.tagline,
         aboutCopy: structured.aboutCopy,
+        ctaLabel: structured.ctaLabel,
         services: services as unknown as Prisma.InputJsonValue,
         testimonials: testimonials as unknown as Prisma.InputJsonValue,
         stats: stats as unknown as Prisma.InputJsonValue,
         faqs: faqs as unknown as Prisma.InputJsonValue,
         differentiators: differentiators as unknown as Prisma.InputJsonValue,
         process: process as unknown as Prisma.InputJsonValue,
+        serviceAreas: serviceAreas as unknown as Prisma.InputJsonValue,
+        hours: hours as unknown as Prisma.InputJsonValue,
+        offers: offers as unknown as Prisma.InputJsonValue,
+        credentials: credentials as unknown as Prisma.InputJsonValue,
         brandColors: brandColors as unknown as Prisma.InputJsonValue,
         images: contentImagesWithCaptions as unknown as Prisma.InputJsonValue,
         contactEmail: contact.email,
@@ -165,12 +176,17 @@ export async function runAnalysisInBackground(clientId: string, siteUrl: string)
         businessName: structured.businessName,
         tagline: structured.tagline,
         aboutCopy: structured.aboutCopy,
+        ctaLabel: structured.ctaLabel,
         services: services as unknown as Prisma.InputJsonValue,
         testimonials: testimonials as unknown as Prisma.InputJsonValue,
         stats: stats as unknown as Prisma.InputJsonValue,
         faqs: faqs as unknown as Prisma.InputJsonValue,
         differentiators: differentiators as unknown as Prisma.InputJsonValue,
         process: process as unknown as Prisma.InputJsonValue,
+        serviceAreas: serviceAreas as unknown as Prisma.InputJsonValue,
+        hours: hours as unknown as Prisma.InputJsonValue,
+        offers: offers as unknown as Prisma.InputJsonValue,
+        credentials: credentials as unknown as Prisma.InputJsonValue,
         brandColors: brandColors as unknown as Prisma.InputJsonValue,
         images: contentImagesWithCaptions as unknown as Prisma.InputJsonValue,
         contactEmail: contact.email,
