@@ -21,6 +21,10 @@ import type {
   ContentFaq,
   ContentDifferentiator,
   ContentProcessStep,
+  ContentServiceArea,
+  ContentHours,
+  ContentOffer,
+  ContentCredential,
   FieldFlags,
 } from "@/lib/content/types";
 
@@ -106,11 +110,182 @@ function ImageCard({ clientId, img }: { clientId: string; img: ImageWithUrl }) {
   );
 }
 
+// ---------- ArrayCard: the one implementation behind every flagged-row section ----------
+//
+// Services/testimonials/stats/faqs/differentiators/process/serviceAreas/hours/offers/
+// credentials all share the identical mechanics — add a row, remove a row, resubmit the
+// full array as parallel form fields, show a confidence badge — and used to be nine (soon
+// ten) near-identical hand-written sections. What genuinely differs between them is only
+// which fields a row has and how those fields lay out (one field per line, or two side by
+// side) — that's what `fieldRows` describes, not something worth a generic renderer
+// papering over. A section that doesn't fit this shape (brand colours: always exactly
+// three fixed roles, no add/remove) correctly stays its own hand-written block below.
+
+type ArrayCardRow = {
+  id: string;
+  confidence?: string;
+  flagged?: boolean;
+  flagReason?: string;
+  [dataKey: string]: unknown;
+};
+
+type ArrayCardField = {
+  name: string; // form field name this value round-trips through
+  dataKey: string; // property on the row holding this field's value
+  placeholder: string;
+  multiline?: boolean;
+  rows?: number;
+  className?: string; // e.g. a narrow width for a stat's value or an offer's price
+};
+
+function ArrayCard({
+  title,
+  helpText,
+  idFieldName,
+  fieldRows,
+  addLabel,
+  initialRows,
+}: {
+  title: string;
+  helpText?: string;
+  idFieldName: string;
+  fieldRows: ArrayCardField[][]; // each inner array renders as one side-by-side row of fields
+  addLabel: string;
+  initialRows: ArrayCardRow[];
+}) {
+  const [rows, setRows] = useState<(ArrayCardRow & { key: string })[]>(() =>
+    initialRows.map((r, i) => ({ ...r, key: `${idFieldName}-${i}` }))
+  );
+
+  const addRow = () => {
+    const blank: ArrayCardRow & { key: string } = {
+      id: "",
+      confidence: "high",
+      flagged: false,
+      key: `${idFieldName}-new-${rows.length}-${Date.now()}`,
+    };
+    for (const group of fieldRows) for (const f of group) blank[f.dataKey] = "";
+    setRows((rs) => [...rs, blank]);
+  };
+
+  return (
+    <section className={CARD_CLASS}>
+      <h3 className="mb-3 text-xs font-medium uppercase tracking-wide text-neutral-500">{title}</h3>
+      {helpText && <p className="mb-3 text-xs text-neutral-500">{helpText}</p>}
+      <div className="space-y-3">
+        {rows.map((row) => (
+          <div key={row.key} className="flex gap-2">
+            <input type="hidden" name={idFieldName} value={row.id} />
+            <div className="flex-1 space-y-2">
+              {fieldRows.map((group, gi) => (
+                <div key={gi} className="flex gap-2">
+                  {group.map((f) =>
+                    f.multiline ? (
+                      <textarea
+                        key={f.name}
+                        name={f.name}
+                        defaultValue={(row[f.dataKey] as string) ?? ""}
+                        placeholder={f.placeholder}
+                        rows={f.rows ?? 2}
+                        className={`${INPUT_CLASS}${f.className ? ` ${f.className}` : ""}`}
+                      />
+                    ) : (
+                      <input
+                        key={f.name}
+                        name={f.name}
+                        defaultValue={(row[f.dataKey] as string) ?? ""}
+                        placeholder={f.placeholder}
+                        className={`${INPUT_CLASS}${f.className ? ` ${f.className}` : ""}`}
+                      />
+                    )
+                  )}
+                </div>
+              ))}
+            </div>
+            <div className="flex flex-col items-end gap-2">
+              <ConfidenceBadge
+                confidence={row.confidence as "low" | "medium" | "high" | undefined}
+                flagged={row.flagged}
+                flagReason={row.flagReason}
+              />
+              <button
+                type="button"
+                onClick={() => setRows((rs) => rs.filter((r) => r.key !== row.key))}
+                className="text-xs text-neutral-500 hover:text-red-400"
+              >
+                Remove
+              </button>
+            </div>
+          </div>
+        ))}
+        <button
+          type="button"
+          onClick={addRow}
+          className="rounded-lg border border-dashed border-neutral-700 px-4 py-2 text-sm text-neutral-400 transition hover:border-neutral-500 hover:text-neutral-200"
+        >
+          + {addLabel}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+// Field-row definitions — one per section, describing only what's genuinely different
+// between them: field names, placeholders, and single-line vs stacked layout.
+const SERVICE_FIELD_ROWS: ArrayCardField[][] = [
+  [{ name: "serviceName", dataKey: "name", placeholder: "Service name" }],
+  [{ name: "serviceDescription", dataKey: "description", placeholder: "Description", multiline: true, rows: 2 }],
+];
+const TESTIMONIAL_FIELD_ROWS: ArrayCardField[][] = [
+  [{ name: "testimonialQuote", dataKey: "quote", placeholder: "Quote", multiline: true, rows: 2 }],
+  [
+    { name: "testimonialAuthor", dataKey: "author", placeholder: "Author" },
+    { name: "testimonialRole", dataKey: "role", placeholder: "Role (optional)" },
+  ],
+];
+const STAT_FIELD_ROWS: ArrayCardField[][] = [
+  [
+    { name: "statValue", dataKey: "value", placeholder: "25+", className: "max-w-[8rem]" },
+    { name: "statLabel", dataKey: "label", placeholder: "Years in business" },
+  ],
+];
+const DIFFERENTIATOR_FIELD_ROWS: ArrayCardField[][] = [
+  [{ name: "differentiatorTitle", dataKey: "title", placeholder: "Title" }],
+  [{ name: "differentiatorDescription", dataKey: "description", placeholder: "Description", multiline: true, rows: 2 }],
+];
+const PROCESS_FIELD_ROWS: ArrayCardField[][] = [
+  [{ name: "processTitle", dataKey: "title", placeholder: "Step title" }],
+  [{ name: "processDescription", dataKey: "description", placeholder: "Description", multiline: true, rows: 2 }],
+];
+const FAQ_FIELD_ROWS: ArrayCardField[][] = [
+  [{ name: "faqQuestion", dataKey: "question", placeholder: "Question" }],
+  [{ name: "faqAnswer", dataKey: "answer", placeholder: "Answer", multiline: true, rows: 2 }],
+];
+const OFFER_FIELD_ROWS: ArrayCardField[][] = [
+  [
+    { name: "offerPrice", dataKey: "price", placeholder: "$199", className: "max-w-[8rem]" },
+    { name: "offerName", dataKey: "name", placeholder: "New patient check-up" },
+  ],
+];
+const CREDENTIAL_FIELD_ROWS: ArrayCardField[][] = [
+  [{ name: "credentialLabel", dataKey: "label", placeholder: "AHPRA registered" }],
+];
+const HOURS_FIELD_ROWS: ArrayCardField[][] = [
+  [
+    { name: "hoursDays", dataKey: "days", placeholder: "Mon–Fri", className: "max-w-[10rem]" },
+    { name: "hoursHours", dataKey: "hours", placeholder: "8:00am–5:00pm" },
+  ],
+];
+const SERVICE_AREA_FIELD_ROWS: ArrayCardField[][] = [
+  [{ name: "serviceAreaName", dataKey: "name", placeholder: "Gold Coast" }],
+];
+
 type ContentReviewFormProps = {
   clientId: string;
   businessName: string | null;
   tagline: string | null;
   aboutCopy: string | null;
+  ctaLabel: string | null;
   contactEmail: string | null;
   contactPhone: string | null;
   contactAddress: string | null;
@@ -120,6 +295,10 @@ type ContentReviewFormProps = {
   faqs: ContentFaq[];
   differentiators: ContentDifferentiator[];
   process: ContentProcessStep[];
+  serviceAreas: ContentServiceArea[];
+  hours: ContentHours[];
+  offers: ContentOffer[];
+  credentials: ContentCredential[];
   brandColors: ContentColor[];
   images: ImageWithUrl[];
   fieldFlags: FieldFlags;
@@ -130,6 +309,7 @@ export function ContentReviewForm({
   businessName,
   tagline,
   aboutCopy,
+  ctaLabel,
   contactEmail,
   contactPhone,
   contactAddress,
@@ -139,21 +319,14 @@ export function ContentReviewForm({
   faqs,
   differentiators,
   process,
+  serviceAreas,
+  hours,
+  offers,
+  credentials,
   brandColors,
   images,
   fieldFlags,
 }: ContentReviewFormProps) {
-  const [serviceRows, setServiceRows] = useState(services.map((s, i) => ({ ...s, key: `s-${i}` })));
-  const [testimonialRows, setTestimonialRows] = useState(
-    testimonials.map((t, i) => ({ ...t, key: `t-${i}` }))
-  );
-  const [statRows, setStatRows] = useState(stats.map((s, i) => ({ ...s, key: `st-${i}` })));
-  const [faqRows, setFaqRows] = useState(faqs.map((f, i) => ({ ...f, key: `f-${i}` })));
-  const [differentiatorRows, setDifferentiatorRows] = useState(
-    differentiators.map((d, i) => ({ ...d, key: `d-${i}` }))
-  );
-  const [processRows, setProcessRows] = useState(process.map((p, i) => ({ ...p, key: `p-${i}` })));
-
   const colorByRole = (role: ContentColor["role"]) => brandColors.find((c) => c.role === role);
   const mainImages = images.filter((img) => img.role !== "partner-logo");
   const partnerLogoImages = images.filter((img) => img.role === "partner-logo");
@@ -185,272 +358,112 @@ export function ContentReviewForm({
           </div>
         </section>
 
+        <ArrayCard
+          title="Services"
+          idFieldName="serviceId"
+          fieldRows={SERVICE_FIELD_ROWS}
+          addLabel="Add service"
+          initialRows={services}
+        />
+
+        {/* Stats first among the flagged-by-default sections — a wrong number in a
+            prospect-facing mockup costs more credibility than any other extraction here, so
+            it gets reviewed before anything else new. No auto-clear-on-edit exemption: like
+            every other field, a human editing a row unflags it — the AI-side "always
+            flagged" default (structure-and-rewrite.ts) only applies before a human has
+            looked. */}
+        <ArrayCard
+          title="Stats"
+          idFieldName="statId"
+          fieldRows={STAT_FIELD_ROWS}
+          addLabel="Add stat"
+          initialRows={stats}
+        />
+
+        {/* Second extraction expansion (serviceAreas/hours/offers/credentials/ctaLabel),
+            ordered by the same risk logic as stats above: a wrong price is the worst thing
+            on this page, so offers leads; ctaLabel is the lowest-stakes of the five (worst
+            case it's just generic instead of theirs) so it trails. All four arrays are
+            forced flagged: true regardless of AI confidence (structure-and-rewrite.ts) —
+            unproven-against-real-data fields get a human's eyes before they ship, same as
+            stats. */}
+        <ArrayCard
+          title="Offers"
+          helpText="Priced offers/promotions — only ones with an actual price stated."
+          idFieldName="offerId"
+          fieldRows={OFFER_FIELD_ROWS}
+          addLabel="Add offer"
+          initialRows={offers}
+        />
+        <ArrayCard
+          title="Credentials"
+          helpText="Licenses, registrations, certifications explicitly stated on the site."
+          idFieldName="credentialId"
+          fieldRows={CREDENTIAL_FIELD_ROWS}
+          addLabel="Add credential"
+          initialRows={credentials}
+        />
+        <ArrayCard
+          title="Hours"
+          helpText="Opening hours / availability, as stated."
+          idFieldName="hoursId"
+          fieldRows={HOURS_FIELD_ROWS}
+          addLabel="Add hours"
+          initialRows={hours}
+        />
+        <ArrayCard
+          title="Service areas"
+          helpText="Suburbs/regions the business says it serves."
+          idFieldName="serviceAreaId"
+          fieldRows={SERVICE_AREA_FIELD_ROWS}
+          addLabel="Add area"
+          initialRows={serviceAreas}
+        />
         <section className={CARD_CLASS}>
-          <h3 className="mb-3 text-xs font-medium uppercase tracking-wide text-neutral-500">Services</h3>
-          <div className="space-y-3">
-            {serviceRows.map((row) => (
-              <div key={row.key} className="flex gap-2">
-                <input type="hidden" name="serviceId" value={row.id} />
-                <div className="flex-1 space-y-2">
-                  <input
-                    name="serviceName"
-                    defaultValue={row.name}
-                    placeholder="Service name"
-                    className={INPUT_CLASS}
-                  />
-                  <textarea
-                    name="serviceDescription"
-                    defaultValue={row.description}
-                    placeholder="Description"
-                    rows={2}
-                    className={INPUT_CLASS}
-                  />
-                </div>
-                <div className="flex flex-col items-end gap-2">
-                  <ConfidenceBadge confidence={row.confidence} flagged={row.flagged} flagReason={row.flagReason} />
-                  <button
-                    type="button"
-                    onClick={() => setServiceRows((rows) => rows.filter((r) => r.key !== row.key))}
-                    className="text-xs text-neutral-500 hover:text-red-400"
-                  >
-                    Remove
-                  </button>
-                </div>
-              </div>
-            ))}
-            <button
-              type="button"
-              onClick={() =>
-                setServiceRows((rows) => [
-                  ...rows,
-                  { id: "", name: "", description: "", confidence: "high", flagged: false, key: `s-new-${rows.length}-${Date.now()}` },
-                ])
-              }
-              className="rounded-lg border border-dashed border-neutral-700 px-4 py-2 text-sm text-neutral-400 transition hover:border-neutral-500 hover:text-neutral-200"
-            >
-              + Add service
-            </button>
-          </div>
+          <h3 className="mb-3 text-xs font-medium uppercase tracking-wide text-neutral-500">Call to action</h3>
+          <p className="mb-3 text-xs text-neutral-500">
+            The site&rsquo;s own button label, in their words — used instead of a generic
+            &quot;Get in touch&quot; when present.
+          </p>
+          <label className={LABEL_CLASS}>
+            CTA label <ConfidenceBadge {...fieldFlags.ctaLabel} />
+          </label>
+          <input name="ctaLabel" defaultValue={ctaLabel ?? ""} placeholder="Book an appointment" className={INPUT_CLASS} />
         </section>
 
-        {/* Stats first among the new sections — a wrong number in a prospect-facing
-            mockup costs more credibility than any other extraction here, so it gets
-            reviewed before anything else new. No auto-clear-on-edit exemption: like every
-            other field, a human editing a row unflags it — the AI-side "always flagged"
-            default (structure-and-rewrite.ts) only applies before a human has looked. */}
-        <section className={CARD_CLASS}>
-          <h3 className="mb-3 text-xs font-medium uppercase tracking-wide text-neutral-500">Stats</h3>
-          <div className="space-y-3">
-            {statRows.map((row) => (
-              <div key={row.key} className="flex gap-2">
-                <input type="hidden" name="statId" value={row.id} />
-                <div className="flex flex-1 gap-2">
-                  <input name="statValue" defaultValue={row.value} placeholder="25+" className={`${INPUT_CLASS} max-w-[8rem]`} />
-                  <input name="statLabel" defaultValue={row.label} placeholder="Years in business" className={INPUT_CLASS} />
-                </div>
-                <div className="flex flex-col items-end gap-2">
-                  <ConfidenceBadge confidence={row.confidence} flagged={row.flagged} flagReason={row.flagReason} />
-                  <button
-                    type="button"
-                    onClick={() => setStatRows((rows) => rows.filter((r) => r.key !== row.key))}
-                    className="text-xs text-neutral-500 hover:text-red-400"
-                  >
-                    Remove
-                  </button>
-                </div>
-              </div>
-            ))}
-            <button
-              type="button"
-              onClick={() =>
-                setStatRows((rows) => [
-                  ...rows,
-                  { id: "", value: "", label: "", confidence: "high", flagged: false, key: `st-new-${rows.length}-${Date.now()}` },
-                ])
-              }
-              className="rounded-lg border border-dashed border-neutral-700 px-4 py-2 text-sm text-neutral-400 transition hover:border-neutral-500 hover:text-neutral-200"
-            >
-              + Add stat
-            </button>
-          </div>
-        </section>
+        <ArrayCard
+          title="Differentiators"
+          helpText={'"Why choose us" points — distinct from services.'}
+          idFieldName="differentiatorId"
+          fieldRows={DIFFERENTIATOR_FIELD_ROWS}
+          addLabel="Add differentiator"
+          initialRows={differentiators}
+        />
 
-        <section className={CARD_CLASS}>
-          <h3 className="mb-3 text-xs font-medium uppercase tracking-wide text-neutral-500">Differentiators</h3>
-          <p className="mb-3 text-xs text-neutral-500">&quot;Why choose us&quot; points — distinct from services.</p>
-          <div className="space-y-3">
-            {differentiatorRows.map((row) => (
-              <div key={row.key} className="flex gap-2">
-                <input type="hidden" name="differentiatorId" value={row.id} />
-                <div className="flex-1 space-y-2">
-                  <input name="differentiatorTitle" defaultValue={row.title} placeholder="Title" className={INPUT_CLASS} />
-                  <textarea
-                    name="differentiatorDescription"
-                    defaultValue={row.description}
-                    placeholder="Description"
-                    rows={2}
-                    className={INPUT_CLASS}
-                  />
-                </div>
-                <div className="flex flex-col items-end gap-2">
-                  <ConfidenceBadge confidence={row.confidence} flagged={row.flagged} flagReason={row.flagReason} />
-                  <button
-                    type="button"
-                    onClick={() => setDifferentiatorRows((rows) => rows.filter((r) => r.key !== row.key))}
-                    className="text-xs text-neutral-500 hover:text-red-400"
-                  >
-                    Remove
-                  </button>
-                </div>
-              </div>
-            ))}
-            <button
-              type="button"
-              onClick={() =>
-                setDifferentiatorRows((rows) => [
-                  ...rows,
-                  { id: "", title: "", description: "", confidence: "high", flagged: false, key: `d-new-${rows.length}-${Date.now()}` },
-                ])
-              }
-              className="rounded-lg border border-dashed border-neutral-700 px-4 py-2 text-sm text-neutral-400 transition hover:border-neutral-500 hover:text-neutral-200"
-            >
-              + Add differentiator
-            </button>
-          </div>
-        </section>
+        <ArrayCard
+          title="Process"
+          helpText={'"How it works" steps. Not every site has these — empty is normal.'}
+          idFieldName="processId"
+          fieldRows={PROCESS_FIELD_ROWS}
+          addLabel="Add step"
+          initialRows={process}
+        />
 
-        <section className={CARD_CLASS}>
-          <h3 className="mb-3 text-xs font-medium uppercase tracking-wide text-neutral-500">Process</h3>
-          <p className="mb-3 text-xs text-neutral-500">&quot;How it works&quot; steps. Not every site has these — empty is normal.</p>
-          <div className="space-y-3">
-            {processRows.map((row) => (
-              <div key={row.key} className="flex gap-2">
-                <input type="hidden" name="processId" value={row.id} />
-                <div className="flex-1 space-y-2">
-                  <input name="processTitle" defaultValue={row.title} placeholder="Step title" className={INPUT_CLASS} />
-                  <textarea
-                    name="processDescription"
-                    defaultValue={row.description}
-                    placeholder="Description"
-                    rows={2}
-                    className={INPUT_CLASS}
-                  />
-                </div>
-                <div className="flex flex-col items-end gap-2">
-                  <ConfidenceBadge confidence={row.confidence} flagged={row.flagged} flagReason={row.flagReason} />
-                  <button
-                    type="button"
-                    onClick={() => setProcessRows((rows) => rows.filter((r) => r.key !== row.key))}
-                    className="text-xs text-neutral-500 hover:text-red-400"
-                  >
-                    Remove
-                  </button>
-                </div>
-              </div>
-            ))}
-            <button
-              type="button"
-              onClick={() =>
-                setProcessRows((rows) => [
-                  ...rows,
-                  { id: "", title: "", description: "", confidence: "high", flagged: false, key: `p-new-${rows.length}-${Date.now()}` },
-                ])
-              }
-              className="rounded-lg border border-dashed border-neutral-700 px-4 py-2 text-sm text-neutral-400 transition hover:border-neutral-500 hover:text-neutral-200"
-            >
-              + Add step
-            </button>
-          </div>
-        </section>
+        <ArrayCard
+          title="Testimonials"
+          idFieldName="testimonialId"
+          fieldRows={TESTIMONIAL_FIELD_ROWS}
+          addLabel="Add testimonial"
+          initialRows={testimonials}
+        />
 
-        <section className={CARD_CLASS}>
-          <h3 className="mb-3 text-xs font-medium uppercase tracking-wide text-neutral-500">Testimonials</h3>
-          <div className="space-y-3">
-            {testimonialRows.map((row) => (
-              <div key={row.key} className="flex gap-2">
-                <input type="hidden" name="testimonialId" value={row.id} />
-                <div className="flex-1 space-y-2">
-                  <textarea
-                    name="testimonialQuote"
-                    defaultValue={row.quote}
-                    placeholder="Quote"
-                    rows={2}
-                    className={INPUT_CLASS}
-                  />
-                  <div className="flex gap-2">
-                    <input name="testimonialAuthor" defaultValue={row.author} placeholder="Author" className={INPUT_CLASS} />
-                    <input name="testimonialRole" defaultValue={row.role ?? ""} placeholder="Role (optional)" className={INPUT_CLASS} />
-                  </div>
-                </div>
-                <div className="flex flex-col items-end gap-2">
-                  <ConfidenceBadge confidence={row.confidence} flagged={row.flagged} flagReason={row.flagReason} />
-                  <button
-                    type="button"
-                    onClick={() => setTestimonialRows((rows) => rows.filter((r) => r.key !== row.key))}
-                    className="text-xs text-neutral-500 hover:text-red-400"
-                  >
-                    Remove
-                  </button>
-                </div>
-              </div>
-            ))}
-            <button
-              type="button"
-              onClick={() =>
-                setTestimonialRows((rows) => [
-                  ...rows,
-                  { id: "", quote: "", author: "", confidence: "high", flagged: false, key: `t-new-${rows.length}-${Date.now()}` },
-                ])
-              }
-              className="rounded-lg border border-dashed border-neutral-700 px-4 py-2 text-sm text-neutral-400 transition hover:border-neutral-500 hover:text-neutral-200"
-            >
-              + Add testimonial
-            </button>
-          </div>
-        </section>
-
-        <section className={CARD_CLASS}>
-          <h3 className="mb-3 text-xs font-medium uppercase tracking-wide text-neutral-500">FAQs</h3>
-          <div className="space-y-3">
-            {faqRows.map((row) => (
-              <div key={row.key} className="flex gap-2">
-                <input type="hidden" name="faqId" value={row.id} />
-                <div className="flex-1 space-y-2">
-                  <input name="faqQuestion" defaultValue={row.question} placeholder="Question" className={INPUT_CLASS} />
-                  <textarea
-                    name="faqAnswer"
-                    defaultValue={row.answer}
-                    placeholder="Answer"
-                    rows={2}
-                    className={INPUT_CLASS}
-                  />
-                </div>
-                <div className="flex flex-col items-end gap-2">
-                  <ConfidenceBadge confidence={row.confidence} flagged={row.flagged} flagReason={row.flagReason} />
-                  <button
-                    type="button"
-                    onClick={() => setFaqRows((rows) => rows.filter((r) => r.key !== row.key))}
-                    className="text-xs text-neutral-500 hover:text-red-400"
-                  >
-                    Remove
-                  </button>
-                </div>
-              </div>
-            ))}
-            <button
-              type="button"
-              onClick={() =>
-                setFaqRows((rows) => [
-                  ...rows,
-                  { id: "", question: "", answer: "", confidence: "high", flagged: false, key: `f-new-${rows.length}-${Date.now()}` },
-                ])
-              }
-              className="rounded-lg border border-dashed border-neutral-700 px-4 py-2 text-sm text-neutral-400 transition hover:border-neutral-500 hover:text-neutral-200"
-            >
-              + Add FAQ
-            </button>
-          </div>
-        </section>
+        <ArrayCard
+          title="FAQs"
+          idFieldName="faqId"
+          fieldRows={FAQ_FIELD_ROWS}
+          addLabel="Add FAQ"
+          initialRows={faqs}
+        />
 
         <section className={CARD_CLASS}>
           <h3 className="mb-3 text-xs font-medium uppercase tracking-wide text-neutral-500">Contact</h3>

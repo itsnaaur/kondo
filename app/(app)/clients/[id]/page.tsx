@@ -144,6 +144,7 @@ export default async function ClientWorkspacePage({ params }: { params: Promise<
               businessName={contentRecord.businessName}
               tagline={contentRecord.tagline}
               aboutCopy={contentRecord.aboutCopy}
+              ctaLabel={contentRecord.ctaLabel}
               contactEmail={contentRecord.contactEmail}
               contactPhone={contentRecord.contactPhone}
               contactAddress={contentRecord.contactAddress}
@@ -153,6 +154,10 @@ export default async function ClientWorkspacePage({ params }: { params: Promise<
               faqs={(contentRecord.faqs as never) ?? []}
               differentiators={(contentRecord.differentiators as never) ?? []}
               process={(contentRecord.process as never) ?? []}
+              serviceAreas={(contentRecord.serviceAreas as never) ?? []}
+              hours={(contentRecord.hours as never) ?? []}
+              offers={(contentRecord.offers as never) ?? []}
+              credentials={(contentRecord.credentials as never) ?? []}
               brandColors={(contentRecord.brandColors as never) ?? []}
               images={images}
               fieldFlags={((contentRecord.fieldFlags as unknown as FieldFlags | null) ?? {}) as FieldFlags}

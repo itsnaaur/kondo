@@ -24,6 +24,11 @@ import type {
   ContentFaq,
   ContentDifferentiator,
   ContentProcessStep,
+  ContentServiceArea,
+  ContentHours,
+  ContentOffer,
+  ContentCredential,
+  ConfidenceLevel,
   FieldFlags,
 } from "@/lib/content/types";
 
@@ -33,188 +38,117 @@ function optionalText(schema: typeof shortTextSchema, value: FormDataEntryValue 
   return text.length > 0 ? text : null;
 }
 
-// Rebuilds services/testimonials from the resubmitted parallel-array form fields — the
-// full array is the source of truth on every submit, so a row the user didn't re-include
-// is simply gone (that's what "delete what's junk" is). A row whose id matches an
-// existing one keeps its prior confidence unless its text actually changed, in which case
-// a human just fixed it, so it's unflagged and treated as high confidence; a row with no
-// matching id is new (the user added it) and is unflagged/high confidence from the start.
-function rebuildServices(formData: FormData, existing: ContentService[]): ContentService[] {
-  const ids = formData.getAll("serviceId").map(String);
-  const names = formData.getAll("serviceName").map(String);
-  const descriptions = formData.getAll("serviceDescription").map(String);
-  const existingById = new Map(existing.map((s) => [s.id, s]));
+type FlaggedRow = { id: string; confidence: ConfidenceLevel; flagged: boolean; flagReason?: string };
 
-  const result: ContentService[] = [];
-  for (let i = 0; i < names.length; i++) {
-    const name = shortTextSchema.safeParse(names[i]).success ? shortTextSchema.parse(names[i]) : "";
-    const description = mediumTextSchema.safeParse(descriptions[i] ?? "").success
-      ? mediumTextSchema.parse(descriptions[i] ?? "")
-      : "";
-    if (!name && !description) continue;
+type ArrayFieldConfig<T> = {
+  formName: string; // form field name this column round-trips through
+  dataKey: Extract<keyof T, string>;
+  schema: typeof shortTextSchema | typeof mediumTextSchema;
+  // Excluded from the "does this row have anything worth keeping" check, and normalized to
+  // undefined rather than "" when blank (matches how the original testimonial-role handling
+  // worked) — for fields like a testimonial's role where absence isn't itself a reason to
+  // drop the row.
+  optional?: boolean;
+};
+
+// Every flagged-row section (services/testimonials/stats/faqs/differentiators/process/
+// serviceAreas/hours/offers/credentials) rebuilds from its resubmitted parallel-array form
+// fields the identical way: the full array is the source of truth on every submit, so a row
+// not re-included is simply gone; a row whose id matches an existing one keeps its prior
+// confidence/flag unless its text actually changed (a human just fixed it, so it's unflagged
+// and treated as high confidence); a row with no matching id is new and unflagged/high
+// confidence from the start. This one function replaced what used to be a near-identical
+// rebuildX copy per section, differing only in field names and which schema validates which
+// column — the ContentReviewForm side of this same duplication is ArrayCard.
+function rebuildArraySection<T extends FlaggedRow>(
+  formData: FormData,
+  idFieldName: string,
+  fields: ArrayFieldConfig<T>[],
+  existing: T[]
+): T[] {
+  const ids = formData.getAll(idFieldName).map(String);
+  const columns = fields.map((f) => formData.getAll(f.formName).map(String));
+  const existingById = new Map(existing.map((e) => [e.id, e]));
+  const count = Math.max(0, ...columns.map((c) => c.length));
+
+  const result: T[] = [];
+  for (let i = 0; i < count; i++) {
+    const values: Record<string, string | undefined> = {};
+    let hasRequiredContent = false;
+
+    fields.forEach((def, f) => {
+      const raw = columns[f][i] ?? "";
+      if (def.optional) {
+        values[def.dataKey] = optionalText(def.schema, raw) ?? undefined;
+      } else {
+        const parsed = def.schema.safeParse(raw);
+        const text = parsed.success ? parsed.data : "";
+        values[def.dataKey] = text;
+        if (text) hasRequiredContent = true;
+      }
+    });
+    if (!hasRequiredContent) continue;
 
     const id = ids[i] || randomUUID();
     const prior = existingById.get(id);
-    const changed = !prior || prior.name !== name || prior.description !== description;
+    const changed = !prior || fields.some((def) => (prior as Record<string, unknown>)[def.dataKey] !== values[def.dataKey]);
 
-    result.push({
+    const row = {
       id,
-      name,
-      description,
-      confidence: changed ? "high" : prior.confidence,
-      flagged: changed ? false : prior.flagged,
-      ...(changed ? {} : { flagReason: prior.flagReason }),
-    });
+      ...values,
+      confidence: changed ? "high" : prior!.confidence,
+      flagged: changed ? false : prior!.flagged,
+      ...(!changed && prior!.flagReason !== undefined ? { flagReason: prior!.flagReason } : {}),
+    } as unknown as Record<string, unknown>;
+
+    for (const def of fields) {
+      if (def.optional && row[def.dataKey] === undefined) delete row[def.dataKey];
+    }
+
+    result.push(row as unknown as T);
   }
   return result;
 }
 
-function rebuildTestimonials(formData: FormData, existing: ContentTestimonial[]): ContentTestimonial[] {
-  const ids = formData.getAll("testimonialId").map(String);
-  const quotes = formData.getAll("testimonialQuote").map(String);
-  const authors = formData.getAll("testimonialAuthor").map(String);
-  const roles = formData.getAll("testimonialRole").map(String);
-  const existingById = new Map(existing.map((t) => [t.id, t]));
-
-  const result: ContentTestimonial[] = [];
-  for (let i = 0; i < quotes.length; i++) {
-    const quote = mediumTextSchema.safeParse(quotes[i]).success ? mediumTextSchema.parse(quotes[i]) : "";
-    const author = shortTextSchema.safeParse(authors[i] ?? "").success ? shortTextSchema.parse(authors[i] ?? "") : "";
-    const role = optionalText(shortTextSchema, roles[i] ?? "") ?? undefined;
-    if (!quote && !author) continue;
-
-    const id = ids[i] || randomUUID();
-    const prior = existingById.get(id);
-    const changed = !prior || prior.quote !== quote || prior.author !== author || prior.role !== role;
-
-    result.push({
-      id,
-      quote,
-      author,
-      ...(role ? { role } : {}),
-      confidence: changed ? "high" : prior.confidence,
-      flagged: changed ? false : prior.flagged,
-      ...(changed ? {} : { flagReason: prior.flagReason }),
-    });
-  }
-  return result;
-}
-
-function rebuildStats(formData: FormData, existing: ContentStat[]): ContentStat[] {
-  const ids = formData.getAll("statId").map(String);
-  const values = formData.getAll("statValue").map(String);
-  const labels = formData.getAll("statLabel").map(String);
-  const existingById = new Map(existing.map((s) => [s.id, s]));
-
-  const result: ContentStat[] = [];
-  for (let i = 0; i < values.length; i++) {
-    const value = shortTextSchema.safeParse(values[i]).success ? shortTextSchema.parse(values[i]) : "";
-    const label = shortTextSchema.safeParse(labels[i] ?? "").success ? shortTextSchema.parse(labels[i] ?? "") : "";
-    if (!value && !label) continue;
-
-    const id = ids[i] || randomUUID();
-    const prior = existingById.get(id);
-    const changed = !prior || prior.value !== value || prior.label !== label;
-
-    result.push({
-      id,
-      value,
-      label,
-      confidence: changed ? "high" : prior.confidence,
-      flagged: changed ? false : prior.flagged,
-      ...(changed ? {} : { flagReason: prior.flagReason }),
-    });
-  }
-  return result;
-}
-
-function rebuildFaqs(formData: FormData, existing: ContentFaq[]): ContentFaq[] {
-  const ids = formData.getAll("faqId").map(String);
-  const questions = formData.getAll("faqQuestion").map(String);
-  const answers = formData.getAll("faqAnswer").map(String);
-  const existingById = new Map(existing.map((f) => [f.id, f]));
-
-  const result: ContentFaq[] = [];
-  for (let i = 0; i < questions.length; i++) {
-    const question = shortTextSchema.safeParse(questions[i]).success ? shortTextSchema.parse(questions[i]) : "";
-    const answer = mediumTextSchema.safeParse(answers[i] ?? "").success ? mediumTextSchema.parse(answers[i] ?? "") : "";
-    if (!question && !answer) continue;
-
-    const id = ids[i] || randomUUID();
-    const prior = existingById.get(id);
-    const changed = !prior || prior.question !== question || prior.answer !== answer;
-
-    result.push({
-      id,
-      question,
-      answer,
-      confidence: changed ? "high" : prior.confidence,
-      flagged: changed ? false : prior.flagged,
-      ...(changed ? {} : { flagReason: prior.flagReason }),
-    });
-  }
-  return result;
-}
-
-function rebuildDifferentiators(formData: FormData, existing: ContentDifferentiator[]): ContentDifferentiator[] {
-  const ids = formData.getAll("differentiatorId").map(String);
-  const titles = formData.getAll("differentiatorTitle").map(String);
-  const descriptions = formData.getAll("differentiatorDescription").map(String);
-  const existingById = new Map(existing.map((d) => [d.id, d]));
-
-  const result: ContentDifferentiator[] = [];
-  for (let i = 0; i < titles.length; i++) {
-    const title = shortTextSchema.safeParse(titles[i]).success ? shortTextSchema.parse(titles[i]) : "";
-    const description = mediumTextSchema.safeParse(descriptions[i] ?? "").success
-      ? mediumTextSchema.parse(descriptions[i] ?? "")
-      : "";
-    if (!title && !description) continue;
-
-    const id = ids[i] || randomUUID();
-    const prior = existingById.get(id);
-    const changed = !prior || prior.title !== title || prior.description !== description;
-
-    result.push({
-      id,
-      title,
-      description,
-      confidence: changed ? "high" : prior.confidence,
-      flagged: changed ? false : prior.flagged,
-      ...(changed ? {} : { flagReason: prior.flagReason }),
-    });
-  }
-  return result;
-}
-
-function rebuildProcess(formData: FormData, existing: ContentProcessStep[]): ContentProcessStep[] {
-  const ids = formData.getAll("processId").map(String);
-  const titles = formData.getAll("processTitle").map(String);
-  const descriptions = formData.getAll("processDescription").map(String);
-  const existingById = new Map(existing.map((p) => [p.id, p]));
-
-  const result: ContentProcessStep[] = [];
-  for (let i = 0; i < titles.length; i++) {
-    const title = shortTextSchema.safeParse(titles[i]).success ? shortTextSchema.parse(titles[i]) : "";
-    const description = mediumTextSchema.safeParse(descriptions[i] ?? "").success
-      ? mediumTextSchema.parse(descriptions[i] ?? "")
-      : "";
-    if (!title && !description) continue;
-
-    const id = ids[i] || randomUUID();
-    const prior = existingById.get(id);
-    const changed = !prior || prior.title !== title || prior.description !== description;
-
-    result.push({
-      id,
-      title,
-      description,
-      confidence: changed ? "high" : prior.confidence,
-      flagged: changed ? false : prior.flagged,
-      ...(changed ? {} : { flagReason: prior.flagReason }),
-    });
-  }
-  return result;
-}
+const SERVICE_FIELDS: ArrayFieldConfig<ContentService>[] = [
+  { formName: "serviceName", dataKey: "name", schema: shortTextSchema },
+  { formName: "serviceDescription", dataKey: "description", schema: mediumTextSchema },
+];
+const TESTIMONIAL_FIELDS: ArrayFieldConfig<ContentTestimonial>[] = [
+  { formName: "testimonialQuote", dataKey: "quote", schema: mediumTextSchema },
+  { formName: "testimonialAuthor", dataKey: "author", schema: shortTextSchema },
+  { formName: "testimonialRole", dataKey: "role", schema: shortTextSchema, optional: true },
+];
+const STAT_FIELDS: ArrayFieldConfig<ContentStat>[] = [
+  { formName: "statValue", dataKey: "value", schema: shortTextSchema },
+  { formName: "statLabel", dataKey: "label", schema: shortTextSchema },
+];
+const FAQ_FIELDS: ArrayFieldConfig<ContentFaq>[] = [
+  { formName: "faqQuestion", dataKey: "question", schema: shortTextSchema },
+  { formName: "faqAnswer", dataKey: "answer", schema: mediumTextSchema },
+];
+const DIFFERENTIATOR_FIELDS: ArrayFieldConfig<ContentDifferentiator>[] = [
+  { formName: "differentiatorTitle", dataKey: "title", schema: shortTextSchema },
+  { formName: "differentiatorDescription", dataKey: "description", schema: mediumTextSchema },
+];
+const PROCESS_FIELDS: ArrayFieldConfig<ContentProcessStep>[] = [
+  { formName: "processTitle", dataKey: "title", schema: shortTextSchema },
+  { formName: "processDescription", dataKey: "description", schema: mediumTextSchema },
+];
+const SERVICE_AREA_FIELDS: ArrayFieldConfig<ContentServiceArea>[] = [
+  { formName: "serviceAreaName", dataKey: "name", schema: shortTextSchema },
+];
+const HOURS_FIELDS: ArrayFieldConfig<ContentHours>[] = [
+  { formName: "hoursDays", dataKey: "days", schema: shortTextSchema },
+  { formName: "hoursHours", dataKey: "hours", schema: shortTextSchema },
+];
+const OFFER_FIELDS: ArrayFieldConfig<ContentOffer>[] = [
+  { formName: "offerName", dataKey: "name", schema: shortTextSchema },
+  { formName: "offerPrice", dataKey: "price", schema: shortTextSchema },
+];
+const CREDENTIAL_FIELDS: ArrayFieldConfig<ContentCredential>[] = [
+  { formName: "credentialLabel", dataKey: "label", schema: shortTextSchema },
+];
 
 function rebuildColors(formData: FormData, existing: ContentColor[]): ContentColor[] {
   const roles: ContentColor["role"][] = ["primary", "secondary", "accent"];
@@ -249,12 +183,17 @@ async function applyContentUpdate(clientId: string, formData: FormData) {
   const existingFaqs = (record.faqs as unknown as ContentFaq[] | null) ?? [];
   const existingDifferentiators = (record.differentiators as unknown as ContentDifferentiator[] | null) ?? [];
   const existingProcess = (record.process as unknown as ContentProcessStep[] | null) ?? [];
+  const existingServiceAreas = (record.serviceAreas as unknown as ContentServiceArea[] | null) ?? [];
+  const existingHours = (record.hours as unknown as ContentHours[] | null) ?? [];
+  const existingOffers = (record.offers as unknown as ContentOffer[] | null) ?? [];
+  const existingCredentials = (record.credentials as unknown as ContentCredential[] | null) ?? [];
   const existingColors = (record.brandColors as unknown as ContentColor[] | null) ?? [];
   const existingFlags = (record.fieldFlags as unknown as FieldFlags | null) ?? {};
 
   const businessName = optionalText(shortTextSchema, formData.get("businessName"));
   const tagline = optionalText(shortTextSchema, formData.get("tagline"));
   const aboutCopy = optionalText(longTextSchema, formData.get("aboutCopy"));
+  const ctaLabel = optionalText(shortTextSchema, formData.get("ctaLabel"));
   const contactEmail = optionalText(contactFieldSchema, formData.get("contactEmail"));
   const contactPhone = optionalText(contactFieldSchema, formData.get("contactPhone"));
   const contactAddress = optionalText(contactFieldSchema, formData.get("contactAddress"));
@@ -269,13 +208,18 @@ async function applyContentUpdate(clientId: string, formData: FormData) {
   clearIfChanged("contactAddress", record.contactAddress, contactAddress);
   clearIfChanged("contactEmail", record.contactEmail, contactEmail);
   clearIfChanged("contactPhone", record.contactPhone, contactPhone);
+  clearIfChanged("ctaLabel", record.ctaLabel, ctaLabel);
 
-  const services = rebuildServices(formData, existingServices);
-  const testimonials = rebuildTestimonials(formData, existingTestimonials);
-  const stats = rebuildStats(formData, existingStats);
-  const faqs = rebuildFaqs(formData, existingFaqs);
-  const differentiators = rebuildDifferentiators(formData, existingDifferentiators);
-  const process = rebuildProcess(formData, existingProcess);
+  const services = rebuildArraySection(formData, "serviceId", SERVICE_FIELDS, existingServices);
+  const testimonials = rebuildArraySection(formData, "testimonialId", TESTIMONIAL_FIELDS, existingTestimonials);
+  const stats = rebuildArraySection(formData, "statId", STAT_FIELDS, existingStats);
+  const faqs = rebuildArraySection(formData, "faqId", FAQ_FIELDS, existingFaqs);
+  const differentiators = rebuildArraySection(formData, "differentiatorId", DIFFERENTIATOR_FIELDS, existingDifferentiators);
+  const process = rebuildArraySection(formData, "processId", PROCESS_FIELDS, existingProcess);
+  const serviceAreas = rebuildArraySection(formData, "serviceAreaId", SERVICE_AREA_FIELDS, existingServiceAreas);
+  const hours = rebuildArraySection(formData, "hoursId", HOURS_FIELDS, existingHours);
+  const offers = rebuildArraySection(formData, "offerId", OFFER_FIELDS, existingOffers);
+  const credentials = rebuildArraySection(formData, "credentialId", CREDENTIAL_FIELDS, existingCredentials);
   const brandColors = rebuildColors(formData, existingColors);
 
   // Images aren't edited as text here — removal and the flagged-image replacement
@@ -288,6 +232,7 @@ async function applyContentUpdate(clientId: string, formData: FormData) {
       businessName,
       tagline,
       aboutCopy,
+      ctaLabel,
       contactEmail,
       contactPhone,
       contactAddress,
@@ -297,6 +242,10 @@ async function applyContentUpdate(clientId: string, formData: FormData) {
       faqs: faqs as unknown as Prisma.InputJsonValue,
       differentiators: differentiators as unknown as Prisma.InputJsonValue,
       process: process as unknown as Prisma.InputJsonValue,
+      serviceAreas: serviceAreas as unknown as Prisma.InputJsonValue,
+      hours: hours as unknown as Prisma.InputJsonValue,
+      offers: offers as unknown as Prisma.InputJsonValue,
+      credentials: credentials as unknown as Prisma.InputJsonValue,
       brandColors: brandColors as unknown as Prisma.InputJsonValue,
       fieldFlags: fieldFlags as unknown as Prisma.InputJsonValue,
     },
