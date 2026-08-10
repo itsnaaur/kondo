@@ -154,6 +154,17 @@ model ContentRecord {
 
   crawlPagesCount      Int     @default(0)
   sourceCrawlTruncated Boolean @default(false)
+  // Set when the structuring call returned almost nothing outside services — testimonials,
+  // stats, faqs, differentiators, process, serviceAreas, hours, offers, credentials all (or
+  // nearly all) empty — despite a substantial amount of selected source text. Confirmed live
+  // this pattern can mean a completed, "successful" (schema-valid, non-truncated) tool call
+  // that the model nonetheless emptied out for reasons validateShape/coerceTextArray can't
+  // detect, since an empty array is *usually* the correct answer for these fields (see
+  // structure-and-rewrite.ts). This flag exists because that failure mode is otherwise
+  // indistinguishable from a genuinely thin site: status still goes to READY_FOR_REVIEW,
+  // pagesAnalyzed still looks healthy. Always recomputed fresh on every analysis (including
+  // re-analysis), same as sourceCrawlTruncated — a later successful run clears it.
+  possibleExtractionCollapse Boolean @default(false)
   // How many of crawlPagesCount were actually fed to the structuring/rewrite call (see
   // lib/content/select-relevant-pages.ts) — the two numbers routinely differ a lot on
   // anything bigger than a handful of pages (confirmed live: 92 crawled, 12 read), and

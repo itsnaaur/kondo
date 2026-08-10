@@ -140,6 +140,27 @@ export async function runAnalysisInBackground(clientId: string, siteUrl: string)
     const offers = structured.offers.map((o) => ({ ...o, id: randomUUID() }));
     const credentials = structured.credentials.map((c) => ({ ...c, id: randomUUID() }));
 
+    // Detects a structuring call that completed (schema-valid, not truncated) but came back
+    // essentially empty outside services — confirmed live this can happen silently: a large
+    // early array can apparently exhaust the model's attention for the smaller fields that
+    // follow, and since an empty array is *usually* the correct answer for these nine fields
+    // individually, nothing in validateShape/coerceTextArray catches it. Calibrated against
+    // all 7 real clients in dev, not just guessed: "more than half the arrays empty" was the
+    // first idea, but Propell Property genuinely has 6 of these 9 empty (a property advisory
+    // with no FAQs/process/hours/offers page) with a completely healthy extraction otherwise
+    // — that threshold would have flagged it every time. "8 or more of 9 empty" doesn't
+    // trigger on any real client measured, but does catch the actual collapse (9 of 9 empty,
+    // twice, reproducibly, on a client whose source text plainly contained several of them).
+    const selectedCharCount = selectedPages.reduce((sum, p) => sum + p.text.length, 0);
+    const nonServiceArrays = [testimonials, stats, faqs, differentiators, process, serviceAreas, hours, offers, credentials];
+    const emptyNonServiceArrays = nonServiceArrays.filter((a) => a.length === 0).length;
+    // Below this, a genuinely thin site (little to extract at all) makes an empty result
+    // unsurprising rather than suspicious — confirmed live Brightwater's single-page,
+    // 4.7k-char site is a real, healthy extraction, not a collapse candidate.
+    const MIN_CHARS_FOR_COLLAPSE_CHECK = 20_000;
+    const possibleExtractionCollapse =
+      selectedCharCount >= MIN_CHARS_FOR_COLLAPSE_CHECK && emptyNonServiceArrays >= 8;
+
     await prisma.contentRecord.upsert({
       where: { clientId },
       create: {
@@ -169,6 +190,7 @@ export async function runAnalysisInBackground(clientId: string, siteUrl: string)
         crawlPagesCount: pages.length,
         pagesAnalyzed: selectedPages.length,
         sourceCrawlTruncated: truncated,
+        possibleExtractionCollapse,
         reviewedAt: null,
         reviewedByUserId: null,
       },
@@ -198,6 +220,7 @@ export async function runAnalysisInBackground(clientId: string, siteUrl: string)
         crawlPagesCount: pages.length,
         pagesAnalyzed: selectedPages.length,
         sourceCrawlTruncated: truncated,
+        possibleExtractionCollapse,
         // Explicitly reset on every re-analysis — this is what re-locks Choose Template /
         // Generate & Preview until a human re-approves the fresh extraction. See the plan's
         // gating fix: Client.status is never the gate, contentRecord.reviewedAt is.

@@ -106,6 +106,16 @@ export default async function ClientWorkspacePage({ params }: { params: Promise<
             </form>
           </div>
 
+          {contentRecord.possibleExtractionCollapse && (
+            <div className="rounded-lg border border-red-700/60 bg-red-950/30 px-4 py-3 text-sm text-red-300">
+              This extraction came back with almost nothing outside of services — testimonials, stats,
+              FAQs, differentiators, and similar sections are empty despite a substantial amount of
+              source text. That pattern has previously meant the extraction fell over, not that the
+              site genuinely has none of this content. Worth checking the live site before approving,
+              or trying Re-analyse Site.
+            </div>
+          )}
+
           {contentRecord.pagesAnalyzed < contentRecord.crawlPagesCount && (
             <div className="rounded-lg border border-amber-700/60 bg-amber-950/30 px-4 py-3 text-sm text-amber-300">
               Only {contentRecord.pagesAnalyzed} of {contentRecord.crawlPagesCount} crawled pages were
