@@ -112,49 +112,46 @@ export function renderAtlas(c: TemplateContent): { body: string; css: string } {
   const partnerStrip = partners.length
     ? `<section class="at-strip" style="border-top:1px solid var(--line)"><div class="at-wrap at-strip__in">
     <p class="at-strip__label">Trusted partners &amp; accreditations</p>
-    <div class="at-partners">${partners.map((l) => `<img src="${esc(l.url)}" alt="">`).join("")}</div>
+    <div class="at-partners">${partners.map((l) => `<span><img src="${esc(l.url)}" alt=""></span>`).join("")}</div>
   </div></section>`
     : "";
 
   const why = diffs.length
     ? `<section class="at-why" id="why"><div class="at-wrap at-why__in">
-    <div class="at-head">
+    <div class="at-head at-why__head">
       <p class="at-eyebrow">Why us</p>
       <h2 class="at-h2">What makes ${esc(c.businessName)} <span class="at-em">different</span></h2>
     </div>
-    <div class="at-why__grid">${diffs.map((d) => `<div class="at-why__cell">
-      <h3>${esc(d.title)}</h3>${d.description ? `<p>${esc(d.description)}</p>` : ""}
-    </div>`).join("")}</div>
+    <div class="at-why__grid">${diffs.map((d) => `<article class="at-why__card">
+      <h3>${esc(d.title)}</h3>
+      ${d.description ? `<p>${esc(d.description)}</p>` : ""}
+    </article>`).join("")}</div>
   </div></section>`
     : "";
 
-  // Seven or fewer reads well as cards; beyond that a two-column index, which
-  // is what a long capability list actually is.
-  const asCards = services.length > 0 && services.length <= 7;
+  // One treatment at every length — see styles.ts. The old card/index switch at
+  // seven meant a client never knew which page they'd get.
   const servicesSection = services.length
     ? `<section class="at-svc" id="services"><div class="at-wrap at-svc__in">
-    <div class="at-head">
+    <div class="at-head at-svc__head">
       <p class="at-eyebrow">What we do</p>
       <h2 class="at-h2">Everything ${esc(c.businessName)} <span class="at-em">looks after</span></h2>
     </div>
-    ${asCards
-      ? `<div class="at-svc__cards">${services.map((s) => `<article class="at-svc__card">
-      <h3>${esc(s.name)}</h3>${s.description ? `<p>${esc(s.description)}</p>` : ""}
-    </article>`).join("")}</div>`
-      : `<div class="at-svc__index">${services.map((s) => `<div class="at-svc__item">
-      <h3>${esc(s.name)}</h3>${s.description ? `<p>${esc(s.description)}</p>` : ""}
-    </div>`).join("")}</div>`}
+    <dl class="at-svc__list">${services.map((s) => `<div class="at-svc__item">
+      <dt>${esc(s.name)}</dt>${s.description ? `<dd>${esc(s.description)}</dd>` : ""}
+    </div>`).join("")}</dl>
   </div></section>`
     : "";
 
   const processSection = process.length
     ? `<section class="at-proc" id="process"><div class="at-wrap at-proc__in">
-    <div class="at-head">
+    <div class="at-head at-proc__head">
       <p class="at-eyebrow">How it works</p>
       <h2 class="at-h2">The path from here <span class="at-em">to done</span></h2>
     </div>
-    <div class="at-proc__list">${process.map((s) => `<div class="at-proc__step">
-      <h3>${esc(s.title)}</h3>${s.description ? `<p>${esc(s.description)}</p>` : "<span></span>"}
+    <div class="at-proc__list">${process.map((s, i) => `<div class="at-proc__step">
+      <span class="at-proc__no">${String(i + 1).padStart(2, "0")}</span>
+      <h3>${esc(s.title)}</h3>${s.description ? `<p>${esc(s.description)}</p>` : ""}
     </div>`).join("")}</div>
   </div></section>`
     : "";
@@ -192,17 +189,28 @@ export function renderAtlas(c: TemplateContent): { body: string; css: string } {
   </div></section>`
     : "";
 
-  const reviews = quotes.length
-    ? `<section class="at-says" id="reviews"><div class="at-wrap at-says__in">
-    <div class="at-head">
+ const reviews = quotes.length
+    ? (() => {
+        const [lead, ...rest] = quotes;
+        return `<section class="at-says" id="reviews"><div class="at-wrap at-says__in">
+    <div class="at-head at-says__head">
       <p class="at-eyebrow">In their words</p>
       <h2 class="at-h2">What clients <span class="at-em">actually say</span></h2>
     </div>
-    <div class="at-says__grid">${quotes.slice(0, 9).map((q) => `<blockquote class="at-quote">
+    <blockquote class="at-says__lead">
+      “${esc(lead.quote)}”
+      <cite>${esc(lead.author)}${lead.role ? " — " + esc(lead.role) : ""}</cite>
+    </blockquote>
+    ${
+      rest.length
+        ? `<div class="at-says__rest">${rest.slice(0, 2).map((q) => `<blockquote>
       <p>${esc(q.quote)}</p>
       <footer><b>${esc(q.author)}</b>${q.role ? " — " + esc(q.role) : ""}</footer>
-    </blockquote>`).join("")}</div>
-  </div></section>`
+    </blockquote>`).join("")}</div>`
+        : ""
+    }
+  </div></section>`;
+      })()
     : "";
 
   const faqSection = faqs.length
@@ -223,26 +231,31 @@ export function renderAtlas(c: TemplateContent): { body: string; css: string } {
   // missing one simply has one fewer row rather than a placeholder. This duplicates the
   // contact rows already in the footer, deliberately — the CTA is where a prospect decides
   // to act and the footer is where they look afterwards, and neither reliably gets read.
-  const ctaFacts: string[] = [];
+  // Contact details as a panel beside the ask, not a ruled list — the services
+  // glossary already owns that construction. Each entry is an extracted field,
+  // so a client missing one has one fewer entry rather than a placeholder.
+  const ctaSide: string[] = [];
   if (c.contactPhone)
-    ctaFacts.push(`<div><dt>Phone</dt><dd><a href="${esc(telHref(c.contactPhone))}">${esc(c.contactPhone)}</a></dd></div>`);
+    ctaSide.push(`<div><span>Phone</span><strong><a href="${esc(telHref(c.contactPhone))}">${esc(c.contactPhone)}</a></strong></div>`);
   if (c.contactEmail)
-    ctaFacts.push(`<div><dt>Email</dt><dd><a href="mailto:${esc(c.contactEmail)}">${esc(c.contactEmail)}</a></dd></div>`);
+    ctaSide.push(`<div><span>Email</span><strong><a href="mailto:${esc(c.contactEmail)}">${esc(c.contactEmail)}</a></strong></div>`);
   if (c.contactAddress)
-    ctaFacts.push(`<div><dt>Where to find us</dt><dd>${esc(c.contactAddress)}</dd></div>`);
+    ctaSide.push(`<div><span>Where to find us</span><strong>${esc(c.contactAddress)}</strong></div>`);
 
-  const cta = `<section class="at-cta${ctaFacts.length ? "" : " at-cta--slim"}" id="contact">
+  const cta = `<section class="at-cta${ctaSide.length ? "" : " at-cta--slim"}" id="contact">
   <div class="at-wrap at-cta__in">
-    <div>
-      <h2 class="at-h2">Ready when you are.</h2>
-      <p class="at-cta__note">No obligation and no pitch — just a conversation about what you're after.</p>
-      <div class="at-actions">${cta1}${
-        c.contactEmail
-          ? `<a class="at-btn at-btn--ghost" href="mailto:${esc(c.contactEmail)}">Send us a message</a>`
-          : ""
-      }</div>
+    <div class="at-cta__panel">
+      <div class="at-cta__ask">
+        <h2 class="at-h2">Ready when you are.</h2>
+        <p class="at-cta__note">No obligation and no pitch — just a conversation about what you're after.</p>
+        <div class="at-actions">${cta1}${
+          c.contactEmail
+            ? `<a class="at-btn at-btn--ghost" href="mailto:${esc(c.contactEmail)}">Send us a message</a>`
+            : ""
+        }</div>
+      </div>
+      ${ctaSide.length ? `<div class="at-cta__side">${ctaSide.join("")}</div>` : ""}
     </div>
-    ${ctaFacts.length ? `<dl class="at-cta__facts">${ctaFacts.join("")}</dl>` : ""}
   </div>
 </section>`;
 

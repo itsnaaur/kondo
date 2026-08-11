@@ -141,9 +141,27 @@ body.tpl-atlas {
 /* ---------- stat / partner strip ---------- */
 
 .at-strip { border-bottom: 1px solid var(--line); background: var(--paper); }
-.at-strip__in { padding-block: clamp(30px, 3.6vw, 46px); }
-.at-partners { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: clamp(24px, 5vw, 56px); }
-.at-partners img { max-height: 34px; width: auto; filter: grayscale(1); opacity: 0.6; }
+.at-strip__in { padding-block: clamp(40px, 4.6vw, 64px); }
+.at-partners {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(146px, 100%), 1fr));
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+}
+.at-partners > span {
+  background: var(--paper);
+  display: grid; place-items: center;
+  padding: clamp(18px, 2.2vw, 28px) clamp(12px, 1.6vw, 20px);
+  min-height: 100px;
+  transition: background-color 0.18s ease;
+}
+.at-partners > span:hover { background: var(--mist); }
+/* Full colour and roughly double the old size. These are health funds and
+   accreditations — a prospect checking whether their insurer is accepted has
+   to be able to read them, and desaturating is what stops a Bupa logo looking
+   like Bupa. */
+.at-partners img { max-height: 58px; max-width: 100%; width: auto; height: auto; object-fit: contain; }
 .at-strip__label {
   font-size: 0.7rem; letter-spacing: 0.14em; text-transform: uppercase;
   color: var(--ink-muted); margin: 0 0 18px; text-align: center;
@@ -151,88 +169,116 @@ body.tpl-atlas {
 
 /* ---------- differentiators: the strongest reliable content ---------- */
 
+/* ---------- differentiators: the page's one card section ----------
+   Every section can't be ruled rows any more than every section can be a grid.
+   This is where boxes earn their place: short punchy titles with a sentence
+   each, four to eight of them, no natural order. Cards suit that.
+
+   Deliberately unnumbered. Counting implies an order, and these have none —
+   the same reason a services list isn't numbered. The numerals belong to the
+   process band, where the sequence is the point; using them in both places
+   made two sections read as the same object. What stops this reading as a
+   lattice is the stagger and the rule, not a figure. */
+
 .at-why { background: var(--deep); color: var(--paper); }
 .at-why__in { padding-block: var(--band); }
 .at-why .at-eyebrow { color: rgb(255 255 255 / 0.55); }
 .at-why .at-em { color: var(--paper); opacity: 0.9; }
-.at-why__grid {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
-  gap: 1px; background: rgb(255 255 255 / 0.14);
-  border: 1px solid rgb(255 255 255 / 0.14);
-}
-.at-why__cell {
-  background: var(--deep); padding: clamp(26px, 2.6vw, 34px) clamp(22px, 2.2vw, 30px);
-  transition: background-color 0.22s ease;
-}
-.at-why__cell:hover { background: var(--deep-soft); }
-.at-why__cell h3 {
-  margin: 0 0 10px; font-size: 1.06rem; font-weight: 600;
-  letter-spacing: -0.022em; line-height: 1.28;
-}
-.at-why__cell p { margin: 0; font-size: 0.94rem; line-height: 1.6; color: rgb(255 255 255 / 0.64); }
+.at-why__head { max-width: 44ch; margin-bottom: clamp(34px, 4.4vw, 62px); }
 
-/* ---------- services ---------- */
+.at-why__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(276px, 100%), 1fr));
+  gap: clamp(16px, 2vw, 26px);
+  align-items: start;
+}
+.at-why__card {
+  position: relative;
+  background: var(--deep-soft);
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 4px;
+  padding: clamp(26px, 2.6vw, 34px) clamp(24px, 2.4vw, 32px);
+  transition: transform 0.22s ease, border-color 0.22s ease;
+}
+.at-why__card:hover { transform: translateY(-4px); border-color: color-mix(in srgb, var(--accent) 60%, transparent); }
+/* Stagger, so a row of four doesn't read as a spec-sheet lattice. */
+.at-why__card:nth-child(even) { margin-top: clamp(18px, 2.6vw, 40px); }
+/* A short accent rule instead of a number — it marks the card without
+   claiming a position in a sequence. */
+.at-why__card::before {
+  content: "";
+  display: block;
+  width: 26px; height: 2px;
+  background: var(--accent);
+  margin-bottom: clamp(18px, 2vw, 24px);
+  transition: width 0.28s cubic-bezier(0.2, 0, 0.1, 1);
+}
+.at-why__card:hover::before { width: 48px; }
+.at-why__card h3 {
+  margin: 0 0 10px;
+  font-size: clamp(1.06rem, 1.7vw, 1.24rem);
+  font-weight: 600; letter-spacing: -0.026em; line-height: 1.22;
+}
+.at-why__card p { margin: 0; font-size: 0.95rem; line-height: 1.62; color: rgb(255 255 255 / 0.66); }
+
+/* ---------- services: a glossary, not cards ----------
+   Was cards below seven services and a two-column index above — two layouts,
+   so a client never knew which page they'd get, and the switch point was
+   arbitrary. One treatment instead: a definition list flowing across two
+   columns, name in the accent and description running on beneath. Reads like
+   an index in a book, holds identically at four services and nineteen. */
 
 .at-svc__in { padding-block: var(--band); }
+.at-svc__head { max-width: 40ch; margin-bottom: clamp(30px, 4vw, 54px); }
 
-/* Few services: cards with room to breathe. */
-.at-svc__cards {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr));
-  gap: clamp(16px, 2vw, 26px);
-}
-.at-svc__card {
-  border: 1px solid var(--line); padding: clamp(26px, 2.6vw, 34px);
-  transition: border-color 0.2s ease, transform 0.2s ease;
-}
-.at-svc__card:hover { border-color: var(--accent); transform: translateY(-2px); }
-.at-svc__card h3 {
-  margin: 0 0 10px; font-size: 1.16rem; font-weight: 600;
-  letter-spacing: -0.024em; line-height: 1.24;
-}
-.at-svc__card p { margin: 0; color: var(--ink-muted); font-size: 0.96rem; line-height: 1.58; }
-.at-svc__card::before {
-  content: ""; display: block; width: 24px; height: 2px;
-  background: var(--accent); margin-bottom: 18px;
-  transition: width 0.25s cubic-bezier(0.2, 0, 0.1, 1);
-}
-.at-svc__card:hover::before { width: 44px; }
-
-/* Many services: a two-column index. Sixteen cards is a wall; sixteen index
-   entries is a capability list, which is what a long service list actually is. */
-.at-svc__index {
-  columns: 2; column-gap: clamp(26px, 4vw, 64px);
-  border-top: 1px solid var(--line);
+.at-svc__list {
+  columns: 2;
+  column-gap: clamp(30px, 5vw, 76px);
+  margin: 0;
 }
 .at-svc__item {
-  break-inside: avoid; padding: 17px 2px;
+  break-inside: avoid;
+  padding-block: clamp(13px, 1.5vw, 19px);
   border-bottom: 1px solid var(--line);
 }
-.at-svc__item h3 {
-  margin: 0 0 5px; font-size: 1rem; font-weight: 600;
-  letter-spacing: -0.02em; line-height: 1.25;
+.at-svc__item:first-child { border-top: 1px solid var(--line); }
+.at-svc__item dt {
+  font-size: 1.02rem; font-weight: 600;
+  letter-spacing: -0.024em; line-height: 1.25;
+  color: var(--ink);
 }
-.at-svc__item p { margin: 0; color: var(--ink-muted); font-size: 0.9rem; line-height: 1.5; }
+.at-svc__item dd {
+  margin: 5px 0 0;
+  font-size: 0.9rem; line-height: 1.56; color: var(--ink-muted);
+}
 
-/* ---------- process ---------- */
+/* ---------- process: numerals across ----------
+   A vertical timeline is still a list, and this page already has one. Here the
+   numbers themselves are the structure — set large in the brand colour,
+   wrapping across the band with the step beneath each. No rail, no rules, no
+   boxes. Reads as a sequence because the figures count up, not because a line
+   says so. */
 
 .at-proc { background: var(--mist); }
 .at-proc__in { padding-block: var(--band); }
-.at-proc__list { counter-reset: step; border-top: 1px solid var(--line); }
-.at-proc__step {
-  counter-increment: step;
-  display: grid; grid-template-columns: 62px minmax(0, 0.7fr) minmax(0, 1.3fr);
-  gap: clamp(12px, 2.5vw, 36px);
-  align-items: baseline;
-  padding: 20px 2px;
-  border-bottom: 1px solid var(--line);
+.at-proc__head { max-width: 40ch; margin-bottom: clamp(34px, 4.4vw, 60px); }
+
+.at-proc__list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(196px, 100%), 1fr));
+  gap: clamp(26px, 3.4vw, 48px) clamp(20px, 2.6vw, 38px);
 }
-.at-proc__step::before {
-  content: counter(step, decimal-leading-zero);
-  font-size: 0.86rem; font-weight: 600; letter-spacing: 0.04em;
-  color: var(--accent); font-variant-numeric: tabular-nums;
+.at-proc__step { position: relative; }
+.at-proc__no {
+  display: block;
+  font-size: clamp(2.2rem, 4.2vw, 3.4rem);
+  font-weight: 600; letter-spacing: -0.055em; line-height: 0.9;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  margin-bottom: clamp(12px, 1.4vw, 18px);
 }
-.at-proc__step h3 { margin: 0; font-size: 1.06rem; font-weight: 600; letter-spacing: -0.022em; }
-.at-proc__step p { margin: 0; color: var(--ink-muted); font-size: 0.95rem; line-height: 1.55; }
+.at-proc__step h3 { margin: 0 0 7px; font-size: 1.04rem; font-weight: 600; letter-spacing: -0.024em; line-height: 1.2; }
+.at-proc__step p { margin: 0; font-size: 0.92rem; line-height: 1.58; color: var(--ink-muted); }
 
 /* ---------- about + team ---------- */
 
@@ -243,10 +289,13 @@ body.tpl-atlas {
 }
 .at-about__body { font-size: clamp(1.02rem, 1.7vw, 1.2rem); line-height: 1.6; margin: 0; letter-spacing: -0.012em; }
 
-.at-team { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: clamp(14px, 1.8vw, 22px); }
-.at-team figure { margin: 0; }
-.at-team img { width: 100%; aspect-ratio: 4 / 5; object-fit: cover; border-radius: 3px; }
-.at-team figcaption { padding-top: 14px; }
+/* Team photographs run as a filmstrip — images and names, no frames. The
+   differentiator section already owns cards; repeating them here would make
+   two of nine sections identical in construction. */
+.at-team { display: flex; flex-wrap: wrap; gap: clamp(14px, 2vw, 26px); }
+.at-team figure { margin: 0; flex: 1 1 clamp(130px, 15vw, 180px); max-width: 200px; }
+.at-team img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; border-radius: 3px; }
+.at-team figcaption { padding-top: 12px; }
 .at-team b { display: block; font-size: 1rem; font-weight: 600; letter-spacing: -0.02em; }
 .at-team span { display: block; margin-top: 3px; font-size: 0.86rem; color: var(--ink-muted); line-height: 1.4; }
 
@@ -259,19 +308,45 @@ body.tpl-atlas {
   background: linear-gradient(to top, rgb(0 0 0 / 0.6), transparent);
 }
 
-/* ---------- testimonials ---------- */
+/* ---------- testimonials: one statement, three supporting ----------
+   A column of twelve quotes is a list, and the page has its list already. One
+   quote gets real size and three sit beneath it in a single row, hairline
+   separated. Capping at three is the point — a prospect reads one testimonial
+   properly or twelve not at all. */
 
-.at-says { background: var(--mist); }
+.at-says { background: var(--accent); color: var(--accent-ink); }
 .at-says__in { padding-block: var(--band); }
-.at-says__grid { columns: 3; column-gap: clamp(14px, 1.8vw, 22px); }
-.at-quote {
-  break-inside: avoid; margin: 0 0 clamp(14px, 1.8vw, 22px);
-  background: var(--paper); border: 1px solid var(--line);
-  padding: clamp(24px, 2.4vw, 30px);
+.at-says .at-eyebrow { color: color-mix(in srgb, var(--accent-ink) 60%, transparent); justify-content: center; }
+.at-says__head { text-align: center; max-width: 34ch; margin-inline: auto; margin-bottom: clamp(34px, 4.2vw, 56px); }
+.at-says .at-em { color: currentColor; opacity: 0.82; }
+
+.at-says__lead {
+  margin: 0 auto;
+  max-width: 24ch;
+  text-align: center;
+  font-size: clamp(1.5rem, 3.6vw, 2.7rem);
+  line-height: 1.2; letter-spacing: -0.032em; font-weight: 500;
 }
-.at-quote p { margin: 0 0 16px; font-size: 1rem; line-height: 1.54; letter-spacing: -0.013em; }
-.at-quote footer { font-size: 0.86rem; color: var(--ink-muted); }
-.at-quote footer b { color: var(--ink); font-weight: 600; }
+.at-says__lead cite {
+  display: block; margin-top: clamp(20px, 2.4vw, 30px);
+  font-style: normal; font-size: 0.76rem; letter-spacing: 0.14em;
+  text-transform: uppercase; opacity: 0.72;
+}
+/* Two supporting quotes at unequal widths, the second dropped — the process
+   band above is already an even row of items, so this can't be one too. */
+.at-says__rest {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+  gap: clamp(24px, 4vw, 64px);
+  margin-top: clamp(44px, 5.4vw, 78px);
+  padding-top: clamp(28px, 3.4vw, 42px);
+  border-top: 1px solid color-mix(in srgb, var(--accent-ink) 28%, transparent);
+}
+.at-says__rest blockquote { margin: 0; }
+.at-says__rest blockquote:nth-child(2) { margin-top: clamp(18px, 2.4vw, 34px); }
+.at-says__rest p { margin: 0 0 10px; font-size: 0.95rem; line-height: 1.56; letter-spacing: -0.012em; }
+.at-says__rest footer { font-size: 0.78rem; letter-spacing: 0.06em; opacity: 0.74; }
+.at-says__rest footer b { font-weight: 600; opacity: 1; }
 
 /* ---------- faq ---------- */
 
@@ -293,43 +368,47 @@ body.tpl-atlas {
 .at-faq details[open] summary::after { transform: rotate(-135deg); margin-top: -2px; }
 .at-faq details p { margin: 0 0 24px; color: var(--ink-muted); font-size: 0.97rem; line-height: 1.62; max-width: 70ch; }
 
-/* ---------- cta + footer ----------
-   The CTA carries the contact details rather than a heading and two buttons on
-   a colour stripe. Everything in it comes from extracted fields, so the band
-   ends up being the section a prospect actually needs instead of decoration
-   before the footer. */
+/* ---------- cta: a split panel ----------
+   The contact rows were a ruled definition list — structurally the same object
+   as the services glossary. Two panels side by side instead: the ask on the
+   accent, the details on paper, forming one block rather than a band with a
+   list in it. */
 
-.at-cta { background: var(--accent); color: var(--accent-ink); }
-.at-cta__in {
-  padding-block: clamp(50px, 6.5vw, 88px);
-  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 0.92fr);
-  gap: clamp(30px, 4.5vw, 64px); align-items: start;
+.at-cta { background: var(--mist); }
+.at-cta__in { padding-block: clamp(52px, 6.5vw, 92px); }
+.at-cta__panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1.06fr) minmax(0, 0.94fr);
+  border-radius: 5px;
+  overflow: hidden;
+  box-shadow: 0 30px 64px -34px rgb(16 24 40 / 0.34);
 }
-.at-cta .at-h2 { max-width: 15ch; }
-.at-cta__note { margin: 16px 0 0; max-width: 42ch; opacity: 0.82; font-size: 0.96rem; line-height: 1.58; }
-.at-cta .at-actions { margin-top: 26px; }
-.at-cta .at-btn--solid { background: var(--paper); color: var(--ink); }
-.at-cta .at-btn--ghost { color: currentColor; }
-.at-cta .at-btn--ghost:hover { background: var(--accent-ink); color: var(--accent); border-color: var(--accent-ink); }
+.at-cta__ask {
+  background: var(--accent); color: var(--accent-ink);
+  padding: clamp(34px, 4vw, 58px) clamp(28px, 3.4vw, 48px);
+}
+.at-cta__ask .at-h2 { max-width: 16ch; }
+.at-cta__note { margin: 16px 0 0; max-width: 38ch; opacity: 0.84; font-size: 0.97rem; line-height: 1.58; }
+.at-cta__ask .at-actions { margin-top: 28px; }
+.at-cta__ask .at-btn--solid { background: var(--paper); color: var(--ink); }
+.at-cta__ask .at-btn--ghost { color: currentColor; border-color: color-mix(in srgb, var(--accent-ink) 46%, transparent); }
+.at-cta__ask .at-btn--ghost:hover { background: var(--accent-ink); color: var(--accent); border-color: var(--accent-ink); }
 
-/* Contact facts, ruled rather than boxed — the accent ground is already doing
-   enough work without cards on top of it. */
-.at-cta__facts { margin: 0; }
-.at-cta__facts > div {
-  display: grid; grid-template-columns: 82px minmax(0, 1fr); gap: 16px;
-  padding: 14px 0; border-top: 1px solid color-mix(in srgb, var(--accent-ink) 26%, transparent);
+.at-cta__side {
+  background: var(--paper);
+  padding: clamp(34px, 4vw, 58px) clamp(28px, 3.4vw, 48px);
+  display: grid; align-content: center; gap: clamp(18px, 2.2vw, 28px);
 }
-.at-cta__facts > div:last-child {
-  border-bottom: 1px solid color-mix(in srgb, var(--accent-ink) 26%, transparent);
+.at-cta__side div > span {
+  display: block; font-size: 0.72rem; letter-spacing: 0.13em;
+  text-transform: uppercase; color: var(--ink-muted); margin-bottom: 6px;
 }
-.at-cta__facts dt { font-size: 0.78rem; opacity: 0.66; letter-spacing: 0.04em; padding-top: 2px; }
-.at-cta__facts dd { margin: 0; font-size: 0.95rem; font-weight: 500; line-height: 1.5; }
-.at-cta__facts a { text-decoration: none; }
-.at-cta__facts a:hover { text-decoration: underline; }
+.at-cta__side strong { font-size: 1.04rem; font-weight: 600; letter-spacing: -0.018em; line-height: 1.45; }
+.at-cta__side a { text-decoration: none; }
+.at-cta__side a:hover { color: var(--accent); }
 
-/* Only a heading and buttons survive — centre it rather than leaving a hole
-   where the facts column would have been. */
-.at-cta--slim .at-cta__in { grid-template-columns: minmax(0, 1fr); justify-items: start; }
+/* No contact details at all — the ask fills the panel on its own. */
+.at-cta--slim .at-cta__panel { grid-template-columns: minmax(0, 1fr); }
 
 .at-foot { background: var(--deep); color: rgb(255 255 255 / 0.72); }
 .at-foot__in {
@@ -349,23 +428,19 @@ body.tpl-atlas {
 
 @media (max-width: 1040px) {
   .at-nav__links { display: none; }
-  .at-says__grid { columns: 2; }
 }
 @media (max-width: 860px) {
+  .at-cta__panel { grid-template-columns: minmax(0, 1fr); }
+  .at-says__rest { grid-template-columns: minmax(0, 1fr); }
+  .at-says__rest blockquote:nth-child(2) { margin-top: 0; }
+  .at-why__card:nth-child(even) { margin-top: 0; }
+  .at-svc__list { columns: 1; }
   .at-about__grid { grid-template-columns: minmax(0, 1fr); }
-  .at-svc__index { columns: 1; }
-  .at-says__grid { columns: 1; }
-  .at-proc__step { grid-template-columns: 42px minmax(0, 1fr); }
-  .at-proc__step p { grid-column: 2; }
   .at-nav__tel { display: none; }
-}
-@media (max-width: 860px) {
-  .at-cta__in { grid-template-columns: minmax(0, 1fr); gap: 30px; }
 }
 @media (max-width: 520px) {
   body.tpl-atlas { font-size: 16px; }
   .at-actions .at-btn { flex: 1 1 auto; justify-content: center; }
-  .at-cta__facts > div { grid-template-columns: minmax(0, 1fr); gap: 4px; }
 }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
