@@ -197,6 +197,20 @@ export async function runAnalysisInBackground(clientId: string, siteUrl: string)
     const possibleExtractionCollapse =
       selectedCharCount >= MIN_CHARS_FOR_COLLAPSE_CHECK && emptyNonServiceArrays >= 8;
 
+    // Same shape as possibleExtractionCollapse, for the same reason: a completed
+    // (schema-valid) call can still come back wrong in a way validateShape/coerceTextArray
+    // can't catch. Confirmed live: three independent classification runs against Propell
+    // Property's same 7 images returned "all 7 excluded" once and "6 of 7 real" twice — a
+    // single bad roll is otherwise indistinguishable from a client that genuinely has no
+    // usable photography, and a page that silently renders with no images because of it is
+    // worse than one flagged for a second look. MIN_ELIGIBLE_FOR_MISCLASSIFICATION_CHECK
+    // avoids flagging a client with only 1-3 real photo candidates, where "all excluded"
+    // is a normal, small-sample outcome rather than a suspicious one.
+    const MIN_ELIGIBLE_FOR_MISCLASSIFICATION_CHECK = 4;
+    const possibleImageMisclassification =
+      imageCandidatesForAi.length >= MIN_ELIGIBLE_FOR_MISCLASSIFICATION_CHECK &&
+      structured.images.every((i) => i.subject === "abstract");
+
     await prisma.contentRecord.upsert({
       where: { clientId },
       create: {
@@ -227,6 +241,7 @@ export async function runAnalysisInBackground(clientId: string, siteUrl: string)
         pagesAnalyzed: selectedPages.length,
         sourceCrawlTruncated: truncated,
         possibleExtractionCollapse,
+        possibleImageMisclassification,
         reviewedAt: null,
         reviewedByUserId: null,
       },
@@ -257,6 +272,7 @@ export async function runAnalysisInBackground(clientId: string, siteUrl: string)
         pagesAnalyzed: selectedPages.length,
         sourceCrawlTruncated: truncated,
         possibleExtractionCollapse,
+        possibleImageMisclassification,
         // Explicitly reset on every re-analysis — this is what re-locks Choose Template /
         // Generate & Preview until a human re-approves the fresh extraction. See the plan's
         // gating fix: Client.status is never the gate, contentRecord.reviewedAt is.

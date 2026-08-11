@@ -116,6 +116,15 @@ export default async function ClientWorkspacePage({ params }: { params: Promise<
             </div>
           )}
 
+          {contentRecord.possibleImageMisclassification && (
+            <div className="rounded-lg border border-red-700/60 bg-red-950/30 px-4 py-3 text-sm text-red-300">
+              Every candidate photo on this site came back excluded from the image classification pass —
+              that can mean the site genuinely has no usable photography, but it can also mean a single
+              bad classification run threw out real photos. Worth checking the live site for photos
+              before approving, or trying Re-analyse Site to see if it resolves differently.
+            </div>
+          )}
+
           {contentRecord.pagesAnalyzed < contentRecord.crawlPagesCount && (
             <div className="rounded-lg border border-amber-700/60 bg-amber-950/30 px-4 py-3 text-sm text-amber-300">
               Only {contentRecord.pagesAnalyzed} of {contentRecord.crawlPagesCount} crawled pages were

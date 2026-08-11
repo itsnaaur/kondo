@@ -165,6 +165,15 @@ model ContentRecord {
   // pagesAnalyzed still looks healthy. Always recomputed fresh on every analysis (including
   // re-analysis), same as sourceCrawlTruncated — a later successful run clears it.
   possibleExtractionCollapse Boolean @default(false)
+  // Set when every vision-eligible image (at least 4 sent to classification) came back
+  // subject: "abstract" — confirmed live this can happen on a single analysis run even when
+  // the client has genuinely usable photography: three independent runs against the same
+  // Propell Property images produced "all excluded" once and "6 of 7 real" twice, so a
+  // single bad roll is indistinguishable from a client that actually has nothing usable
+  // unless something flags it. Same shape as possibleExtractionCollapse — doesn't hard-fail
+  // or retry, just stops a bad roll from looking like a legitimate "no photos" result.
+  // Recomputed fresh on every analysis; a later successful run clears it.
+  possibleImageMisclassification Boolean @default(false)
   // How many of crawlPagesCount were actually fed to the structuring/rewrite call (see
   // lib/content/select-relevant-pages.ts) — the two numbers routinely differ a lot on
   // anything bigger than a handful of pages (confirmed live: 92 crawled, 12 read), and
