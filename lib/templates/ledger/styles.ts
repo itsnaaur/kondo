@@ -272,30 +272,48 @@ body.tpl-ledger {
   pointer-events: none;
 }
 
-/* ---------- trust strip ---------- */
+/* ---------- trust strip ----------
+   These were 34px tall, desaturated and at 62% opacity — a treatment that
+   makes sense for client logos on an agency site, where the point is "lots of
+   them" rather than "these ones". Here they're health funds and accreditations:
+   a prospect scanning for whether their insurer is accepted needs to read them,
+   and washing out the colour is what makes a Bupa logo stop looking like Bupa.
+
+   Full colour, roughly double the size, each in its own cell of a hairline
+   lattice so a row of four and a row of nine both look composed. */
 
 .tl-strip { border-bottom: 1px solid var(--line); background: var(--paper); }
-.tl-strip__in { padding-top: 34px; padding-bottom: 34px; }
+.tl-strip__in { padding-top: clamp(44px, 5vw, 68px); padding-bottom: clamp(44px, 5vw, 68px); }
 .tl-strip__label {
   font-size: 0.72rem;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--ink-muted);
-  margin: 0 0 20px;
+  margin: 0 0 clamp(22px, 2.6vw, 32px);
   text-align: center;
 }
 .tl-strip__row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  gap: clamp(24px, 5vw, 56px);
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(148px, 100%), 1fr));
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
 }
+.tl-strip__row > span {
+  background: var(--paper);
+  display: grid;
+  place-items: center;
+  padding: clamp(20px, 2.4vw, 30px) clamp(14px, 1.8vw, 22px);
+  min-height: 104px;
+  transition: background-color 0.18s ease;
+}
+.tl-strip__row > span:hover { background: var(--mist); }
 .tl-strip__row img {
-  max-height: 34px;
+  max-height: 62px;
+  max-width: 100%;
   width: auto;
-  filter: grayscale(1);
-  opacity: 0.62;
+  height: auto;
+  object-fit: contain;
 }
 
 /* ---------- statement band ---------- */
@@ -364,18 +382,17 @@ body.tpl-ledger {
 .tl-deep .tl-lede { color: rgb(255 255 255 / 0.66); }
 .tl-deep__head { max-width: 44ch; margin-bottom: clamp(34px, 4vw, 52px); }
 
-.tl-gallery {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
-  gap: 14px;
-}
+/* Columns rather than a fixed grid, so each photo keeps its own proportions.
+   The forced 4:3 cropped every portrait through its subject. */
+.tl-gallery { columns: 2; column-gap: 14px; }
 .tl-gallery figure {
-  margin: 0;
+  break-inside: avoid;
+  margin: 0 0 14px;
   border-radius: 3px;
   overflow: hidden;
   background: var(--deep-soft);
 }
-.tl-gallery img { width: 100%; height: 100%; object-fit: cover; aspect-ratio: 4 / 3; }
+.tl-gallery img { width: 100%; height: auto; display: block; }
 
 .tl-facts {
   display: grid;
@@ -401,47 +418,96 @@ body.tpl-ledger {
 }
 .tl-facts a { text-decoration: none; }
 
-/* ---------- testimonials ---------- */
+/* ---------- testimonials ----------
+   Was a grid of bordered cards with an accent rule on top — the one card
+   treatment left in a template built entirely from hairlines and ruled rows.
+   Set in the serif italic instead, the face Ledger already uses for its
+   headline accent, stacked with room to breathe and alternately offset. The
+   type does the work the borders were doing. */
 
 .tl-quotes__in { padding-top: var(--band); padding-bottom: var(--band); }
-.tl-quotes__grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr));
-  gap: 20px;
-  margin-top: clamp(30px, 4vw, 48px);
-}
+.tl-quotes__list { margin-top: clamp(34px, 4.4vw, 60px); }
 .tl-quote {
-  border: 1px solid var(--line);
-  border-top: 3px solid var(--accent);
-  padding: 30px 28px;
-  background: var(--paper);
+  margin: 0;
+  padding-block: clamp(26px, 3.2vw, 44px);
+  border-top: 1px solid var(--line);
+  max-width: 46ch;
 }
+.tl-quote:last-child { border-bottom: 1px solid var(--line); }
+/* Alternate the offset so a stack of six doesn't read as a single column of
+   left-aligned paragraphs. */
+.tl-quote:nth-child(even) { margin-left: auto; }
 .tl-quote p {
-  margin: 0 0 20px;
-  font-size: 1.03rem;
-  line-height: 1.55;
-  letter-spacing: -0.012em;
+  margin: 0 0 18px;
+  font-family: "Newsreader", Georgia, "Times New Roman", serif;
+  font-style: italic;
+  font-weight: 400;
+  font-size: clamp(1.2rem, 2.2vw, 1.72rem);
+  line-height: 1.32;
+  letter-spacing: -0.014em;
 }
-.tl-quote footer { font-size: 0.86rem; color: var(--ink-muted); }
-.tl-quote footer b { display: block; color: var(--ink); font-weight: 600; }
+.tl-quote footer {
+  font-size: 0.76rem;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+.tl-quote footer b { color: var(--ink); font-weight: 600; }
 
-/* ---------- closing cta ---------- */
+/* ---------- closing cta ----------
+   A flat accent stripe with a heading left and buttons right has no hierarchy,
+   and it sat directly above the dark footer — two solid bands closing the page.
 
-.tl-cta { background: var(--accent); color: var(--accent-ink); }
+   The deep band already carries the contact facts, so repeating them here
+   would be filler. Instead the phone number itself is set at display size: for
+   a local business the next step is a call, so the number is the call to
+   action rather than something buried inside a button. */
+
+.tl-cta { background: var(--accent); color: var(--accent-ink); position: relative; overflow: hidden; }
+.tl-cta::after {
+  content: "";
+  position: absolute; inset: 0; pointer-events: none;
+  background:
+    radial-gradient(58% 70% at 88% 6%, rgb(255 255 255 / 0.14) 0%, transparent 62%),
+    radial-gradient(48% 60% at 6% 96%, rgb(0 0 0 / 0.16) 0%, transparent 66%);
+}
 .tl-cta__in {
-  padding-top: clamp(52px, 7vw, 92px);
-  padding-bottom: clamp(52px, 7vw, 92px);
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 28px;
+  position: relative; z-index: 1;
+  padding-top: clamp(60px, 8vw, 106px);
+  padding-bottom: clamp(60px, 8vw, 106px);
+  text-align: center;
 }
-.tl-cta .tl-h2 { max-width: 18ch; }
+.tl-cta .tl-eyebrow { color: color-mix(in srgb, var(--accent-ink) 62%, transparent); justify-content: center; }
+.tl-cta__tel {
+  display: inline-block;
+  margin: 0;
+  font-size: clamp(2.2rem, 6.4vw, 4.4rem);
+  font-weight: 600;
+  letter-spacing: -0.045em;
+  line-height: 1;
+  text-decoration: none;
+  color: currentColor;
+  border-bottom: 3px solid color-mix(in srgb, var(--accent-ink) 34%, transparent);
+  padding-bottom: 6px;
+  transition: border-color 0.18s ease;
+}
+.tl-cta__tel:hover { border-bottom-color: currentColor; }
+.tl-cta__note {
+  margin: clamp(22px, 2.6vw, 32px) auto 0;
+  max-width: 48ch;
+  font-size: 1rem;
+  line-height: 1.6;
+  opacity: 0.82;
+}
+.tl-cta__note a { font-weight: 600; text-decoration: none; border-bottom: 1px solid color-mix(in srgb, var(--accent-ink) 45%, transparent); }
+.tl-cta__note a:hover { border-bottom-color: currentColor; }
+/* No phone — fall back to the heading-and-button shape rather than leaving the
+   band empty. */
+.tl-cta .tl-h2 { max-width: 20ch; margin-inline: auto; }
+.tl-cta .tl-actions { justify-content: center; margin-top: 28px; }
 .tl-cta .tl-btn--solid { background: var(--paper); color: var(--ink); }
 .tl-cta .tl-btn--ghost { color: currentColor; }
 .tl-cta .tl-btn--ghost:hover { background: var(--accent-ink); color: var(--accent); border-color: var(--accent-ink); }
-.tl-cta .tl-actions { margin-top: 0; }
 
 /* ---------- footer ---------- */
 
@@ -493,13 +559,14 @@ body.tpl-ledger {
   .tl-statement__grid { grid-template-columns: minmax(0, 1fr); }
   .tl-statement__body { max-width: none; }
   .tl-row { grid-template-columns: minmax(0, 1fr); gap: 7px; padding: 20px 4px; }
+  .tl-gallery { columns: 1; }
+  .tl-quote { max-width: none; }
   .tl-nav__tel { display: none; }
 }
 
 @media (max-width: 520px) {
   body.tpl-ledger { font-size: 16px; }
   .tl-actions .tl-btn { flex: 1 1 auto; justify-content: center; }
-  .tl-cta__in { flex-direction: column; align-items: flex-start; }
 }
 
 @media (prefers-reduced-motion: reduce) {

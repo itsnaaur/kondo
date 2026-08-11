@@ -12,6 +12,16 @@ function esc(v: unknown): string {
 }
 
 /**
+ * A punctuation split is only worth taking if it leaves a balanced headline.
+ * Propell's tagline breaks on its em-dash into 4 words and 11, so the italic
+ * clause ran four lines against a one-line head and stopped reading as an
+ * accent — it swallowed the headline instead.
+ */
+function balanced(head: string, tail: string): boolean {
+  return tail.split(/\s+/).length <= head.split(/\s+/).length * 1.6;
+}
+
+/**
  * Splits a tagline into a plain head and an italic tail.
  * Every prospect's own tagline becomes the display headline, with its
  * closing clause set in the serif italic — so the page reads as written
@@ -23,12 +33,16 @@ function splitTagline(tagline: string): { head: string; tail: string } {
 
   const dash = t.search(/\s[—–-]\s/);
   if (dash > 8 && dash < t.length - 8) {
-    return { head: t.slice(0, dash).trim(), tail: t.slice(dash + 3).trim() };
+    const h = t.slice(0, dash).trim();
+    const tl = t.slice(dash + 3).trim();
+    if (balanced(h, tl)) return { head: h, tail: tl };
   }
 
   const colon = t.indexOf(": ");
   if (colon > 8 && colon < t.length - 8) {
-    return { head: t.slice(0, colon).trim(), tail: t.slice(colon + 2).trim() };
+    const h = t.slice(0, colon).trim();
+    const tl = t.slice(colon + 2).trim();
+    if (balanced(h, tl)) return { head: h, tail: tl };
   }
 
   const words = t.split(/\s+/);
@@ -128,7 +142,7 @@ export function renderLedger(c: TemplateContent): { body: string; css: string } 
   <div class="tl-wrap tl-strip__in">
     <p class="tl-strip__label">Trusted partners &amp; accreditations</p>
     <div class="tl-strip__row">
-      ${partners.map((l) => `<img src="${esc(l.url)}" alt="">`).join("")}
+      ${partners.map((l) => `<span><img src="${esc(l.url)}" alt=""></span>`).join("")}
     </div>
   </div>
 </section>`
@@ -206,20 +220,20 @@ export function renderLedger(c: TemplateContent): { body: string; css: string } 
 </section>`
       : "";
 
-  // ---- testimonials
+  // ---- testimonials: serif pull-quotes, no cards (see styles.ts)
   const quotesSection = quotes.length
     ? `
 <section class="tl-quotes" id="reviews">
   <div class="tl-wrap tl-quotes__in">
     <p class="tl-eyebrow">In their words</p>
     <h2 class="tl-h2">What people <span class="tl-em">tell us</span></h2>
-    <div class="tl-quotes__grid">
+    <div class="tl-quotes__list">
       ${quotes
         .slice(0, 6)
         .map(
           (q) => `<blockquote class="tl-quote">
         <p>${esc(q.quote)}</p>
-        <footer><b>${esc(q.author)}</b>${q.role ? esc(q.role) : ""}</footer>
+        <footer><b>${esc(q.author)}</b>${q.role ? " — " + esc(q.role) : ""}</footer>
       </blockquote>`,
         )
         .join("")}
@@ -228,12 +242,30 @@ export function renderLedger(c: TemplateContent): { body: string; css: string } 
 </section>`
     : "";
 
-  // ---- closing cta
-  const cta = `
+  // ---- closing cta: the number is the action (see styles.ts)
+  const cta = c.contactPhone
+    ? `
 <section class="tl-cta">
   <div class="tl-wrap tl-cta__in">
-    <h2 class="tl-h2">Ready when you are.</h2>
-    <div class="tl-actions">${primaryCta}${c.contactEmail ? `<a class="tl-btn tl-btn--ghost" href="mailto:${esc(c.contactEmail)}">Send us a message</a>` : ""}</div>
+    <p class="tl-eyebrow">Ready when you are</p>
+    <a class="tl-cta__tel" href="${esc(telHref(c.contactPhone))}">${esc(c.contactPhone)}</a>
+    <p class="tl-cta__note">${
+      c.contactEmail
+        ? `Or email <a href="mailto:${esc(c.contactEmail)}">${esc(c.contactEmail)}</a> — we'll come back to you the same day.`
+        : "Give us a call and we'll take it from there."
+    }</p>
+  </div>
+</section>`
+    : `
+<section class="tl-cta">
+  <div class="tl-wrap tl-cta__in">
+    <p class="tl-eyebrow">Ready when you are</p>
+    <h2 class="tl-h2">Let's talk about <span class="tl-em">what you need</span></h2>
+    <div class="tl-actions">${
+      c.contactEmail
+        ? `<a class="tl-btn tl-btn--solid" href="mailto:${esc(c.contactEmail)}">Send us a message</a>`
+        : ""
+    }</div>
   </div>
 </section>`;
 
