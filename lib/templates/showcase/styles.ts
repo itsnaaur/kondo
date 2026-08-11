@@ -129,27 +129,37 @@ body.tpl-showcase {
 .sc-nav__side { display: flex; align-items: center; gap: 18px; flex: none; margin-left: clamp(20px, 3vw, 44px); }
 .sc-nav__tel { font-weight: 600; font-size: 0.95rem; text-decoration: none; letter-spacing: -0.01em; }
 
-/* ---------- hero: full-bleed photo, headline over it ---------- */
+/* ---------- nav ----------
+   Sticky and translucent rather than absolutely positioned over the hero. The
+   overlay version put the photo directly behind the links, so legibility
+   depended entirely on what the crawl happened to return — a bright sky behind
+   white nav text is unreadable and we can't control which image arrives.
 
-/* Nav and hero share a stacking context so the nav can sit on the image. */
-.sc-top { position: relative; }
-
-.sc-nav--over {
-  position: absolute;
-  top: 0; left: 0; right: 0;
-  z-index: 5;
-  background: transparent;
-  border-bottom-color: rgb(255 255 255 / 0.16);
-  color: var(--paper);
+   Now the bar holds its own ground at the top of the page and the hero begins
+   beneath it. Scrolling moves content under a blurred bar, which is the
+   behaviour you get from an overlay without the legibility gamble. */
+.sc-nav {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: color-mix(in srgb, var(--paper) 76%, transparent);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  backdrop-filter: blur(16px) saturate(160%);
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
 }
-.sc-nav--over .sc-nav__links a:hover { border-bottom-color: var(--paper); }
-.sc-nav--over .sc-btn--solid { background: var(--paper); color: var(--ink); }
+/* No backdrop-filter support — fall back to an opaque bar rather than a
+   see-through one, which is the failure this change exists to avoid. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .sc-nav { background: var(--paper); }
+}
+
+/* ---------- hero: full-bleed photo ---------- */
 
 .sc-hero {
   position: relative;
   display: grid;
   align-items: end;
-  min-height: min(86vh, 800px);
+  min-height: min(74vh, 660px);
   background: var(--deep);
   overflow: hidden;
 }
@@ -206,73 +216,48 @@ body.tpl-showcase {
 .sc-hero--noimg .sc-lede { margin-left: 0; }
 .sc-hero--noimg .sc-actions { justify-content: flex-start; }
 
-/* ---------- services as image tiles ---------- */
+/* ---------- services: type, not tiles ----------
+   Photos are deliberately absent here. Setting a service name over an image
+   claims that image illustrates that service, and subject classification is
+   only confident on a minority of clients — so the claim is usually unfounded.
+   The same failure as a cookie icon captioned "Entertainment Systems", just
+   better dressed.
 
-.sc-tiles__in { padding-top: var(--band); padding-bottom: var(--band); }
-.sc-tiles__head { max-width: 38ch; margin-bottom: clamp(30px, 4vw, 52px); }
-.sc-tiles__grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(290px, 100%), 1fr));
-  gap: clamp(14px, 1.8vw, 24px);
-}
-.sc-tile { display: flex; flex-direction: column; }
-.sc-tile__img {
-  overflow: hidden; border-radius: 3px; background: var(--mist);
-  margin-bottom: 20px;
-}
-.sc-tile__img img {
-  width: 100%; aspect-ratio: 4 / 3; object-fit: cover;
-  transition: transform 0.5s cubic-bezier(0.2, 0, 0.1, 1);
-}
-.sc-tile:hover .sc-tile__img img { transform: scale(1.035); }
-.sc-tile h3 {
-  font-size: clamp(1.12rem, 1.9vw, 1.34rem);
-  font-weight: 600; letter-spacing: -0.024em; line-height: 1.22;
-  margin: 0 0 9px;
-}
-.sc-tile p { margin: 0; color: var(--ink-muted); font-size: 0.97rem; line-height: 1.58; }
+   The names themselves carry it instead: hanging numerals, large type, ruled
+   rows. Holds from four services to nineteen because each entry is one row,
+   and the first three get extra weight since extraction order roughly tracks
+   how prominently a site features them. */
 
-/* Services beyond the tiled three. A hairline matrix rather than stacked rows —
-   Ledger already owns the ruled-list treatment, and repeating it here made the
-   two templates look like the same page twice. Reads as a spec sheet, and holds
-   from one overflow item to sixteen. */
-.sc-grid {
-  margin-top: clamp(28px, 3.6vw, 46px);
+.sc-svc__in { padding-top: var(--band); padding-bottom: var(--band); }
+.sc-svc__head { max-width: 40ch; margin-bottom: clamp(34px, 4.4vw, 62px); }
+
+.sc-svc__list { border-top: 1px solid var(--line); }
+.sc-svc__row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(268px, 100%), 1fr));
-  gap: 1px;
-  background: var(--line);
-  border: 1px solid var(--line);
+  grid-template-columns: clamp(48px, 6vw, 88px) minmax(0, 1fr) minmax(0, 1.15fr);
+  gap: clamp(14px, 2.6vw, 46px);
+  align-items: baseline;
+  padding: clamp(18px, 2.2vw, 30px) 4px;
+  border-bottom: 1px solid var(--line);
+  transition: padding-left 0.22s cubic-bezier(0.2, 0, 0.1, 1);
 }
-.sc-grid__cell {
-  background: var(--paper);
-  padding: clamp(22px, 2.2vw, 30px) clamp(20px, 2vw, 28px);
-  transition: background-color 0.2s ease;
+.sc-svc__row:hover { padding-left: 16px; }
+.sc-svc__no {
+  font-size: 0.76rem; font-weight: 600; letter-spacing: 0.14em;
+  color: var(--accent); font-variant-numeric: tabular-nums;
 }
-.sc-grid__cell:hover { background: var(--accent-soft); }
-.sc-grid__cell::before {
-  content: "";
-  display: block;
-  width: 22px;
-  height: 2px;
-  background: var(--accent);
-  margin-bottom: 16px;
-  transition: width 0.25s cubic-bezier(0.2, 0, 0.1, 1);
-}
-.sc-grid__cell:hover::before { width: 40px; }
-.sc-grid__cell h4 {
-  margin: 0 0 8px;
-  font-size: 1.04rem;
-  font-weight: 600;
-  letter-spacing: -0.022em;
-  line-height: 1.25;
-}
-.sc-grid__cell p {
+.sc-svc__name {
   margin: 0;
-  color: var(--ink-muted);
-  font-size: 0.94rem;
-  line-height: 1.56;
+  font-size: clamp(1.16rem, 2vw, 1.6rem);
+  font-weight: 600; letter-spacing: -0.03em; line-height: 1.12;
 }
+.sc-svc__row p { margin: 0; font-size: 0.95rem; line-height: 1.6; color: var(--ink-muted); }
+
+/* The first three carry more weight — a flat list of nineteen equals reads as
+   an inventory; a tapered one reads as a page. */
+.sc-svc__row--lead .sc-svc__name { font-size: clamp(1.5rem, 3.1vw, 2.5rem); letter-spacing: -0.038em; }
+.sc-svc__row--lead { padding-block: clamp(24px, 2.8vw, 40px); }
+.sc-svc__row--lead p { font-size: 1.01rem; }
 
 /* ---------- feature: full-bleed image with copy over it ---------- */
 
@@ -316,56 +301,119 @@ body.tpl-showcase {
   color: rgb(255 255 255 / 0.62); letter-spacing: 0.01em;
 }
 
-/* ---------- asymmetric pair + copy ---------- */
+/* ---------- about: sticky label, statement copy ----------
+   A label pinned in the margin while the copy scrolls past it — an editorial
+   device rather than a card. The photographs sit beneath the text at their own
+   proportions, offset from each other, which is the one place in this section
+   an image makes no claim about what it depicts. */
 
-.sc-pair__in { padding-top: var(--band); padding-bottom: var(--band); }
-.sc-pair__grid {
+.sc-about { background: var(--mist); }
+.sc-about__in { padding-top: var(--band); padding-bottom: var(--band); }
+.sc-about__grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
-  gap: clamp(28px, 4.5vw, 68px);
-  align-items: center;
+  grid-template-columns: clamp(120px, 16vw, 210px) minmax(0, 1fr);
+  gap: clamp(24px, 4vw, 64px);
+  align-items: start;
 }
-.sc-pair__stack { display: grid; gap: clamp(12px, 1.6vw, 20px); }
-.sc-pair__stack figure { margin: 0; overflow: hidden; border-radius: 3px; background: var(--mist); }
-.sc-pair__stack img { width: 100%; object-fit: cover; }
-.sc-pair__stack figure:nth-child(1) img { aspect-ratio: 5 / 4; }
-.sc-pair__stack figure:nth-child(2) {
-  /* Offset so the two don't read as a plain stack. */
-  width: 78%; margin-left: auto;
-}
-.sc-pair__stack figure:nth-child(2) img { aspect-ratio: 1 / 1; }
+.sc-about__aside { position: sticky; top: 104px; }
+.sc-about__aside .sc-eyebrow { margin-bottom: 12px; }
+.sc-about__aside p { margin: 0; font-size: 0.85rem; line-height: 1.5; color: var(--ink-muted); }
 
-/* ---------- mosaic ---------- */
+.sc-about__lead {
+  margin: 0;
+  font-size: clamp(1.3rem, 2.9vw, 2.05rem);
+  line-height: 1.26; letter-spacing: -0.03em; font-weight: 500;
+  max-width: 30ch;
+}
+.sc-about__body {
+  margin: clamp(20px, 2.4vw, 30px) 0 0;
+  font-size: 1rem; line-height: 1.68; color: var(--ink-muted); max-width: 62ch;
+}
+
+.sc-about__shots {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+  gap: clamp(14px, 1.8vw, 22px);
+  margin-top: clamp(34px, 4.4vw, 58px);
+  align-items: start;
+}
+.sc-about__shots figure {
+  margin: 0; border-radius: 4px; overflow: hidden; background: var(--paper);
+  box-shadow: 0 18px 40px -26px rgb(16 24 40 / 0.3);
+}
+/* Natural aspect — nothing cropped, whatever shape the crawl returns. */
+.sc-about__shots img { width: 100%; height: auto; display: block; }
+.sc-about__shots figure:nth-child(even) { margin-top: clamp(20px, 3.4vw, 46px); }
+.sc-about__shots figcaption { padding: 11px 13px 13px; font-size: 0.8rem; line-height: 1.4; color: var(--ink-muted); }
+
+/* ---------- mosaic ----------
+   Was a six-column grid with nth-child rules assigning 16:9, 4:5 and 4:3 frames
+   by position. Every image was cropped to whatever shape its index happened to
+   land on, so a portrait in slot one lost its subject and a panorama in slot
+   two became a square.
+
+   Masonry columns instead: each photo keeps its own proportions and the column
+   flow produces the varied rhythm the nth-child rules were faking. It also
+   means a mixed set of portrait and landscape images reads as deliberate
+   rather than mangled. */
 
 .sc-mosaic { background: var(--mist); }
 .sc-mosaic__in { padding-top: var(--band); padding-bottom: var(--band); }
 .sc-mosaic__head { max-width: 34ch; margin-bottom: clamp(28px, 3.6vw, 46px); }
 .sc-mosaic__grid {
-  display: grid;
-  grid-template-columns: repeat(6, 1fr);
-  gap: clamp(12px, 1.6vw, 20px);
+  columns: 3;
+  column-gap: clamp(12px, 1.6vw, 20px);
 }
-.sc-mosaic__grid figure { margin: 0; overflow: hidden; border-radius: 3px; background: var(--paper); }
-.sc-mosaic__grid img { width: 100%; height: 100%; object-fit: cover; }
-/* Alternating spans keep it from reading as a uniform grid regardless of count. */
-.sc-mosaic__grid figure { grid-column: span 2; }
-.sc-mosaic__grid figure:nth-child(4n + 1) { grid-column: span 4; }
-.sc-mosaic__grid figure:nth-child(4n + 1) img { aspect-ratio: 16 / 9; }
-.sc-mosaic__grid figure:nth-child(4n + 2) img { aspect-ratio: 4 / 5; }
-.sc-mosaic__grid figure img { aspect-ratio: 4 / 3; }
+.sc-mosaic__grid figure {
+  break-inside: avoid;
+  margin: 0 0 clamp(12px, 1.6vw, 20px);
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--paper);
+  position: relative;
+}
+.sc-mosaic__grid img { width: 100%; height: auto; display: block; }
+.sc-mosaic__grid figcaption {
+  position: absolute;
+  inset: auto 0 0 0;
+  padding: 32px 14px 12px;
+  font-size: 0.79rem;
+  color: var(--paper);
+  background: linear-gradient(to top, rgb(0 0 0 / 0.62), transparent);
+}
 
-/* ---------- testimonials ---------- */
+/* ---------- testimonials: one large, the rest ruled ----------
+   Was a grid of bordered cards, which is the shape three other sections
+   already had. A client with sixteen quotes and a client with two need
+   different things, so the strongest quote is set at display size on the bare
+   page and the remainder run as ruled rows — no boxes anywhere. */
 
 .sc-quotes__in { padding-top: var(--band); padding-bottom: var(--band); }
-.sc-quotes__grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr));
-  gap: 20px; margin-top: clamp(28px, 3.6vw, 46px);
+.sc-quotes__lead {
+  margin: 0 auto;
+  max-width: 24ch;
+  text-align: center;
+  font-size: clamp(1.5rem, 3.6vw, 2.7rem);
+  line-height: 1.2; letter-spacing: -0.032em; font-weight: 500;
 }
-.sc-quote { border: 1px solid var(--line); border-top: 3px solid var(--accent); padding: 30px 28px; }
-.sc-quote p { margin: 0 0 20px; font-size: 1.03rem; line-height: 1.55; letter-spacing: -0.012em; }
-.sc-quote footer { font-size: 0.86rem; color: var(--ink-muted); }
-.sc-quote footer b { display: block; color: var(--ink); font-weight: 600; }
+.sc-quotes__lead cite {
+  display: block; margin-top: clamp(20px, 2.4vw, 30px);
+  font-style: normal; font-size: 0.78rem; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--ink-muted);
+}
+.sc-quotes__rest {
+  margin-top: clamp(44px, 5.4vw, 78px);
+  border-top: 1px solid var(--line);
+  columns: 2; column-gap: clamp(28px, 4.4vw, 64px);
+}
+.sc-quotes__rest blockquote {
+  break-inside: avoid; margin: 0;
+  padding: clamp(18px, 2.2vw, 26px) 2px;
+  border-bottom: 1px solid var(--line);
+}
+.sc-quotes__rest p { margin: 0 0 10px; font-size: 0.98rem; line-height: 1.56; letter-spacing: -0.012em; }
+.sc-quotes__rest footer { font-size: 0.84rem; color: var(--ink-muted); }
+.sc-quotes__rest footer b { color: var(--ink); font-weight: 600; }
 
 /* ---------- trust strip ---------- */
 
@@ -381,18 +429,67 @@ body.tpl-showcase {
 }
 .sc-strip__row img { max-height: 34px; width: auto; filter: grayscale(1); opacity: 0.62; }
 
-/* ---------- cta + footer ---------- */
+/* ---------- cta ----------
+   A flat accent stripe with a heading on one side and buttons on the other has
+   no hierarchy, and on this template it sits directly above the dark footer —
+   two heavy bands in a row to close the page.
 
-.sc-cta { background: var(--accent); color: var(--accent-ink); }
-.sc-cta__in {
-  padding-top: clamp(50px, 7vw, 88px); padding-bottom: clamp(50px, 7vw, 88px);
-  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 26px;
+   Showcase is the image-led template, so the CTA takes a photo when one is
+   still unallocated: full-bleed, scrimmed, with the ask over it. That mirrors
+   the hero and gives the page a bookend rather than a stripe. When no image is
+   left it falls back to a deep gradient band, which is still a step up from
+   flat colour. */
+
+.sc-cta { position: relative; overflow: hidden; background: var(--deep); color: var(--paper); }
+.sc-cta__bg { position: absolute; inset: 0; }
+.sc-cta__bg img { width: 100%; height: 100%; object-fit: cover; }
+.sc-cta__bg::after {
+  content: "";
+  position: absolute; inset: 0;
+  background:
+    linear-gradient(to top,
+      color-mix(in srgb, var(--deep) 92%, transparent) 0%,
+      color-mix(in srgb, var(--deep) 74%, transparent) 42%,
+      color-mix(in srgb, var(--deep) 52%, transparent) 100%),
+    radial-gradient(90% 80% at 50% 60%,
+      color-mix(in srgb, var(--accent) 34%, transparent) 0%, transparent 72%);
 }
-.sc-cta .sc-h2 { max-width: 18ch; }
+
+/* No photo left — a designed band rather than a flat fill. */
+.sc-cta--plain {
+  background:
+    radial-gradient(70% 90% at 88% 8%, color-mix(in srgb, var(--accent) 62%, transparent) 0%, transparent 62%),
+    radial-gradient(60% 70% at 6% 96%, color-mix(in srgb, var(--accent) 38%, transparent) 0%, transparent 66%),
+    var(--deep);
+}
+
+.sc-cta__in {
+  position: relative; z-index: 1;
+  padding-top: clamp(64px, 8.5vw, 118px); padding-bottom: clamp(64px, 8.5vw, 118px);
+  text-align: center;
+}
+.sc-cta .sc-eyebrow { color: rgb(255 255 255 / 0.58); justify-content: center; }
+.sc-cta .sc-h2 { max-width: 20ch; margin-inline: auto; }
+.sc-cta .sc-em { color: var(--paper); opacity: 0.9; }
+.sc-cta .sc-actions { justify-content: center; margin-top: 28px; }
 .sc-cta .sc-btn--solid { background: var(--paper); color: var(--ink); }
-.sc-cta .sc-btn--ghost { color: currentColor; }
-.sc-cta .sc-btn--ghost:hover { background: var(--accent-ink); color: var(--accent); border-color: var(--accent-ink); }
-.sc-cta .sc-actions { margin-top: 0; }
+.sc-cta .sc-btn--ghost { color: currentColor; border-color: rgb(255 255 255 / 0.4); }
+.sc-cta .sc-btn--ghost:hover { background: var(--paper); color: var(--deep); border-color: var(--paper); }
+
+/* Contact details beneath the buttons — one line, hairline-separated. Real
+   extracted fields, so a client missing one simply has one fewer item. */
+.sc-cta__facts {
+  display: flex; flex-wrap: wrap; justify-content: center;
+  gap: clamp(12px, 2.4vw, 34px);
+  margin: clamp(30px, 3.6vw, 46px) auto 0;
+  padding-top: clamp(22px, 2.6vw, 32px);
+  border-top: 1px solid rgb(255 255 255 / 0.2);
+  max-width: 860px;
+}
+.sc-cta__facts span { font-size: 0.9rem; color: rgb(255 255 255 / 0.78); }
+.sc-cta__facts a { color: inherit; text-decoration: none; }
+.sc-cta__facts a:hover { color: var(--paper); text-decoration: underline; }
+.sc-cta__facts b { color: var(--paper); font-weight: 600; }
 
 .sc-foot { background: var(--deep); color: rgb(255 255 255 / 0.72); }
 .sc-foot__in {
@@ -412,23 +509,28 @@ body.tpl-showcase {
 
 @media (max-width: 1040px) { .sc-nav__links { display: none; } }
 
+@media (max-width: 900px) {
+  .sc-svc__row { grid-template-columns: 42px minmax(0, 1fr); gap: 6px 14px; }
+  .sc-svc__row p { grid-column: 2; }
+  .sc-about__grid { grid-template-columns: minmax(0, 1fr); gap: 22px; }
+  .sc-about__aside { position: static; }
+  .sc-quotes__rest { columns: 1; }
+}
+
 @media (max-width: 860px) {
-  .sc-pair__grid { grid-template-columns: minmax(0, 1fr); }
-  .sc-pair__stack figure:nth-child(2) { width: 100%; margin-left: 0; }
-  .sc-mosaic__grid { grid-template-columns: repeat(2, 1fr); }
-  .sc-mosaic__grid figure,
-  .sc-mosaic__grid figure:nth-child(4n + 1) { grid-column: span 1; }
-  .sc-mosaic__grid figure:nth-child(4n + 1) img,
-  .sc-mosaic__grid figure:nth-child(4n + 2) img { aspect-ratio: 4 / 3; }
+  .sc-mosaic__grid { columns: 2; }
   .sc-hero { min-height: min(78vh, 620px); }
   .sc-hero__copy { max-width: 100%; }
   .sc-nav__tel { display: none; }
 }
 
+@media (max-width: 620px) {
+  .sc-mosaic__grid { columns: 1; }
+  }
+
 @media (max-width: 520px) {
   body.tpl-showcase { font-size: 16px; }
   .sc-actions .sc-btn { flex: 1 1 auto; justify-content: center; }
-  .sc-cta__in { flex-direction: column; align-items: flex-start; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -57,64 +57,65 @@ function telHref(phone: string): string {
  */
 type Slots = {
   hero: TemplateImage | null;
-  tiles: TemplateImage[]; // 0 or 3+
   feature: TemplateImage | null;
-  pair: TemplateImage[]; // 0 or 2
+  about: TemplateImage[]; // 0–3
+  cta: TemplateImage | null;
   mosaic: TemplateImage[]; // 0 or 3+
 };
 
 function allocateImages(hero: TemplateImage | null, gallery: TemplateImage[]): Slots {
   let pool: TemplateImage[] = [];
   const seen = new Set<string>();
-  const pushUnique = (img: TemplateImage | null | undefined) => {
+  const push = (img: TemplateImage | null | undefined) => {
     if (img?.url && !seen.has(img.url)) {
       seen.add(img.url);
       pool.push(img);
     }
   };
-  pushUnique(hero);
-  for (const g of gallery) pushUnique(g);
+  push(hero);
+  for (const g of gallery) push(g);
 
-  const removeFromPool = (imgs: TemplateImage[]) => {
+  const drop = (imgs: TemplateImage[]) => {
     const urls = new Set(imgs.map((i) => i.url));
     pool = pool.filter((i) => !urls.has(i.url));
   };
-  const wideAvailable = () => {
+  const wide = () => {
     const { landscape, square } = byOrientation(pool);
     return [...landscape, ...square];
   };
-  const tallAvailable = () => byOrientation(pool).portrait;
 
-  const slots: Slots = { hero: null, tiles: [], feature: null, pair: [], mosaic: [] };
+  const slots: Slots = { hero: null, feature: null, about: [], cta: null, mosaic: [] };
 
-  const wideForHero = wideAvailable();
-  if (wideForHero.length) {
-    slots.hero = wideForHero[0];
-    removeFromPool([slots.hero]);
+  const heroPick = wide();
+  if (heroPick.length) {
+    slots.hero = heroPick[0];
+    drop([slots.hero]);
   }
 
-  // Tiles need at least 3 to read as a grid; with 1–2 spare the services
-  // render as a ruled list instead, which looks deliberate rather than sparse.
-  const wideForTiles = wideAvailable();
-  if (wideForTiles.length >= 3) {
-    slots.tiles = wideForTiles.slice(0, 3);
-    removeFromPool(slots.tiles);
+  const featurePick = wide();
+  if (featurePick.length) {
+    slots.feature = featurePick[0];
+    drop([slots.feature]);
   }
 
-  const wideForFeature = wideAvailable();
-  if (wideForFeature.length >= 1) {
-    slots.feature = wideForFeature[0];
-    removeFromPool([slots.feature]);
+  // About takes portraits first — a tall photo has nowhere better to go, and
+  // this section renders every image at its own proportions.
+  const { portrait } = byOrientation(pool);
+  const aboutPick = [...portrait, ...wide()];
+  if (aboutPick.length) {
+    slots.about = aboutPick.slice(0, 3);
+    drop(slots.about);
   }
 
-  const tallForPair = tallAvailable();
-  if (tallForPair.length >= 2) {
-    slots.pair = tallForPair.slice(0, 2);
-    removeFromPool(slots.pair);
+  // The closing band gets a photo before the gallery does — a bookend to the
+  // hero is worth more than one more frame in a mosaic.
+  const ctaPick = wide();
+  if (ctaPick.length) {
+    slots.cta = ctaPick[0];
+    drop([slots.cta]);
   }
 
-  const restForMosaic = [...wideAvailable(), ...tallAvailable()];
-  if (restForMosaic.length >= 3) slots.mosaic = restForMosaic.slice(0, Math.min(restForMosaic.length, 7));
+  if (pool.length >= 3) slots.mosaic = pool.slice(0, 7);
 
   return slots;
 }
@@ -151,7 +152,7 @@ export function renderShowcase(c: TemplateContent): { body: string; css: string 
   navLinks.push('<a href="#contact">Contact</a>');
 
   const nav = `
-<header class="sc-nav${img.hero ? " sc-nav--over" : ""}">
+<header class="sc-nav">
   <div class="sc-wrap sc-nav__in">
     <div class="sc-nav__mark">${mark}</div>
     <nav class="sc-nav__links" aria-label="Sections">${navLinks.join("")}</nav>
@@ -175,46 +176,28 @@ export function renderShowcase(c: TemplateContent): { body: string; css: string 
   </div>
 </section>`;
 
-  // Nav overlays the hero photo, so the two ship as one block.
-  const top = img.hero ? `<div class="sc-top">${nav}${hero}</div>` : `${nav}${hero}`;
+  // Nav is sticky and translucent rather than overlaid, so it's just a sibling
+  // of the hero now — no shared stacking context needed.
+  const top = `${nav}${hero}`;
 
-  // ---- services: tiles for the first three, ruled list for the rest
-  const tiled = img.tiles.length ? services.slice(0, 3) : [];
-  const listed = services.slice(tiled.length);
-
+  // ---- services: no photographs, deliberately (see styles.ts)
   const servicesSection = services.length
     ? `
-<section class="sc-tiles" id="services">
-  <div class="sc-wrap sc-tiles__in">
-    <div class="sc-tiles__head">
+<section class="sc-svc" id="services">
+  <div class="sc-wrap sc-svc__in">
+    <div class="sc-svc__head">
       <p class="sc-eyebrow">What we do</p>
       <h2 class="sc-h2">Everything ${esc(c.businessName)} <span class="sc-em">looks after</span></h2>
     </div>
-    ${
-      tiled.length
-        ? `<div class="sc-tiles__grid">${tiled
-            .map(
-              (s, i) => `<article class="sc-tile">
-        <div class="sc-tile__img"><img src="${esc(img.tiles[i].url)}" alt=""${imgAttrs(img.tiles[i])}></div>
-        <h3>${esc(s.name)}</h3>
-        ${s.description ? `<p>${esc(s.description)}</p>` : ""}
-      </article>`,
-            )
-            .join("")}</div>`
-        : ""
-    }
-    ${
-      listed.length
-        ? `<div class="sc-grid">${listed
-            .map(
-              (s) => `<div class="sc-grid__cell">
-        <h4>${esc(s.name)}</h4>
-        ${s.description ? `<p>${esc(s.description)}</p>` : ""}
-      </div>`,
-            )
-            .join("")}</div>`
-        : ""
-    }
+    <div class="sc-svc__list">${services
+      .map(
+        (s, i) => `<div class="sc-svc__row${i < 3 ? " sc-svc__row--lead" : ""}">
+      <span class="sc-svc__no">${String(i + 1).padStart(2, "0")}</span>
+      <h3 class="sc-svc__name">${esc(s.name)}</h3>
+      ${s.description ? `<p>${esc(s.description)}</p>` : "<span></span>"}
+    </div>`,
+      )
+      .join("")}</div>
   </div>
 </section>`
     : "";
@@ -239,25 +222,31 @@ export function renderShowcase(c: TemplateContent): { body: string; css: string 
 </section>`
       : "";
 
-  // ---- about + asymmetric image pair
+  // ---- about: sticky label column, statement copy, offset photographs
   const about = c.aboutCopy
     ? `
-<section class="sc-pair" id="about">
-  <div class="sc-wrap sc-pair__in">
-    <div class="sc-pair__grid">
-      <div>
+<section class="sc-about" id="about">
+  <div class="sc-wrap sc-about__in">
+    <div class="sc-about__grid">
+      <aside class="sc-about__aside">
         <p class="sc-eyebrow">About us</p>
-        <h2 class="sc-h2">A little more <span class="sc-em">about how we work</span></h2>
-        <p class="sc-lede">${esc(c.aboutCopy)}</p>
+        <p>${esc(c.businessName)}</p>
+      </aside>
+      <div>
+        <p class="sc-about__lead">${esc(firstSentence(c.aboutCopy))}</p>
+        <p class="sc-about__body">${esc(c.aboutCopy)}</p>
+        ${
+          img.about.length
+            ? `<div class="sc-about__shots">${img.about
+                .map(
+                  (a) => `<figure>
+          <img src="${esc(a.url)}" alt=""${imgAttrs(a)}>${a.caption ? `<figcaption>${esc(a.caption)}</figcaption>` : ""}
+        </figure>`,
+                )
+                .join("")}</div>`
+            : ""
+        }
       </div>
-      ${
-        img.pair.length === 2
-          ? `<div class="sc-pair__stack">
-        <figure><img src="${esc(img.pair[0].url)}" alt=""${imgAttrs(img.pair[0])}></figure>
-        <figure><img src="${esc(img.pair[1].url)}" alt=""${imgAttrs(img.pair[1])}></figure>
-      </div>`
-          : ""
-      }
     </div>
   </div>
 </section>`
@@ -273,7 +262,13 @@ export function renderShowcase(c: TemplateContent): { body: string; css: string 
       <h2 class="sc-h2">See it <span class="sc-em">for yourself</span></h2>
     </div>
     <div class="sc-mosaic__grid">
-      ${img.mosaic.map((m) => `<figure><img src="${esc(m.url)}" alt=""${imgAttrs(m)}></figure>`).join("")}
+      ${img.mosaic
+        .map(
+          (m) => `<figure><img src="${esc(m.url)}" alt=""${imgAttrs(m)}>${
+            m.caption ? `<figcaption>${esc(m.caption)}</figcaption>` : ""
+          }</figure>`,
+        )
+        .join("")}
     </div>
   </div>
 </section>`
@@ -290,35 +285,56 @@ export function renderShowcase(c: TemplateContent): { body: string; css: string 
 </section>`
     : "";
 
-  // ---- testimonials (the first is already used in the feature band)
+  // ---- testimonials: strongest quote at display size, the rest ruled
   const remaining = img.feature && quotes.length ? quotes.slice(1) : quotes;
+  const lead = remaining[0];
+  const rest = remaining.slice(1);
+
   const quotesSection = remaining.length
     ? `
 <section class="sc-quotes" id="reviews">
   <div class="sc-wrap sc-quotes__in">
-    <p class="sc-eyebrow">In their words</p>
-    <h2 class="sc-h2">What people <span class="sc-em">tell us</span></h2>
-    <div class="sc-quotes__grid">
-      ${remaining
-        .slice(0, 6)
-        .map(
-          (q) => `<blockquote class="sc-quote">
+    <blockquote class="sc-quotes__lead">
+      “${esc(lead.quote)}”
+      <cite>${esc(lead.author)}${lead.role ? " — " + esc(lead.role) : ""}</cite>
+    </blockquote>
+    ${
+      rest.length
+        ? `<div class="sc-quotes__rest">${rest
+            .slice(0, 8)
+            .map(
+              (q) => `<blockquote>
         <p>${esc(q.quote)}</p>
-        <footer><b>${esc(q.author)}</b>${q.role ? esc(q.role) : ""}</footer>
+        <footer><b>${esc(q.author)}</b>${q.role ? " — " + esc(q.role) : ""}</footer>
       </blockquote>`,
-        )
-        .join("")}
-    </div>
+            )
+            .join("")}</div>`
+        : ""
+    }
   </div>
 </section>`
     : "";
 
   // ---- cta
+  const ctaFacts: string[] = [];
+  if (c.contactPhone)
+    ctaFacts.push(`<span><b>Call</b> <a href="${esc(telHref(c.contactPhone))}">${esc(c.contactPhone)}</a></span>`);
+  if (c.contactEmail)
+    ctaFacts.push(`<span><b>Email</b> <a href="mailto:${esc(c.contactEmail)}">${esc(c.contactEmail)}</a></span>`);
+  if (c.contactAddress) ctaFacts.push(`<span><b>Find us</b> ${esc(c.contactAddress)}</span>`);
+
   const cta = `
-<section class="sc-cta" id="contact">
+<section class="sc-cta${img.cta ? "" : " sc-cta--plain"}" id="contact">
+  ${img.cta ? `<div class="sc-cta__bg"><img src="${esc(img.cta.url)}" alt=""${imgAttrs(img.cta)}></div>` : ""}
   <div class="sc-wrap sc-cta__in">
-    <h2 class="sc-h2">Ready when you are.</h2>
-    <div class="sc-actions">${primaryCta}${c.contactEmail ? `<a class="sc-btn sc-btn--ghost" href="mailto:${esc(c.contactEmail)}">Send us a message</a>` : ""}</div>
+    <p class="sc-eyebrow">Get in touch</p>
+    <h2 class="sc-h2">Ready when <span class="sc-em">you are</span></h2>
+    <div class="sc-actions">${primaryCta}${
+      c.contactEmail
+        ? `<a class="sc-btn sc-btn--ghost" href="mailto:${esc(c.contactEmail)}">Send us a message</a>`
+        : ""
+    }</div>
+    ${ctaFacts.length ? `<div class="sc-cta__facts">${ctaFacts.join("")}</div>` : ""}
   </div>
 </section>`;
 
