@@ -49,3 +49,38 @@ export function isDecorativePhoto(
   if (logo && img.widthPx === logo.widthPx && img.heightPx === logo.heightPx) return true;
   return false;
 }
+
+// Runs immediately before the vision classification call (structure-and-rewrite.ts) —
+// purely geometric, no model involved, so it both saves the cost of classifying an image
+// that was never going to qualify and keeps junk from ever reaching a call whose whole
+// point is telling real photos apart from junk. Confirmed live on CL Financial: a
+// 2318x2318 image had been tagged role:"hero" by the crawler's own heuristic, and nothing
+// downstream checked whether it actually looked like a photo before promoting it —  it was
+// a blown-up brand wordmark. A genuine photograph is almost never perfectly square at that
+// size; a rendered logo or watermark graphic often is. Same run also had a 1080x1 image (a
+// broken/degenerate crawl artifact) that the aspect-ratio check below catches too.
+//
+// Callers MUST assign subject: "abstract" to anything this returns true for, not just skip
+// classification — every downstream consumer (isDecorativePhoto above, sceneImages,
+// pickHero) keys off subject === "abstract" specifically. Leaving subject unset behaves
+// like "unknown", which is exactly the pass-through bucket this exists to keep junk out of.
+const MIN_PLAUSIBLE_LONG_EDGE_PX = 600;
+const MIN_PLAUSIBLE_ASPECT = 0.4;
+const MAX_PLAUSIBLE_ASPECT = 2.6;
+const NEAR_SQUARE_MIN_RATIO = 0.9;
+const NEAR_SQUARE_MAX_RATIO = 1.1;
+const OVERSIZED_SQUARE_LONG_EDGE_PX = 1500;
+
+export function isImplausibleAsPhoto(widthPx: number, heightPx: number, isSvg: boolean): boolean {
+  if (isSvg) return true;
+  if (heightPx <= 0 || widthPx <= 0) return true;
+  if (Math.max(widthPx, heightPx) < MIN_PLAUSIBLE_LONG_EDGE_PX) return true;
+
+  const ratio = widthPx / heightPx;
+  if (ratio < MIN_PLAUSIBLE_ASPECT || ratio > MAX_PLAUSIBLE_ASPECT) return true;
+
+  const nearSquare = ratio >= NEAR_SQUARE_MIN_RATIO && ratio <= NEAR_SQUARE_MAX_RATIO;
+  if (nearSquare && Math.max(widthPx, heightPx) > OVERSIZED_SQUARE_LONG_EDGE_PX) return true;
+
+  return false;
+}

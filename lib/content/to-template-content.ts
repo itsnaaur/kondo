@@ -50,7 +50,19 @@ export function toTemplateContent(contentRecord: ContentRecord, assets: Asset[])
   // even from approved content — a low-res photo blown up to hero size looks broken
   // regardless of whether a human got around to removing it during review, so this always
   // prefers falling through rather than using a flagged candidate.
-  const tier1 = realImages.find((img) => img.role === "hero" && !img.flagged) ?? null;
+  //
+  // MIN_HERO_ASPECT matches pickHero's own "wideEnough" threshold (content-guards.ts) —
+  // until this existed, tier1 had no aspect (or subject) gate at all, unlike tier2 below
+  // and unlike pickHero. Confirmed live on CL Financial: a 2318x2318 image tagged
+  // role:"hero" by the crawler's own heuristic was actually a blown-up brand wordmark —
+  // square, so it fails this gate, but it isn't SVG, isn't subject:"abstract", and doesn't
+  // match the logo's own dimensions, so isDecorativePhoto above let it through and tier1
+  // promoted it with nothing else to catch it.
+  const MIN_HERO_ASPECT = 1.25;
+  const tier1 =
+    realImages.find(
+      (img) => img.role === "hero" && !img.flagged && img.heightPx > 0 && img.widthPx / img.heightPx >= MIN_HERO_ASPECT
+    ) ?? null;
 
   let heroImageUrl: string | null = null;
   let heroImageSource: "extracted" | "promoted" | null = null;

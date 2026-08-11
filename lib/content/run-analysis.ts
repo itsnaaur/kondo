@@ -9,7 +9,8 @@ import { selectHeroAssetId } from "./select-hero-image";
 import { extractContactDetails } from "./contact-extraction";
 import { structureAndRewriteContent } from "./structure-and-rewrite";
 import { selectRelevantPages } from "./select-relevant-pages";
-import { isJunkBySize } from "./filter-junk-images";
+import { isJunkBySize, isImplausibleAsPhoto } from "./filter-junk-images";
+import { resizeForVisionClassification } from "./resize-for-vision";
 import type { ConfidenceLevel, ContentImage, FieldFlag, FieldFlags } from "./types";
 import type { Prisma } from "@/app/generated/prisma/client";
 
@@ -77,6 +78,22 @@ export async function runAnalysisInBackground(clientId: string, siteUrl: string)
     const nearbyTextByAssetId = new Map(candidates.map((c) => [c.asset.id, c.nearbyText]));
     const contentImages = classifyPartnerLogos(heroAssigned, nearbyTextByAssetId);
 
+    // Deterministic geometry pre-pass, ahead of the vision classification call below —
+    // see isImplausibleAsPhoto's comment. Forces subject: "abstract" on anything that
+    // fails rather than merely skipping it, so it's excluded the same way a genuine
+    // AI-classified abstract image is everywhere downstream (isDecorativePhoto,
+    // sceneImages, pickHero) — an unset subject behaves like "unknown", which is exactly
+    // the pass-through bucket this exists to keep junk out of.
+    const mimeTypeByAssetId = new Map(candidates.map((c) => [c.asset.id, c.asset.mimeType]));
+    const contentImagesPrepassed: ContentImage[] = contentImages.map((img) => {
+      if (img.role !== "gallery" && img.role !== "hero") return img;
+      const isSvg = mimeTypeByAssetId.get(img.assetId) === "image/svg+xml";
+      if (isImplausibleAsPhoto(img.widthPx, img.heightPx, isSvg)) {
+        return { ...img, subject: "abstract" as const };
+      }
+      return img;
+    });
+
     const colorSourceBuffer =
       logo?.buffer ?? candidates.find((c) => c.asset.id === heroAssetId)?.buffer ?? candidates[0]?.buffer ?? null;
     const brandColors = colorSourceBuffer
@@ -92,10 +109,27 @@ export async function runAnalysisInBackground(clientId: string, siteUrl: string)
 
     // Only gallery/hero images get offered for AI captioning — partner logos are trust-
     // strip marks, not content photos, and classifyPartnerLogos has already pulled them
-    // out of this pool above.
-    const imageCandidatesForAi = contentImages
-      .filter((img) => img.role === "gallery" || img.role === "hero")
-      .map((img) => ({ assetId: img.assetId, nearbyText: nearbyTextByAssetId.get(img.assetId) ?? "" }));
+    // out of this pool above. Pre-pass rejects are excluded here too — no point paying to
+    // classify (or even resize) an image the geometry check already ruled out.
+    const bufferByAssetId = new Map(candidates.map((c) => [c.asset.id, c.buffer]));
+    const imageCandidatesForAi = await Promise.all(
+      contentImagesPrepassed
+        .filter((img) => (img.role === "gallery" || img.role === "hero") && img.subject !== "abstract")
+        .map(async (img) => {
+          const buffer = bufferByAssetId.get(img.assetId);
+          // Should be unreachable — every gallery/hero ContentImage originates from
+          // `candidates` above — but a candidate this can't resize is one it can't send,
+          // not one worth failing the whole analysis over.
+          if (!buffer) return null;
+          const { base64, mediaType } = await resizeForVisionClassification(buffer);
+          return {
+            assetId: img.assetId,
+            nearbyText: nearbyTextByAssetId.get(img.assetId) ?? "",
+            imageBase64: base64,
+            mediaType,
+          };
+        })
+    ).then((results) => results.filter((r): r is NonNullable<typeof r> => r !== null));
 
     const structured = await structureAndRewriteContent(
       selectedPages.map((p) => ({ url: p.url, title: p.title, text: p.text })),
@@ -103,8 +137,10 @@ export async function runAnalysisInBackground(clientId: string, siteUrl: string)
     );
 
     const imageClassificationByAssetId = new Map(structured.images.map((i) => [i.assetId, i]));
-    const contentImagesWithCaptions: ContentImage[] = contentImages.map((img) => {
+    const contentImagesWithCaptions: ContentImage[] = contentImagesPrepassed.map((img) => {
       const classification = imageClassificationByAssetId.get(img.assetId);
+      // Pre-pass rejects have no classification entry (never sent to the model) — they
+      // keep the subject: "abstract" the pre-pass already forced onto them above.
       if (!classification) return img;
       return {
         ...img,

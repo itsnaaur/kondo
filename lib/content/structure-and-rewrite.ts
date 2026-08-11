@@ -32,13 +32,20 @@ const MAX_OUTPUT_TOKENS = 16_000;
 const NEAR_LIMIT_WARN_THRESHOLD = 0.9;
 
 const CONFIDENCE_ENUM = ["low", "medium", "high"] as const;
-const IMAGE_SUBJECT_ENUM = ["people", "place", "work", "product", "abstract", "unknown"] as const;
+// "unknown" deliberately removed — it was a pass-through bucket that isDecorativePhoto/
+// sceneImages (content-guards.ts, filter-junk-images.ts) never excluded the way they
+// exclude "abstract", which is how clip-art icons and a blown-up wordmark ended up
+// rendering as real content on CL Financial. Now that the model can actually see each
+// image, there's no case where it has nothing to go on — "abstract" is the fail-closed
+// answer for both "this is decorative/an icon" and "I genuinely can't tell what this is."
+const IMAGE_SUBJECT_ENUM = ["people", "place", "work", "product", "abstract"] as const;
 
-// One image candidate offered to the AI for classification — everything it has to work
-// with is alt text plus nearest-ancestor text (lib/crawl/types.ts's nearbyText); there is
-// no vision model in this pipeline, so a caption is only ever as good as the surrounding
-// text supports.
-export type ImageCandidateInput = { assetId: string; nearbyText: string };
+// One image candidate offered to the AI for classification. imageBase64/mediaType are a
+// pre-resized (see resize-for-vision.ts) JPEG attached to the call as a real image content
+// block — nearbyText (alt text + nearest-ancestor text, lib/crawl/types.ts) is still passed
+// alongside it since it carries information the pixels can't (a name, a job title, which
+// service a photo illustrates), not because the model can't see the image.
+export type ImageCandidateInput = { assetId: string; nearbyText: string; imageBase64: string; mediaType: "image/jpeg" };
 
 // The SDK types Tool.InputSchema.properties as bare `unknown` (it's arbitrary JSON
 // Schema) — that's correct for the wire format but unusable for spreading/composing the
@@ -52,31 +59,34 @@ function buildImagesTool(imageCandidates: ImageCandidateInput[]): ToolProperties
     images: {
       type: "array",
       description:
-        "One entry per image listed in the prompt below, identified by its index (0-based, matching " +
-        "listed order). Every listed image must get an entry, even if subject is \"unknown\" — do not " +
-        "skip images just because their text gives you nothing to go on.",
+        "One entry per image attached below, identified by its index (0-based, matching the order the " +
+        "images appear in). Every attached image must get an entry — you can see each one, so there's no " +
+        "case where there's nothing to classify.",
       items: {
         type: "object",
         required: ["index", "subject", "suitableAsHero", "confidence"],
         properties: {
-          index: { type: "integer", description: "0-based index matching the image's position in the list below." },
+          index: { type: "integer", description: "0-based index matching the image's position in the attached order." },
           caption: {
             type: ["string", "null"],
             description:
-              "A short, natural caption ONLY if the alt text/surrounding text clearly describes what's in " +
-              "the photo (e.g. alt=\"dental surgery reception\" inside a section headed \"Our practice\" -> " +
-              "\"Reception area at the clinic\"). Never invent detail the text doesn't support — null is the " +
-              "correct answer far more often than a guess.",
+              "A short, natural caption describing what's actually in the photo. Use the alt text/surrounding " +
+              "text alongside what you can see to add detail the pixels alone don't give you (a name, a job " +
+              "title, which specific service this illustrates) — but the caption must describe the real " +
+              "content of the image, not just restate nearby text. Null if you can't produce something " +
+              "genuinely useful.",
           },
           subject: {
             type: "string",
             enum: IMAGE_SUBJECT_ENUM,
             description:
-              "people = a photo of person/people (staff, customers). place = a location/premises/exterior — " +
-              "hero-shaped. work = a finished project/product-in-use — gallery-shaped. product = a discrete " +
-              "product/item shot. abstract = decorative/stock/pattern, not a real photo of the business. " +
-              "unknown = the text gives no real signal either way — this is the correct default, not a " +
-              "last resort to avoid.",
+              "people = a real photo of person/people (staff, customers). place = a location/premises/" +
+              "exterior — hero-shaped. work = a finished project/product-in-use — gallery-shaped. product = " +
+              "a discrete product/item shot. abstract = anything that is NOT a real photograph of the " +
+              "business — icons, illustrations, clip art, logos, decorative graphics, stock/pattern imagery " +
+              "— or a real photo whose subject you genuinely can't determine even looking at it. This is the " +
+              "fail-closed choice: if you're not confident it's a real, on-topic photo of the business, " +
+              "choose abstract rather than guessing at people/place/work/product.",
           },
           suitableAsHero: {
             type: "boolean",
@@ -476,7 +486,10 @@ function resolveStructuredContent(raw: Record<string, unknown>, imageCandidates:
     return {
       assetId: candidate.assetId,
       caption: e && typeof e.caption === "string" && e.caption.trim() ? e.caption.trim() : null,
-      subject: e && isImageSubject(e.subject) ? e.subject : "unknown",
+      // Fails closed the same way the enum itself does now: a skipped index or a bad
+      // subject value in the response is exactly the kind of uncertainty that should
+      // exclude the image, not wave it through the way the old "unknown" default did.
+      subject: e && isImageSubject(e.subject) ? e.subject : "abstract",
       suitableAsHero: e && typeof e.suitableAsHero === "boolean" ? e.suitableAsHero : false,
       confidence: e && isConfidence(e.confidence) ? e.confidence : "low",
     };
@@ -527,10 +540,14 @@ name — infer it plausibly from the name and industry context, mark it low conf
 flagged, and say in flagReason that it's inferred rather than sourced.
 - detectedIndustry should be a short, common label a human would recognize (e.g. "local \
 service", "medical/clinic", "SaaS", "hospitality", "professional services", "education").
-- Image classification: you cannot see the images. Base subject/caption entirely on the \
-alt text and surrounding page text given for each one. "unknown" with low confidence is \
-the correct, expected answer when the text gives you nothing to go on — it is not a \
-failure to avoid. Never invent a caption the text doesn't support.
+- Image classification: each image is attached below the text it was found near — actually \
+look at it. Use the alt text/surrounding text to add detail the pixels alone don't give you \
+(a name, a job title, which service a photo illustrates), not as a substitute for looking. \
+If it's not a real, on-topic photograph of the business — an icon, illustration, clip art, \
+logo, decorative graphic, or anything you can't confidently place — classify it "abstract" \
+rather than guessing. Fail closed: an uncertain "people/place/work/product" is worse than a \
+correct "abstract", because everything downstream trusts subject to decide what's safe to \
+show a prospect.
 - Differentiators are "why choose us" points, not a restatement of services. Process steps \
 are a "how it works" sequence. Both are commonly absent — empty arrays are normal, correct \
 answers, not missed extractions.
@@ -566,13 +583,21 @@ export async function structureAndRewriteContent(
     .join("\n\n")
     .slice(0, ANALYSIS_CHAR_BUDGET + 8_000);
 
-  const imagesBlock =
-    imageCandidates.length > 0
-      ? "\n\nImages found on the site (classify each by index, using only the text given — you cannot see the actual images):\n" +
-        imageCandidates
-          .map((c, i) => `[${i}] ${c.nearbyText.trim() ? c.nearbyText.trim().slice(0, 300) : "(no alt or surrounding text)"}`)
-          .join("\n")
-      : "";
+  // Real image content blocks, not a text description of them — each candidate is a short
+  // "[index] alt text" label immediately followed by the actual (pre-resized, see
+  // resize-for-vision.ts) image, so the model can see exactly what it's classifying while
+  // whatever alt/nearby text exists sits right next to it for extra context (a name, a job
+  // title) rather than being the only signal available.
+  const imageContentBlocks: Anthropic.ContentBlockParam[] = imageCandidates.flatMap((c, i) => [
+    {
+      type: "text" as const,
+      text: `[${i}]${c.nearbyText.trim() ? " " + c.nearbyText.trim().slice(0, 300) : ""}`,
+    },
+    {
+      type: "image" as const,
+      source: { type: "base64" as const, media_type: c.mediaType, data: c.imageBase64 },
+    },
+  ]);
 
   const structureTool = buildStructureTool(imageCandidates);
 
@@ -593,7 +618,10 @@ export async function structureAndRewriteContent(
             {
               role: "user",
               content: [
-                { type: "text", text: `Crawled site text:\n\n${combinedText}${imagesBlock}` },
+                { type: "text", text: `Crawled site text:\n\n${combinedText}` },
+                ...(imageContentBlocks.length > 0
+                  ? [{ type: "text" as const, text: "\n\nImages found on the site (classify each by index):" }, ...imageContentBlocks]
+                  : []),
                 ...(correctionNote
                   ? [
                       {
