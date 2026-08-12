@@ -13,6 +13,7 @@ import { isJunkBySize, isImplausibleAsPhoto } from "./filter-junk-images";
 import { resizeForVisionClassification } from "./resize-for-vision";
 import type { ConfidenceLevel, ContentImage, FieldFlag, FieldFlags } from "./types";
 import type { Prisma } from "@/app/generated/prisma/client";
+import { logAuditEvent } from "@/lib/audit-log";
 
 function flagFor(confidence: ConfidenceLevel, reason: string): FieldFlag | undefined {
   return confidence === "high" ? undefined : { confidence, reason };
@@ -288,6 +289,16 @@ export async function runAnalysisInBackground(clientId: string, siteUrl: string)
       .catch(() => {
         // Client may have been deleted between enqueue and this failure — nothing to update.
       });
+    // No userId here — this runs in the worker process from Job.payload (clientId,
+    // siteUrl only), not a request with a signed-in user attached, unlike
+    // ANALYSIS_STARTED (lib/actions/analysis.ts). Was defined in the AuditEvent union and
+    // the schema's own AuditLog comment listed it as a tracked event, but nothing ever
+    // actually called it — the trail had a start for every analysis but no matching
+    // failure record.
+    await logAuditEvent("ANALYSIS_FAILED", {
+      clientId,
+      metadata: { error: (err instanceof Error ? err.message : String(err)).slice(0, 500) },
+    });
     throw err;
   }
 }

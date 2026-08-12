@@ -97,7 +97,7 @@ function ImageCard({ clientId, img }: { clientId: string; img: ImageWithUrl }) {
         // correctly detects the file input below and submits as multipart/form-data.
         <form action={replaceContentImage.bind(null, clientId)} className="space-y-1">
           <input type="hidden" name="assetId" value={img.assetId} />
-          <AssetDropzone label="Replace with a better image" name="file" multiple={false} />
+          <AssetDropzone label="Replace with a better image" name="file" />
           <SubmitButton
             pendingLabel="Uploading..."
             className="w-full rounded-lg border border-neutral-700 px-3 py-1.5 text-xs text-neutral-300 hover:bg-neutral-900"
@@ -184,6 +184,7 @@ function ArrayCard({
                       <textarea
                         key={f.name}
                         name={f.name}
+                        aria-label={f.placeholder}
                         defaultValue={(row[f.dataKey] as string) ?? ""}
                         placeholder={f.placeholder}
                         rows={f.rows ?? 2}
@@ -193,6 +194,7 @@ function ArrayCard({
                       <input
                         key={f.name}
                         name={f.name}
+                        aria-label={f.placeholder}
                         defaultValue={(row[f.dataKey] as string) ?? ""}
                         placeholder={f.placeholder}
                         className={`${INPUT_CLASS}${f.className ? ` ${f.className}` : ""}`}
@@ -282,6 +284,18 @@ const SERVICE_AREA_FIELD_ROWS: ArrayCardField[][] = [
 
 type ContentReviewFormProps = {
   clientId: string;
+  // Whether this content is already approved (contentRecord.reviewedAt != null). The form
+  // itself is identical either way — approving isn't the only path to Choose Template
+  // being unlocked once it already is — but the closing button needs to stop promising
+  // "unlocks Choose Template" once that's already true, and re-approving should read as a
+  // deliberate re-confirmation, not the first-time gate.
+  isApproved: boolean;
+  // ContentRecord.updatedAt at the moment this page was rendered, round-tripped through a
+  // hidden field so applyContentUpdate (lib/actions/content.ts) can detect a re-analysis
+  // that completed and overwrote the record while this form was still open in a browser
+  // tab — without this, that stale submit silently wins and clobbers the fresher
+  // extraction with old/edited-against-old-data values.
+  recordUpdatedAt: string;
   businessName: string | null;
   tagline: string | null;
   aboutCopy: string | null;
@@ -306,6 +320,8 @@ type ContentReviewFormProps = {
 
 export function ContentReviewForm({
   clientId,
+  isApproved,
+  recordUpdatedAt,
   businessName,
   tagline,
   aboutCopy,
@@ -334,26 +350,27 @@ export function ContentReviewForm({
   return (
     <div className="space-y-6">
       <form className="space-y-6">
+        <input type="hidden" name="recordUpdatedAt" value={recordUpdatedAt} />
         <section className={CARD_CLASS}>
           <h3 className="mb-3 text-xs font-medium uppercase tracking-wide text-neutral-500">Business</h3>
           <div className="space-y-4">
             <div>
-              <label className={LABEL_CLASS}>
+              <label className={LABEL_CLASS} htmlFor="businessName">
                 Business name <ConfidenceBadge {...fieldFlags.businessName} />
               </label>
-              <input name="businessName" defaultValue={businessName ?? ""} className={INPUT_CLASS} />
+              <input id="businessName" name="businessName" defaultValue={businessName ?? ""} className={INPUT_CLASS} />
             </div>
             <div>
-              <label className={LABEL_CLASS}>
+              <label className={LABEL_CLASS} htmlFor="tagline">
                 Tagline <ConfidenceBadge {...fieldFlags.tagline} />
               </label>
-              <input name="tagline" defaultValue={tagline ?? ""} className={INPUT_CLASS} />
+              <input id="tagline" name="tagline" defaultValue={tagline ?? ""} className={INPUT_CLASS} />
             </div>
             <div>
-              <label className={LABEL_CLASS}>
+              <label className={LABEL_CLASS} htmlFor="aboutCopy">
                 About <ConfidenceBadge {...fieldFlags.aboutCopy} />
               </label>
-              <textarea name="aboutCopy" rows={4} defaultValue={aboutCopy ?? ""} className={INPUT_CLASS} />
+              <textarea id="aboutCopy" name="aboutCopy" rows={4} defaultValue={aboutCopy ?? ""} className={INPUT_CLASS} />
             </div>
           </div>
         </section>
@@ -425,10 +442,10 @@ export function ContentReviewForm({
             The site&rsquo;s own button label, in their words — used instead of a generic
             &quot;Get in touch&quot; when present.
           </p>
-          <label className={LABEL_CLASS}>
+          <label className={LABEL_CLASS} htmlFor="ctaLabel">
             CTA label <ConfidenceBadge {...fieldFlags.ctaLabel} />
           </label>
-          <input name="ctaLabel" defaultValue={ctaLabel ?? ""} placeholder="Book an appointment" className={INPUT_CLASS} />
+          <input id="ctaLabel" name="ctaLabel" defaultValue={ctaLabel ?? ""} placeholder="Book an appointment" className={INPUT_CLASS} />
         </section>
 
         <ArrayCard
@@ -469,22 +486,22 @@ export function ContentReviewForm({
           <h3 className="mb-3 text-xs font-medium uppercase tracking-wide text-neutral-500">Contact</h3>
           <div className="grid gap-4 sm:grid-cols-3">
             <div>
-              <label className={LABEL_CLASS}>
+              <label className={LABEL_CLASS} htmlFor="contactEmail">
                 Email <ConfidenceBadge {...fieldFlags.contactEmail} />
               </label>
-              <input name="contactEmail" defaultValue={contactEmail ?? ""} className={INPUT_CLASS} />
+              <input id="contactEmail" name="contactEmail" defaultValue={contactEmail ?? ""} className={INPUT_CLASS} />
             </div>
             <div>
-              <label className={LABEL_CLASS}>
+              <label className={LABEL_CLASS} htmlFor="contactPhone">
                 Phone <ConfidenceBadge {...fieldFlags.contactPhone} />
               </label>
-              <input name="contactPhone" defaultValue={contactPhone ?? ""} className={INPUT_CLASS} />
+              <input id="contactPhone" name="contactPhone" defaultValue={contactPhone ?? ""} className={INPUT_CLASS} />
             </div>
             <div>
-              <label className={LABEL_CLASS}>
+              <label className={LABEL_CLASS} htmlFor="contactAddress">
                 Address <ConfidenceBadge {...fieldFlags.contactAddress} />
               </label>
-              <input name="contactAddress" defaultValue={contactAddress ?? ""} className={INPUT_CLASS} />
+              <input id="contactAddress" name="contactAddress" defaultValue={contactAddress ?? ""} className={INPUT_CLASS} />
             </div>
           </div>
         </section>
@@ -496,11 +513,17 @@ export function ContentReviewForm({
               const color = colorByRole(role);
               return (
                 <div key={role}>
-                  <label className={LABEL_CLASS}>
+                  <label className={LABEL_CLASS} htmlFor={`color_${role}`}>
                     {role[0].toUpperCase() + role.slice(1)} <ConfidenceBadge confidence={color?.confidence} flagged={color?.flagged} />
                   </label>
                   <div className="flex items-center gap-2">
-                    <input type="color" name={`color_${role}`} defaultValue={color?.hex ?? "#6b7280"} className="h-9 w-12 rounded border border-neutral-700 bg-neutral-900" />
+                    <input
+                      id={`color_${role}`}
+                      type="color"
+                      name={`color_${role}`}
+                      defaultValue={color?.hex ?? "#6b7280"}
+                      className="h-9 w-12 rounded border border-neutral-700 bg-neutral-900"
+                    />
                     <span className="text-sm text-neutral-400">{color?.hex ?? "—"}</span>
                   </div>
                 </div>
@@ -519,13 +542,17 @@ export function ContentReviewForm({
           </SubmitButton>
           <ConfirmSubmitButton
             formAction={approveContentRecord.bind(null, clientId)}
-            confirmText="Approve this content? It will unlock Choose Template — make sure everything looks right first."
-            confirmLabel="Approve & continue"
+            confirmText={
+              isApproved
+                ? "Re-approve this content? This just re-confirms it and updates who/when it was last approved — Choose Template is already unlocked."
+                : "Approve this content? It will unlock Choose Template — make sure everything looks right first."
+            }
+            confirmLabel={isApproved ? "Re-approve" : "Approve & continue"}
             variant="primary"
-            pendingLabel="Approving..."
+            pendingLabel={isApproved ? "Re-approving..." : "Approving..."}
             className="rounded-lg bg-yellow-400 px-5 py-2.5 font-medium text-neutral-900 transition hover:bg-yellow-300"
           >
-            Approve & continue
+            {isApproved ? "Re-approve" : "Approve & continue"}
           </ConfirmSubmitButton>
         </div>
       </form>

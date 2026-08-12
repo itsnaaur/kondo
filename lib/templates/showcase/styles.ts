@@ -428,6 +428,14 @@ body.tpl-showcase {
   gap: clamp(24px, 5vw, 56px);
 }
 .sc-strip__row img { max-height: 34px; width: auto; filter: grayscale(1); opacity: 0.62; }
+/* Text-form credentials ("AHPRA registered") for sites with no partner logos to crawl —
+   same strip, a lighter-weight treatment than the logo row since there's no image to
+   give the pill its own visual weight. */
+.sc-credentials { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+.sc-credentials > span {
+  font-size: 0.82rem; color: var(--ink-muted); padding: 8px 16px;
+  border: 1px solid var(--line); border-radius: 999px;
+}
 
 /* ---------- cta ----------
    A flat accent stripe with a heading on one side and buttons on the other has

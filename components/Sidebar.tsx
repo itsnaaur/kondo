@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { moveToTrash } from "@/lib/actions/trash";
+import { SubmitButton } from "@/components/SubmitButton";
 
 type SidebarClient = { id: string; name: string; status: string };
 
@@ -79,6 +80,19 @@ export function Sidebar({ clients }: { clients: SidebarClient[] }) {
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
+  // The click-outside overlay below closes the menu for a mouse, but a keyboard user
+  // tabbing through the page has no way to dismiss it at all otherwise — Escape is the
+  // standard, expected way to close any transient menu/popover regardless of input
+  // device. Scoped to only listen while a menu is actually open, not on every render.
+  useEffect(() => {
+    if (!openMenuId) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpenMenuId(null);
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [openMenuId]);
+
   function toggleCollapsed() {
     setCollapsed((c) => {
       const next = !c;
@@ -93,6 +107,7 @@ export function Sidebar({ clients }: { clients: SidebarClient[] }) {
         <button
           onClick={toggleCollapsed}
           title="Expand sidebar"
+          aria-label="Expand sidebar"
           className="rounded-lg p-2 text-neutral-400 transition hover:bg-neutral-900 hover:text-neutral-200"
         >
           <SidebarToggleIcon />
@@ -113,6 +128,7 @@ export function Sidebar({ clients }: { clients: SidebarClient[] }) {
         <button
           onClick={toggleCollapsed}
           title="Collapse sidebar"
+          aria-label="Collapse sidebar"
           className="rounded-lg p-1.5 text-neutral-400 transition hover:bg-neutral-900 hover:text-neutral-200"
         >
           <SidebarToggleIcon />
@@ -158,6 +174,9 @@ export function Sidebar({ clients }: { clients: SidebarClient[] }) {
                     type="button"
                     onClick={() => setOpenMenuId((id) => (id === client.id ? null : client.id))}
                     title="Client options"
+                    aria-label="Client options"
+                    aria-haspopup="menu"
+                    aria-expanded={openMenuId === client.id}
                     className="flex-shrink-0 rounded-lg p-1.5 text-neutral-600 transition hover:bg-neutral-800 hover:text-neutral-300"
                   >
                     <KebabIcon />
@@ -166,15 +185,22 @@ export function Sidebar({ clients }: { clients: SidebarClient[] }) {
 
                 {openMenuId === client.id && (
                   <>
+                    {/* Click-outside-to-close is a mouse-only convenience on top of an
+                        already keyboard-reachable menu: Escape closes it too (see the
+                        document-level keydown listener above), and "Move to trash" below
+                        is a real, focusable <button> in normal tab order. Giving this
+                        invisible full-viewport div its own tabIndex/onKeyDown would put a
+                        useless stop in the tab order instead of an actual fix. */}
+                    {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
                     <div className="fixed inset-0 z-10" onClick={() => setOpenMenuId(null)} />
                     <div className="absolute right-2 top-full z-20 mt-1 w-40 rounded-lg border border-neutral-800 bg-neutral-900 py-1 shadow-lg">
                       <form action={moveToTrash.bind(null, client.id)}>
-                        <button
-                          type="submit"
-                          className="w-full px-3 py-2 text-left text-sm text-neutral-300 transition hover:bg-neutral-800 hover:text-red-400"
+                        <SubmitButton
+                          pendingLabel="Moving..."
+                          className="w-full px-3 py-2 text-left text-sm text-neutral-300 transition hover:bg-neutral-800 hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           Move to trash
-                        </button>
+                        </SubmitButton>
                       </form>
                     </div>
                   </>

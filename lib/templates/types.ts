@@ -63,6 +63,22 @@ export type TemplateContent = {
   // template reads it for rendering, same as heroImageSource above. Kept here rather than
   // threading a second parameter through every scoreTemplate/pickDefaultTemplate call site.
   detectedIndustry: string | null;
+  // The site's own recurring CTA phrase ("Book an appointment", "Get a quote") — null
+  // when nothing recurs clearly enough to trust as their actual wording (see
+  // lib/content/types.ts's FieldFlags comment). Every template substitutes this in place
+  // of its own generic "Get in touch"/"Book a visit" button copy when present, and falls
+  // back to that generic copy when null — never invents a CTA phrase itself.
+  ctaLabel: string | null;
+  // Second extraction-expansion fields (lib/content/structure-and-rewrite.ts) — same
+  // "empty array is a normal, common outcome" convention as stats/faqs/differentiators
+  // above, not a missing-data state. Confidence/flagged metadata is stripped like every
+  // other field here; these are all forced flagged:true at extraction time (a human
+  // always reviews them before they can reach a template), so a template never needs to
+  // re-derive trust here.
+  serviceAreas: string[];
+  hours: { days: string; hours: string }[];
+  offers: { name: string; price: string }[];
+  credentials: string[];
 };
 
 // The content types a template has a section for at all — used only for the tie-break

@@ -59,6 +59,16 @@ const LISTING_ROOT_PATH = /^\/(blog|news|press|articles|insights|resources|updat
 // word) and shouldn't be able to outrank the category hub they were found through.
 const INDEX_PAGE_MIN_SCORE = 1;
 
+// "Unconditional" means every anchor is always included, not that any one of them can be
+// arbitrarily large — without a per-page cap, a single outlier anchor (an unusually large
+// services-index page that dumps every product description inline, say) can alone consume
+// the entire charBudget before rankedNonAnchors' loop below ever runs, silently dropping
+// 100% of the individually-ranked pool this module exists to surface (see the module
+// comment's Princeton Dental numbers). 12k is comfortably above what a normal anchor page
+// needs — the same comment notes Princeton's 4 real anchors totalled ~13.7k *combined* —
+// so this only ever bites the pathological single-page case, not ordinary sites.
+const MAX_ANCHOR_PAGE_CHARS = 12_000;
+
 // Applies only to pages with no keyword match of their own, competing against other such
 // pages for remaining budget — deliberately modest, not larger than a real keyword match,
 // so it can't outrank a genuine category-index page (confirmed live: a flat +20 let a
@@ -171,8 +181,20 @@ export function selectRelevantPages(
     })
     .sort((a, b) => b.score - a.score);
 
-  const selected: PageExtraction[] = [homepage, ...anchors];
+  const cappedAnchors = [homepage, ...anchors].map((page) =>
+    page.text.length > MAX_ANCHOR_PAGE_CHARS ? { ...page, text: page.text.slice(0, MAX_ANCHOR_PAGE_CHARS) } : page
+  );
+
+  const selected: PageExtraction[] = cappedAnchors;
   let used = selected.reduce((sum, p) => sum + p.text.length, 0);
+
+  if (used >= charBudget) {
+    console.error(
+      `[select-relevant-pages] anchor pages alone (${cappedAnchors.length}, ${used} chars) reached the ` +
+        `${charBudget}-char budget even after the ${MAX_ANCHOR_PAGE_CHARS}-char per-page cap — no room left ` +
+        `for any individually-ranked page this run.`
+    );
+  }
 
   for (const { page } of rankedNonAnchors) {
     if (used >= charBudget) break;

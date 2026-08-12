@@ -1,3 +1,4 @@
+import { createHash } from "crypto";
 import { prisma } from "@/lib/prisma";
 import { uploadAssetToStorage } from "@/lib/storage/upload-asset";
 import { AssetType, type Asset } from "@/app/generated/prisma/client";
@@ -100,6 +101,18 @@ async function saveAsset(
   const downloaded = await downloadImage(url);
   if (!downloaded) return null;
 
+  const contentHash = createHash("sha256").update(downloaded.buffer).digest("hex");
+
+  // Assets are deliberately append-only (never deleted or overwritten on re-analysis —
+  // see the Asset model's own comment in prisma/schema.prisma), since already-published
+  // Concept HTML has asset URLs baked in permanently. But that doesn't mean every
+  // re-analysis of an unchanged site should re-download and re-upload byte-identical
+  // photos and grow Storage/the Asset table without bound — if this exact image was
+  // already saved for this client (same clientId + content hash) in an earlier run,
+  // reuse that row instead of creating a new Storage object and a new Asset for it.
+  const existing = await prisma.asset.findFirst({ where: { clientId, contentHash } });
+  if (existing) return { asset: existing, buffer: downloaded.buffer };
+
   const ext = MIME_EXTENSIONS[downloaded.mimeType] ?? "bin";
   const filename = `${filenameHint}.${ext}`;
 
@@ -117,6 +130,7 @@ async function saveAsset(
       url: uploaded.url,
       mimeType: downloaded.mimeType,
       size: downloaded.buffer.length,
+      contentHash,
     },
   });
 
@@ -128,7 +142,14 @@ async function saveAsset(
 // extraction, image-quality flagging — don't have to special-case "asset already existed."
 async function fetchExistingAssetBytes(asset: Asset): Promise<DownloadedAsset | null> {
   try {
-    const res = await fetch(asset.url);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    let res: Response;
+    try {
+      res = await fetch(asset.url, { signal: controller.signal });
+    } finally {
+      clearTimeout(timeout);
+    }
     if (!res.ok) return null;
     const buffer = Buffer.from(await res.arrayBuffer());
     return { asset, buffer };

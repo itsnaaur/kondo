@@ -10,8 +10,17 @@
 // file to load there, and `--env-file` errors out hard if the file doesn't exist. Use
 // `npm run worker:prod` (plain `tsx scripts/worker.ts`, no --env-file flag) instead —
 // see railway.toml.
+import * as Sentry from "@sentry/node";
 import { claimNextJob, completeJob, failJob, reclaimOrphanedJobs, type ClaimedJob } from "@/lib/jobs/queue";
 import { runAnalysisInBackground } from "@/lib/content/run-analysis";
+
+// The worker is its own standalone Node process (not part of the Next.js app), so it uses
+// @sentry/node directly rather than @sentry/nextjs's Next-specific instrumentation hooks
+// — same reasoning as everywhere else in this app: no-ops safely with no SENTRY_DSN set,
+// this is the one place in the whole pipeline where a genuinely novel failure previously
+// had nothing but a console.error to Railway's log stream (see the reliability audit this
+// was written up against).
+Sentry.init({ dsn: process.env.SENTRY_DSN, tracesSampleRate: 0.1 });
 
 const POLL_INTERVAL_MS = 3000;
 
@@ -40,6 +49,7 @@ async function processJob(job: ClaimedJob): Promise<void> {
     console.log(`[worker] completed ${job.id}`);
   } catch (err) {
     console.error(`[worker] job ${job.id} threw:`, err);
+    Sentry.captureException(err, { extra: { jobId: job.id, jobType: job.type } });
     await failJob(job.id, err instanceof Error ? err.message : String(err));
   }
 }
@@ -64,7 +74,13 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
+main().catch(async (err) => {
   console.error("[worker] fatal error:", err);
+  Sentry.captureException(err);
+  // Sentry sends events asynchronously in the background — without this, process.exit()
+  // below can kill the process before the fatal event this handler exists to report ever
+  // actually leaves it. 2s is generous for a single event; worth it here specifically
+  // since a fatal error is by definition the one event that must not be lost.
+  await Sentry.flush(2000);
   process.exit(1);
 });

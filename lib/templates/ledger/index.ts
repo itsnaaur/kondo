@@ -82,12 +82,16 @@ export function renderLedger(c: TemplateContent): { body: string; css: string } 
   const gallery = (c.galleryImages || []).filter((img) => img.url !== c.heroImageUrl);
   const heroImage = (c.galleryImages || []).find((img) => img.url === c.heroImageUrl) ?? null;
   const partners = (c as { partnerLogos?: { url: string }[] }).partnerLogos || [];
+  const credentials = c.credentials || [];
   const hasHero = Boolean(c.heroImageUrl);
+  // The client's own recurring CTA phrase, standing in for the generic scroll-to-contact
+  // copy wherever nothing more specific (a phone number to call) is already in play.
+  const ctaWord = c.ctaLabel || "Get in touch";
 
   const primaryCta = c.contactPhone
     ? `<a class="tl-btn tl-btn--solid" href="${esc(telHref(c.contactPhone))}">Call ${esc(c.contactPhone)}</a>`
     : c.contactEmail
-      ? `<a class="tl-btn tl-btn--solid" href="mailto:${esc(c.contactEmail)}">Get in touch</a>`
+      ? `<a class="tl-btn tl-btn--solid" href="mailto:${esc(c.contactEmail)}">${esc(ctaWord)}</a>`
       : "";
 
   const secondaryCta = `<a class="tl-btn tl-btn--ghost" href="#services">See what we do</a>`;
@@ -112,7 +116,7 @@ export function renderLedger(c: TemplateContent): { body: string; css: string } 
     <nav class="tl-nav__links" aria-label="Sections">${navLinks.join("")}</nav>
     <div class="tl-nav__side">
       ${c.contactPhone ? `<a class="tl-nav__tel" href="${esc(telHref(c.contactPhone))}">${esc(c.contactPhone)}</a>` : ""}
-      <a class="tl-btn tl-btn--solid" href="#contact">Book a visit</a>
+      <a class="tl-btn tl-btn--solid" href="#contact">${esc(c.ctaLabel || "Book a visit")}</a>
     </div>
   </div>
 </header>`;
@@ -136,14 +140,25 @@ export function renderLedger(c: TemplateContent): { body: string; css: string } 
 </section>`;
 
   // ---- trust strip (partner / accreditation logos)
-  const strip = partners.length
+  const strip = partners.length || credentials.length
     ? `
 <section class="tl-strip">
   <div class="tl-wrap tl-strip__in">
     <p class="tl-strip__label">Trusted partners &amp; accreditations</p>
-    <div class="tl-strip__row">
+    ${
+      partners.length
+        ? `<div class="tl-strip__row">
       ${partners.map((l) => `<span><img src="${esc(l.url)}" alt=""></span>`).join("")}
-    </div>
+    </div>`
+        : ""
+    }
+    ${
+      credentials.length
+        ? `<div class="tl-credentials"${partners.length ? ' style="margin-top:20px"' : ""}>${credentials
+            .map((label) => `<span>${esc(label)}</span>`)
+            .join("")}</div>`
+        : ""
+    }
   </div>
 </section>`
     : "";
@@ -196,6 +211,18 @@ export function renderLedger(c: TemplateContent): { body: string; css: string } 
       `<div><dt>Email</dt><dd><a href="mailto:${esc(c.contactEmail)}">${esc(c.contactEmail)}</a></dd></div>`,
     );
   if (c.contactAddress) facts.push(`<div><dt>Where to find us</dt><dd>${esc(c.contactAddress)}</dd></div>`);
+  if (c.hours && c.hours.length)
+    facts.push(
+      `<div><dt>Hours</dt><dd>${c.hours.map((h) => `${esc(h.days)}: ${esc(h.hours)}`).join("<br>")}</dd></div>`
+    );
+  if (c.offers && c.offers.length)
+    facts.push(
+      `<div><dt>Current offer${c.offers.length > 1 ? "s" : ""}</dt><dd>${c.offers
+        .map((o) => `${esc(o.name)} — ${esc(o.price)}`)
+        .join("<br>")}</dd></div>`
+    );
+  if (c.serviceAreas && c.serviceAreas.length)
+    facts.push(`<div><dt>Areas we serve</dt><dd>${esc(c.serviceAreas.join(", "))}</dd></div>`);
 
   const deep =
     gallery.length || facts.length
@@ -270,6 +297,7 @@ export function renderLedger(c: TemplateContent): { body: string; css: string } 
 </section>`;
 
   // ---- footer
+  const hasContact = Boolean(c.contactPhone || c.contactEmail || c.contactAddress);
   const foot = `
 <footer class="tl-foot">
   <div class="tl-wrap tl-foot__in">
@@ -278,7 +306,7 @@ export function renderLedger(c: TemplateContent): { body: string; css: string } 
       ${c.tagline ? `<p>${esc(c.tagline)}</p>` : ""}
     </div>
     ${
-      facts.length
+      hasContact
         ? `<div>
       <h4>Get in touch</h4>
       ${c.contactPhone ? `<a href="${esc(telHref(c.contactPhone))}">${esc(c.contactPhone)}</a>` : ""}

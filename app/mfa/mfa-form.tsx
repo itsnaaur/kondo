@@ -187,11 +187,14 @@ export default function MfaForm() {
       )}
 
       <form onSubmit={handleVerify}>
+        <label htmlFor="mfa-code" className="sr-only">
+          Authenticator code
+        </label>
         <input
+          id="mfa-code"
           type="text"
           inputMode="numeric"
           autoComplete="one-time-code"
-          autoFocus
           maxLength={6}
           value={code}
           onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}

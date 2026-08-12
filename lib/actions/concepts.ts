@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth/require-user";
+import { requireActiveClient } from "@/lib/actions/require-active-client";
 import { logAuditEvent } from "@/lib/audit-log";
 import { renderTemplateToHtml, isValidTemplateKey } from "@/lib/templates/registry";
 import { toTemplateContent } from "@/lib/content/to-template-content";
@@ -14,6 +15,7 @@ import { toTemplateContent } from "@/lib/content/to-template-content";
 // any client-supplied HTML.
 export async function createConcept(clientId: string, templateKey: string) {
   const user = await requireUser();
+  await requireActiveClient(clientId);
 
   if (!isValidTemplateKey(templateKey)) {
     throw new Error(`Unknown template: ${templateKey}`);

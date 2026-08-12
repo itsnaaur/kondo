@@ -315,6 +315,14 @@ body.tpl-ledger {
   height: auto;
   object-fit: contain;
 }
+/* Text-form credentials ("AHPRA registered") for sites with no partner logos to crawl —
+   same strip, a lighter-weight treatment than the logo tiles since there's no image to
+   give the pill its own visual weight. */
+.tl-credentials { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+.tl-credentials > span {
+  font-size: 0.82rem; color: var(--ink-muted); padding: 8px 16px;
+  border: 1px solid var(--line); border-radius: 999px; background: var(--paper);
+}
 
 /* ---------- statement band ---------- */
 

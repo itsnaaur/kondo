@@ -166,6 +166,14 @@ body.tpl-atlas {
   font-size: 0.7rem; letter-spacing: 0.14em; text-transform: uppercase;
   color: var(--ink-muted); margin: 0 0 18px; text-align: center;
 }
+/* Text-form credentials ("AHPRA registered") for sites with no partner logos to crawl —
+   same strip, a lighter-weight treatment than the logo tiles since there's no image to
+   give the pill its own visual weight. */
+.at-credentials { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+.at-credentials > span {
+  font-size: 0.82rem; color: var(--ink-muted); padding: 8px 16px;
+  border: 1px solid var(--line); border-radius: 999px; background: var(--paper);
+}
 
 /* ---------- differentiators: the strongest reliable content ---------- */
 

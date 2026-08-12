@@ -8,6 +8,10 @@ import type {
   ContentFaq,
   ContentDifferentiator,
   ContentProcessStep,
+  ContentServiceArea,
+  ContentHours,
+  ContentOffer,
+  ContentCredential,
 } from "./types";
 import type { TemplateContent } from "@/lib/templates/types";
 import { isDecorativePhoto } from "./filter-junk-images";
@@ -28,6 +32,10 @@ export function toTemplateContent(contentRecord: ContentRecord, assets: Asset[])
   const process = (contentRecord.process as unknown as ContentProcessStep[] | null) ?? [];
   const brandColors = (contentRecord.brandColors as unknown as ContentColor[] | null) ?? [];
   const images = (contentRecord.images as unknown as ContentImage[] | null) ?? [];
+  const serviceAreas = (contentRecord.serviceAreas as unknown as ContentServiceArea[] | null) ?? [];
+  const hours = (contentRecord.hours as unknown as ContentHours[] | null) ?? [];
+  const offers = (contentRecord.offers as unknown as ContentOffer[] | null) ?? [];
+  const credentials = (contentRecord.credentials as unknown as ContentCredential[] | null) ?? [];
 
   const logoUrl = contentRecord.logoAssetId ? (assetById.get(contentRecord.logoAssetId)?.url ?? null) : null;
 
@@ -162,5 +170,10 @@ export function toTemplateContent(contentRecord: ContentRecord, assets: Asset[])
     galleryImages,
     partnerLogos,
     detectedIndustry: contentRecord.detectedIndustry,
+    ctaLabel: contentRecord.ctaLabel ?? null,
+    serviceAreas: serviceAreas.map((a) => a.name),
+    hours: hours.map((h) => ({ days: h.days, hours: h.hours })),
+    offers: offers.map((o) => ({ name: o.name, price: o.price })),
+    credentials: credentials.map((c) => c.label),
   };
 }

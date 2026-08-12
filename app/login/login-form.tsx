@@ -86,16 +86,28 @@ export default function LoginForm() {
           <Image src="/kondo-logo.png" alt="Kondo" width={276} height={45} className="mb-2 h-6 w-auto" priority />
           <p className="text-sm text-neutral-400">Internal facelift tool — JRNY Digital</p>
         </div>
+        {/* Visually the placeholder is label enough — sighted users see "Email"/"Password"
+            the instant the field is empty — but a placeholder alone gives a screen reader
+            no persistent accessible name once the field has a value, and doesn't survive
+            autofill highlighting the same way a real label does. sr-only keeps the visual
+            design exactly as-is. */}
+        <label htmlFor="email" className="sr-only">
+          Email
+        </label>
         <input
+          id="email"
           type="email"
-          autoFocus
           autoComplete="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="Email"
           className="mb-3 w-full rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-2 text-neutral-100 outline-none focus:border-neutral-500"
         />
+        <label htmlFor="password" className="sr-only">
+          Password
+        </label>
         <input
+          id="password"
           type="password"
           autoComplete="current-password"
           value={password}

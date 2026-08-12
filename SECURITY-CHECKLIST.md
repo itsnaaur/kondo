@@ -24,6 +24,30 @@ detail page.
 
 No new secret was needed for MFA recovery — it reuses your existing `DATABASE_URL`.
 
+## New GitHub secret this round
+
+Production migrations now deploy automatically via CI (`.github/workflows/ci.yml`'s
+`migrate-deploy` job) on every push to `main`, instead of needing to be run by hand.
+Add `PRODUCTION_DIRECT_URL` as a repository secret (Settings → Secrets and variables →
+Actions) — same value as Vercel's `DIRECT_URL` for the production database (the
+unpooled, port-5432 connection string, not the pgbouncer one). Without it, the
+`migrate-deploy` job fails closed (loudly, in the Actions tab) rather than silently
+skipping — you'll know immediately if it's missing.
+
+## Optional: error tracking (Sentry)
+
+Not required to launch — the app and worker both run identically with or without this —
+but worth doing before real client work relies on the pipeline, since right now a novel
+production failure is visible only in Vercel/Railway console logs, with no alerting.
+
+1. Create a free project at [sentry.io](https://sentry.io).
+2. Set `SENTRY_DSN` and `NEXT_PUBLIC_SENTRY_DSN` (same value) in Vercel's Production
+   environment, and `SENTRY_DSN` in Railway's worker environment — see `.env.example`
+   for what each is for.
+3. Optional: `SENTRY_AUTH_TOKEN`/`SENTRY_ORG`/`SENTRY_PROJECT` in Vercel (and as CI
+   secrets if you want source maps uploaded from there too) for readable stack traces
+   instead of minified ones.
+
 ## Before anyone logs in
 
 - [ ] **Disable self-signup.** Supabase Dashboard → Authentication → Providers → Email
@@ -54,9 +78,15 @@ No new secret was needed for MFA recovery — it reuses your existing `DATABASE_
 - [ ] **Deploy the background worker.** The whole pipeline (crawl, Call 0/1/2) now runs
   as a queued job a separate process picks up — `npm run worker`, deployed to Railway,
   Fly, Render, or a small VM, alongside the Vercel app. It needs:
-  - The same `DATABASE_URL` and `ANTHROPIC_API_KEY` as the main app.
+  - `DATABASE_URL` and `ANTHROPIC_API_KEY`, same as the main app.
+  - `NEXT_PUBLIC_SUPABASE_URL` and `SUPABASE_SECRET_KEY` — **also required**, not
+    optional: crawled logos/photos are uploaded to Supabase Storage from the worker
+    itself (`lib/storage/upload-asset.ts`), which throws without these. Any client
+    with images fails analysis without them, even though the crawl and AI calls
+    themselves would otherwise succeed. Confirm these are actually set in Railway's
+    variables before relying on this in production.
   - Playwright's Chromium installed on that host: `npx playwright install --with-deps chromium`.
-  - Nothing else — it's a plain `node`/`tsx` process, no Next.js runtime needed.
+  - It's a plain `node`/`tsx` process, no Next.js runtime needed.
   Verify it's actually running before relying on it: enqueue a real audit and confirm
   the client's status progresses past `AUDITING`.
 - [ ] **Vercel Deployment Protection on preview deployments.** Project Settings →

@@ -45,6 +45,12 @@ export function ConfirmDialog({
   }, [variant]);
 
   return (
+    // onClick below is a mouse-only convenience layered on top of an already fully
+    // keyboard-accessible dialog, not the only way to trigger its equivalent action:
+    // Escape already cancels via native <dialog> cancel-event semantics (onCancel below),
+    // and both actions are also reachable as real, focusable <button>s. The linter can't
+    // see that a native <dialog>'s own keyboard handling already covers this.
+    // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions
     <dialog
       ref={dialogRef}
       onCancel={(e) => {

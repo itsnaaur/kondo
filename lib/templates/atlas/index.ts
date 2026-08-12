@@ -59,11 +59,15 @@ export function renderAtlas(c: TemplateContent): { body: string; css: string } {
   const process = c.process || [];
   const quotes = c.testimonials || [];
   const partners = c.partnerLogos || [];
+  const credentials = c.credentials || [];
+  // The client's own recurring CTA phrase, standing in for the generic scroll-to-contact
+  // copy wherever nothing more specific (a phone number to call) is already in play.
+  const ctaWord = c.ctaLabel || "Get in touch";
 
   const cta1 = c.contactPhone
     ? `<a class="at-btn at-btn--solid" href="${esc(telHref(c.contactPhone))}">Call ${esc(c.contactPhone)}</a>`
     : c.contactEmail
-      ? `<a class="at-btn at-btn--solid" href="mailto:${esc(c.contactEmail)}">Get in touch</a>` : "";
+      ? `<a class="at-btn at-btn--solid" href="mailto:${esc(c.contactEmail)}">${esc(ctaWord)}</a>` : "";
   const cta2 = services.length ? `<a class="at-btn at-btn--ghost" href="#services">What we do</a>` : "";
 
   const navLinks: string[] = [];
@@ -82,7 +86,7 @@ export function renderAtlas(c: TemplateContent): { body: string; css: string } {
   <nav class="at-nav__links" aria-label="Sections">${navLinks.join("")}</nav>
   <div class="at-nav__side">
     ${c.contactPhone ? `<a class="at-nav__tel" href="${esc(telHref(c.contactPhone))}">${esc(c.contactPhone)}</a>` : ""}
-    <a class="at-btn at-btn--solid" href="#contact">Get in touch</a>
+    <a class="at-btn at-btn--solid" href="#contact">${esc(ctaWord)}</a>
   </div>
 </div></header>`;
 
@@ -109,10 +113,11 @@ export function renderAtlas(c: TemplateContent): { body: string; css: string } {
   </div>
 </section>`;
 
-  const partnerStrip = partners.length
+  const partnerStrip = partners.length || credentials.length
     ? `<section class="at-strip" style="border-top:1px solid var(--line)"><div class="at-wrap at-strip__in">
     <p class="at-strip__label">Trusted partners &amp; accreditations</p>
-    <div class="at-partners">${partners.map((l) => `<span><img src="${esc(l.url)}" alt=""></span>`).join("")}</div>
+    ${partners.length ? `<div class="at-partners">${partners.map((l) => `<span><img src="${esc(l.url)}" alt=""></span>`).join("")}</div>` : ""}
+    ${credentials.length ? `<div class="at-credentials"${partners.length ? ' style="margin-top:18px"' : ""}>${credentials.map((label) => `<span>${esc(label)}</span>`).join("")}</div>` : ""}
   </div></section>`
     : "";
 
@@ -241,6 +246,18 @@ export function renderAtlas(c: TemplateContent): { body: string; css: string } {
     ctaSide.push(`<div><span>Email</span><strong><a href="mailto:${esc(c.contactEmail)}">${esc(c.contactEmail)}</a></strong></div>`);
   if (c.contactAddress)
     ctaSide.push(`<div><span>Where to find us</span><strong>${esc(c.contactAddress)}</strong></div>`);
+  if (c.hours && c.hours.length)
+    ctaSide.push(
+      `<div><span>Hours</span><strong>${c.hours.map((h) => `${esc(h.days)}: ${esc(h.hours)}`).join("<br>")}</strong></div>`
+    );
+  if (c.offers && c.offers.length)
+    ctaSide.push(
+      `<div><span>Current offer${c.offers.length > 1 ? "s" : ""}</span><strong>${c.offers
+        .map((o) => `${esc(o.name)} — ${esc(o.price)}`)
+        .join("<br>")}</strong></div>`
+    );
+  if (c.serviceAreas && c.serviceAreas.length)
+    ctaSide.push(`<div><span>Areas we serve</span><strong>${esc(c.serviceAreas.join(", "))}</strong></div>`);
 
   const cta = `<section class="at-cta${ctaSide.length ? "" : " at-cta--slim"}" id="contact">
   <div class="at-wrap at-cta__in">

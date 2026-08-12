@@ -4,6 +4,7 @@ import { randomUUID } from "crypto";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth/require-user";
+import { requireActiveClient } from "@/lib/actions/require-active-client";
 import { logAuditEvent } from "@/lib/audit-log";
 import { uploadAssetToStorage } from "@/lib/storage/upload-asset";
 import { AssetType } from "@/app/generated/prisma/client";
@@ -175,7 +176,24 @@ function rebuildColors(formData: FormData, existing: ContentColor[]): ContentCol
 }
 
 async function applyContentUpdate(clientId: string, formData: FormData) {
+  await requireActiveClient(clientId);
   const record = await prisma.contentRecord.findUniqueOrThrow({ where: { clientId } });
+
+  // Optimistic-concurrency guard: the hidden recordUpdatedAt field (ContentReviewForm)
+  // carries the updatedAt this form was rendered against. If a re-analysis (or another
+  // reviewer's save) has touched the record since — e.g. the structuring call's own
+  // upsert (lib/content/run-analysis.ts), which re-generates every array row's id —
+  // this stale submit's row ids won't match the fresh rows below, and every one of them
+  // would be (wrongly) treated as a human edit, silently clobbering the newer extraction
+  // with old, possibly-already-edited-against-old-data values. Fail loudly instead: the
+  // reviewer reloads and redoes whatever edit they were making against the current data.
+  const submittedUpdatedAt = String(formData.get("recordUpdatedAt") ?? "");
+  if (submittedUpdatedAt !== record.updatedAt.toISOString()) {
+    throw new Error(
+      "This content changed elsewhere (likely a re-analysis finishing) while this form was open. " +
+        "Nothing was saved, to avoid overwriting the newer version — reload the page to see it and redo your edit."
+    );
+  }
 
   const existingServices = (record.services as unknown as ContentService[] | null) ?? [];
   const existingTestimonials = (record.testimonials as unknown as ContentTestimonial[] | null) ?? [];
@@ -277,7 +295,8 @@ export async function approveContentRecord(clientId: string, formData: FormData)
 // just drops the entry from ContentRecord.images. Doesn't touch the underlying Asset row
 // (append-only, same as everywhere else).
 export async function removeContentImage(clientId: string, assetId: string) {
-  await requireUser();
+  const user = await requireUser();
+  await requireActiveClient(clientId);
   const record = await prisma.contentRecord.findUniqueOrThrow({ where: { clientId } });
   const images = (record.images as unknown as ContentImage[] | null) ?? [];
   const next = images.filter((img) => img.assetId !== assetId);
@@ -285,6 +304,12 @@ export async function removeContentImage(clientId: string, assetId: string) {
   if (record.logoAssetId === assetId) data.logoAsset = { disconnect: true };
 
   await prisma.contentRecord.update({ where: { clientId }, data });
+  // Reuses CONTENT_UPDATED rather than a dedicated event — this is still "the content
+  // record changed," just via the image-specific escape hatch instead of the main review
+  // form; the metadata is what distinguishes it in the audit trail. Was previously silent
+  // — the sibling updateContentRecord/approveContentRecord log, this and the two actions
+  // below didn't.
+  await logAuditEvent("CONTENT_UPDATED", { userId: user.id, clientId, metadata: { action: "image_removed", assetId } });
   revalidatePath(`/clients/${clientId}`);
 }
 
@@ -297,7 +322,8 @@ const REASSIGNABLE_ROLES = new Set(["gallery", "partner-logo"]);
 // promoting something to logo needs ContentRecord.logoAssetId updated too), not a same-
 // shape swap the way gallery/partner-logo are.
 export async function updateImageRole(clientId: string, assetId: string, formData: FormData) {
-  await requireUser();
+  const user = await requireUser();
+  await requireActiveClient(clientId);
   const role = String(formData.get("role") ?? "");
   if (!REASSIGNABLE_ROLES.has(role)) throw new Error("Invalid image role");
 
@@ -313,6 +339,7 @@ export async function updateImageRole(clientId: string, assetId: string, formDat
     where: { clientId },
     data: { images: next as unknown as Prisma.InputJsonValue },
   });
+  await logAuditEvent("CONTENT_UPDATED", { userId: user.id, clientId, metadata: { action: "image_role_changed", assetId, role } });
   revalidatePath(`/clients/${clientId}`);
 }
 
@@ -321,7 +348,8 @@ export async function updateImageRole(clientId: string, assetId: string, formDat
 // crawler uses, then repoints the ContentRecord entry at the new Asset and clears the
 // flag. The old Asset row is left alone (append-only).
 export async function replaceContentImage(clientId: string, formData: FormData) {
-  await requireUser();
+  const user = await requireUser();
+  await requireActiveClient(clientId);
 
   const oldAssetId = String(formData.get("assetId") ?? "");
   const file = formData.get("file");
@@ -357,5 +385,10 @@ export async function replaceContentImage(clientId: string, formData: FormData) 
   if (target.role === "logo") data.logoAsset = { connect: { id: asset.id } };
 
   await prisma.contentRecord.update({ where: { clientId }, data });
+  await logAuditEvent("CONTENT_UPDATED", {
+    userId: user.id,
+    clientId,
+    metadata: { action: "image_replaced", oldAssetId, newAssetId: asset.id },
+  });
   revalidatePath(`/clients/${clientId}`);
 }

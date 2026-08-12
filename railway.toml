@@ -2,6 +2,12 @@
 # itself is deployed on Vercel, not Railway. This file tells Railway to install
 # Playwright's Chromium during build and run the worker's poll loop instead of trying to
 # build/start the Next.js app the way it would by default.
+#
+# Deliberately does NOT run `prisma migrate deploy` — that runs exactly once, from the
+# migrate-deploy job in .github/workflows/ci.yml on every push to main, so a schema
+# change can't be partially applied by Railway and Vercel racing each other on their own
+# independent build schedules. This build only needs `prisma generate` for typed client
+# output.
 [build]
 builder = "NIXPACKS"
 buildCommand = "npm install && npx prisma generate && npx playwright install --with-deps chromium"

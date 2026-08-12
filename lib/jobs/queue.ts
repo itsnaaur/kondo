@@ -5,6 +5,7 @@
 // "use server", no Next.js imports — so it can be safely imported from both server
 // actions and the standalone worker script.
 import { prisma } from "@/lib/prisma";
+import { logAuditEvent } from "@/lib/audit-log";
 import type { Prisma } from "@/app/generated/prisma/client";
 
 // Only one job type exists in this flow: analysing a site is the one slow, AI-touching
@@ -71,7 +72,23 @@ export async function failJob(id: string, error: string): Promise<void> {
 // is explicitly designed to be safe under concurrent workers (FOR UPDATE SKIP LOCKED), so
 // this deliberately doesn't assume single-worker and reclaim everything RUNNING; a job
 // claimed moments ago by a genuinely-still-alive worker is left alone.
-const STALE_JOB_TIMEOUT_MS = 20 * 60 * 1000;
+//
+// Sized against the pipeline's own worst-case constants, not guessed, since too low a
+// number here means a worker restart (a Railway redeploy, an OOM) mid-way through a
+// genuinely-still-progressing large-site analysis reclaims it as "orphaned" and flips the
+// client to ANALYSIS_FAILED even though the old process would have finished successfully:
+//   - crawl: MAX_PAGES(150) × (PAGE_TIMEOUT_MS 20s + REQUEST_DELAY_MS 400ms)  ≈ 51 min
+//     (lib/crawl/crawler.ts)
+//   - images: up to 11 sequential downloads (logo + MAX_CANDIDATE_IMAGES 10), each up to
+//     MAX_IMAGE_REDIRECTS(5) hops × FETCH_TIMEOUT_MS(10s)                    ≈ 9 min
+//     (lib/crawl/download-images.ts)
+//   - structuring call: MAX_ATTEMPTS(3) validation retries, each itself up to
+//     MAX_TRANSIENT_RETRIES(5) backoff retries (lib/ai/anthropic-retry.ts)   ≈ 16 min
+//     (lib/content/structure-and-rewrite.ts)
+// ≈ 76 minutes worst case, all three stacked. 90 minutes leaves real headroom without
+// being so long that a job that's actually stuck (not just slow) sits unreclaimed for
+// hours.
+const STALE_JOB_TIMEOUT_MS = 90 * 60 * 1000;
 
 async function revertOrphanedClient(clientId: string): Promise<void> {
   try {
@@ -81,6 +98,7 @@ async function revertOrphanedClient(clientId: string): Promise<void> {
     // gate: it never locks a client out of already-approved content or its concept
     // history (see the ClientStatus/gating notes in the Kondo rebuild plan).
     await prisma.client.update({ where: { id: clientId }, data: { status: "ANALYSIS_FAILED" } });
+    await logAuditEvent("ANALYSIS_FAILED", { clientId, metadata: { reason: "orphaned_job_reclaimed" } });
   } catch {
     // Client no longer exists (deleted between enqueue and reclaim) — nothing to revert.
   }

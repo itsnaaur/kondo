@@ -8,20 +8,29 @@ import { requireUser } from "@/lib/auth/require-user";
 import { clientNameSchema, siteUrlInputSchema } from "@/lib/validation/text-limits";
 import { logAuditEvent } from "@/lib/audit-log";
 
+export type CreateClientState = { error: string } | null;
+
 // Add Client: just a name and a URL. Everything else — analysis, content, templates,
 // concepts — happens later in the Client Workspace, not at creation time.
-export async function createClient(formData: FormData) {
+//
+// Returns a state object rather than throwing on a validation/SSRF failure — this is by
+// far the most common way to trip this action (a typo'd URL, a URL the SSRF blocklist
+// correctly rejects), so it's wired to useActionState (app/(app)/clients/new/page.tsx)
+// for an inline message next to the field instead of the full-page error boundary. A
+// genuinely unexpected failure (requireUser(), the database write itself) still throws
+// and falls through to app/(app)/error.tsx as before.
+export async function createClient(_prevState: CreateClientState, formData: FormData): Promise<CreateClientState> {
   const user = await requireUser();
 
   const nameCheck = clientNameSchema.safeParse(formData.get("name"));
   if (!nameCheck.success) {
-    throw new Error("Client name is required and must be under 200 characters");
+    return { error: "Client name is required and must be under 200 characters" };
   }
   const name = nameCheck.data;
 
   const siteUrlCandidate = siteUrlInputSchema.safeParse(formData.get("siteUrl"));
   if (!siteUrlCandidate.success) {
-    throw new Error("Site URL is required and must be under 2000 characters");
+    return { error: "Site URL is required and must be under 2000 characters" };
   }
   const siteUrl = siteUrlCandidate.data;
 
@@ -31,7 +40,7 @@ export async function createClient(formData: FormData) {
   // silently fails deep in the pipeline.
   const siteUrlCheck = await checkUrlIsSafe(siteUrl);
   if (!siteUrlCheck.safe) {
-    throw new Error(`Site URL is not allowed: ${siteUrlCheck.reason}`);
+    return { error: `Site URL is not allowed: ${siteUrlCheck.reason}` };
   }
 
   const client = await prisma.client.create({

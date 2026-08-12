@@ -81,7 +81,20 @@ model Asset {
   size      Int
   createdAt DateTime  @default(now())
 
+  // SHA-256 of the downloaded bytes, set only for crawler-sourced assets (never for a
+  // manually-uploaded replacement — see lib/actions/content.ts's replaceContentImage,
+  // which has no reason to dedupe a human's deliberate upload against anything). Lets
+  // downloadCrawlImages (lib/crawl/download-images.ts) recognize "this exact photo was
+  // already downloaded and uploaded for this client in an earlier analysis" and reuse the
+  // existing Asset instead of re-downloading, re-uploading to Storage, and creating a new
+  // row for byte-identical content every time someone re-analyses an otherwise-unchanged
+  // site. Nullable so existing rows (created before this column existed) simply never
+  // match — dedup only ever applies going forward, no backfill needed.
+  contentHash String?
+
   contentRecordLogoFor ContentRecord? @relation("ContentRecordLogo")
+
+  @@index([clientId, contentHash])
 }
 
 model CrawledPage {

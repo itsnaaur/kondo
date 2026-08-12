@@ -56,28 +56,43 @@ export async function crawlClientSite(
 
       const page = await context.newPage();
       try {
-        await gotoAndSettle(page, url, PAGE_TIMEOUT_MS);
-        const extracted = await extractPageData(page);
+        const { status } = await gotoAndSettle(page, url, PAGE_TIMEOUT_MS);
+        // page.goto() doesn't throw on a non-2xx response — a 403/429/503 bot-block or
+        // rate-limit page loads exactly like a real page and, left unchecked, gets
+        // extracted and stored as if it were genuine content (its "Attention Required" or
+        // "Access Denied" copy becoming the client's businessName/tagline on a small,
+        // low-word-count site — the kind possibleExtractionCollapse's 20k-char threshold
+        // is too coarse to catch). Treated the same as any other page-level failure below:
+        // skip, don't record, don't extract its links, keep crawling the rest of the site.
+        // Deliberately not a `continue` here — this is still inside the try/finally that
+        // closes the page, and skipping past the crawlPagesDone update and
+        // REQUEST_DELAY_MS below it would both blur the progress indicator and hammer an
+        // already-blocking site with back-to-back requests instead of backing off.
+        if (status !== null && status >= 400) {
+          console.error(`[crawl] skipped ${url}: server responded ${status}`);
+        } else {
+          const extracted = await extractPageData(page);
 
-        const record: PageExtraction = { url, ...extracted };
-        pageRecords.push(record);
+          const record: PageExtraction = { url, ...extracted };
+          pageRecords.push(record);
 
-        await prisma.crawledPage.create({
-          data: {
-            clientId,
-            url,
-            title: extracted.title,
-            textContent: extracted.text.slice(0, 20_000),
-          },
-        });
+          await prisma.crawledPage.create({
+            data: {
+              clientId,
+              url,
+              title: extracted.title,
+              textContent: extracted.text.slice(0, 20_000),
+            },
+          });
 
-        for (const link of extracted.links) {
-          const normalized = normalizeUrl(link, url);
-          if (!normalized) continue;
-          if (!isCrawlableLink(normalized, origin)) continue;
-          if (!visited.has(normalized) && !queued.has(normalized)) {
-            queued.add(normalized);
-            queue.push(normalized);
+          for (const link of extracted.links) {
+            const normalized = normalizeUrl(link, url);
+            if (!normalized) continue;
+            if (!isCrawlableLink(normalized, origin)) continue;
+            if (!visited.has(normalized) && !queued.has(normalized)) {
+              queued.add(normalized);
+              queue.push(normalized);
+            }
           }
         }
       } catch (err) {

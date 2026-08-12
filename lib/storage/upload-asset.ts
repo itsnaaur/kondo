@@ -7,6 +7,21 @@ import { createClient } from "@supabase/supabase-js";
 // Vercel's — the worker is a separate process and does not inherit Vercel's env vars.
 const BUCKET = "kondo-assets";
 
+// Every storage-js call (upload/list/remove) goes through fetch under the hood with no
+// timeout of its own — confirmed the worker's main loop (scripts/worker.ts) is strictly
+// single-job-at-a-time, so one hung request here (a bad day for Supabase, a stalled
+// socket) freezes analysis for every client indefinitely, not just the one in flight, and
+// nothing auto-recovers short of a human noticing and restarting the process. Longer than
+// downloadImage's FETCH_TIMEOUT_MS (lib/crawl/download-images.ts) since an upload's body
+// can be considerably larger than a single image fetch.
+const STORAGE_FETCH_TIMEOUT_MS = 30_000;
+
+function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), STORAGE_FETCH_TIMEOUT_MS);
+  return fetch(input, { ...init, signal: controller.signal }).finally(() => clearTimeout(timeout));
+}
+
 // A plain service-role client, not the cookie-based SSR client from lib/supabase/* — this
 // runs from both a Vercel server action (AssetDropzone's upload) and the standalone worker
 // process (the crawler), neither of which has a request-scoped user session to bind to.
@@ -18,7 +33,7 @@ function storageClient() {
       "NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SECRET_KEY must be set to upload assets to Supabase Storage"
     );
   }
-  return createClient(url, key, { auth: { persistSession: false } });
+  return createClient(url, key, { auth: { persistSession: false }, global: { fetch: fetchWithTimeout } });
 }
 
 function sanitizeFilename(filename: string): string {

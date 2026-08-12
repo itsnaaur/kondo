@@ -20,7 +20,10 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Matches package.json's engines.node (">=22.12.0") and .nvmrc — was 20 for
+          # a while, meaning CI never actually built/tested the runtime this app (and
+          # Prisma 7's driver adapters) actually require in production.
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
@@ -28,6 +31,9 @@ jobs:
 
       - name: Lint
         run: npm run lint
+
+      - name: Test
+        run: npm run test
 
       - name: Build
         run: npm run build
@@ -42,3 +48,36 @@ jobs:
 
       - name: npm audit (high/critical, excluding documented no-fix-available findings)
         run: node scripts/check-audit.mjs
+
+  migrate-deploy:
+    # Applies pending Prisma migrations to production. Only runs on an actual push to
+    # main (never on a pull_request build, which has no business touching the prod
+    # DB), and only after build-and-check has passed. This is the only place
+    # `prisma migrate deploy` runs — neither the Vercel build (`npm run build`, which
+    # runs `prisma generate` only) nor the Railway worker build touch migrations, so
+    # a schema change never gets partially applied by two different platforms racing
+    # each other, and preview/branch deploys on Vercel can't accidentally migrate the
+    # production database.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build-and-check
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Deploy migrations
+        # DIRECT_URL, not DATABASE_URL — migrations need an unpooled connection.
+        # Set this as a repository (or "production" environment) secret in GitHub:
+        # Settings → Secrets and variables → Actions. Same value as Vercel's
+        # DIRECT_URL for the production database.
+        env:
+          DIRECT_URL: ${{ secrets.PRODUCTION_DIRECT_URL }}
+        run: npx prisma migrate deploy

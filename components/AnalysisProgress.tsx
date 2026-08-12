@@ -43,15 +43,26 @@ export function AnalysisProgress({ clientId }: { clientId: string }) {
   const done = status?.crawlPagesDone ?? 0;
   const total = status?.crawlPagesTotal ?? 1;
   const pct = Math.min(100, Math.round((done / Math.max(total, 1)) * 100));
+  // crawlPagesDone/Total only ever move during the crawl loop itself (lib/crawl/crawler.ts)
+  // — downloading candidate images and the Claude structuring call that follow it (which
+  // can itself take minutes across retries, see lib/ai/anthropic-retry.ts) give no further
+  // signal at all. Without this, the bar sits visually full and "finished" for however
+  // long that remaining work takes, reading as stuck rather than still working.
+  const crawlDone = status !== null && done > 0 && done >= total;
 
   return (
     <div className="rounded-lg border border-neutral-800 bg-neutral-950 px-4 py-3">
-      <p className="mb-2 text-sm text-neutral-300">
-        Analysing site — {done} page{done === 1 ? "" : "s"} crawled
-        {status?.crawlPagesTotal ? `, ~${status.crawlPagesTotal} discovered so far` : ""}...
+      <p className="mb-2 text-sm text-neutral-300" role="status" aria-live="polite">
+        {crawlDone
+          ? "Crawl complete — extracting and rewriting content with AI, this can take a few minutes..."
+          : `Analysing site — ${done} page${done === 1 ? "" : "s"} crawled${status?.crawlPagesTotal ? `, ~${status.crawlPagesTotal} discovered so far` : ""}...`}
       </p>
       <div className="h-1.5 w-full overflow-hidden rounded-full bg-neutral-800">
-        <div className="h-full bg-yellow-400 transition-all" style={{ width: `${pct}%` }} />
+        {crawlDone ? (
+          <div className="h-full w-1/3 animate-pulse rounded-full bg-yellow-400" />
+        ) : (
+          <div className="h-full bg-yellow-400 transition-all" style={{ width: `${pct}%` }} />
+        )}
       </div>
     </div>
   );

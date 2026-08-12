@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { withSentryConfig } from "@sentry/nextjs";
 
 // Applied to every route including the preview route — this is fine for the
 // non-CSP headers (identical value either way), and the preview route's own
@@ -47,4 +48,24 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+// withSentryConfig is safe to apply unconditionally — with no SENTRY_AUTH_TOKEN set (only
+// needed for uploading source maps, not for error reporting itself) it just skips that
+// step with a build-time warning instead of failing, same as every other Sentry piece in
+// this app staying inert until a DSN/token is actually configured. org/project only
+// matter for that same source-map upload, so leaving them undefined until set is fine.
+//
+// Note for local dev: if you've been alternating `npm run build` and `npm run dev`, a
+// stray/mismatched .next cache between the two can produce spurious 404s on real routes
+// (confirmed live this session — not a Sentry-specific issue, a known class of Next.js
+// dev-vs-build cache artifact). `rm -rf .next` and restart if that ever happens; it is
+// not something this config can prevent.
+export default withSentryConfig(nextConfig, {
+  org: process.env.SENTRY_ORG,
+  project: process.env.SENTRY_PROJECT,
+  silent: !process.env.CI,
+  // This app already ships its own strict CSP/security headers (see SECURITY_HEADERS
+  // above) — the tunnel route trades a small amount of that scope (one extra same-origin
+  // path that proxies to Sentry) for ad-blocker resilience. Left off; revisit if event
+  // delivery turns out to be an issue in practice.
+  tunnelRoute: false,
+});

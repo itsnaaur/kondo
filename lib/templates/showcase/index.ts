@@ -126,6 +126,10 @@ export function renderShowcase(c: TemplateContent): { body: string; css: string 
   const services = c.services || [];
   const quotes = c.testimonials || [];
   const partners = c.partnerLogos || [];
+  const credentials = c.credentials || [];
+  // The client's own recurring CTA phrase, standing in for the generic scroll-to-contact
+  // copy wherever nothing more specific (a phone number to call) is already in play.
+  const ctaWord = c.ctaLabel || "Get in touch";
   // galleryImages already includes whatever heroImageUrl points at (see
   // to-template-content.ts) — look it up there for its width/height/subject instead of
   // passing a bare URL, so allocateImages can weigh it by orientation like everything else.
@@ -135,7 +139,7 @@ export function renderShowcase(c: TemplateContent): { body: string; css: string 
   const primaryCta = c.contactPhone
     ? `<a class="sc-btn sc-btn--solid" href="${esc(telHref(c.contactPhone))}">Call ${esc(c.contactPhone)}</a>`
     : c.contactEmail
-      ? `<a class="sc-btn sc-btn--solid" href="mailto:${esc(c.contactEmail)}">Get in touch</a>`
+      ? `<a class="sc-btn sc-btn--solid" href="mailto:${esc(c.contactEmail)}">${esc(ctaWord)}</a>`
       : "";
   const secondaryCta = services.length ? `<a class="sc-btn sc-btn--ghost" href="#services">What we do</a>` : "";
 
@@ -158,7 +162,7 @@ export function renderShowcase(c: TemplateContent): { body: string; css: string 
     <nav class="sc-nav__links" aria-label="Sections">${navLinks.join("")}</nav>
     <div class="sc-nav__side">
       ${c.contactPhone ? `<a class="sc-nav__tel" href="${esc(telHref(c.contactPhone))}">${esc(c.contactPhone)}</a>` : ""}
-      <a class="sc-btn sc-btn--solid" href="#contact">Get in touch</a>
+      <a class="sc-btn sc-btn--solid" href="#contact">${esc(ctaWord)}</a>
     </div>
   </div>
 </header>`;
@@ -275,12 +279,19 @@ export function renderShowcase(c: TemplateContent): { body: string; css: string 
     : "";
 
   // ---- partner strip
-  const strip = partners.length
+  const strip = partners.length || credentials.length
     ? `
 <section class="sc-strip">
   <div class="sc-wrap sc-strip__in">
     <p class="sc-strip__label">Trusted partners &amp; accreditations</p>
-    <div class="sc-strip__row">${partners.map((l) => `<img src="${esc(l.url)}" alt="">`).join("")}</div>
+    ${partners.length ? `<div class="sc-strip__row">${partners.map((l) => `<img src="${esc(l.url)}" alt="">`).join("")}</div>` : ""}
+    ${
+      credentials.length
+        ? `<div class="sc-credentials"${partners.length ? ' style="margin-top:18px"' : ""}>${credentials
+            .map((label) => `<span>${esc(label)}</span>`)
+            .join("")}</div>`
+        : ""
+    }
   </div>
 </section>`
     : "";
@@ -322,6 +333,18 @@ export function renderShowcase(c: TemplateContent): { body: string; css: string 
   if (c.contactEmail)
     ctaFacts.push(`<span><b>Email</b> <a href="mailto:${esc(c.contactEmail)}">${esc(c.contactEmail)}</a></span>`);
   if (c.contactAddress) ctaFacts.push(`<span><b>Find us</b> ${esc(c.contactAddress)}</span>`);
+  if (c.hours && c.hours.length)
+    ctaFacts.push(
+      `<span><b>Hours</b> ${c.hours.map((h) => `${esc(h.days)}: ${esc(h.hours)}`).join("; ")}</span>`
+    );
+  if (c.offers && c.offers.length)
+    ctaFacts.push(
+      `<span><b>Current offer${c.offers.length > 1 ? "s" : ""}</b> ${c.offers
+        .map((o) => `${esc(o.name)} — ${esc(o.price)}`)
+        .join("; ")}</span>`
+    );
+  if (c.serviceAreas && c.serviceAreas.length)
+    ctaFacts.push(`<span><b>Areas we serve</b> ${esc(c.serviceAreas.join(", "))}</span>`);
 
   const cta = `
 <section class="sc-cta${img.cta ? "" : " sc-cta--plain"}" id="contact">
