@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
-import { STATUS_LABEL } from "@/lib/labels";
 import { purgeExpiredTrash } from "@/lib/actions/trash";
+import { ClientList } from "@/components/ClientList";
 
 export default async function DashboardPage() {
   await purgeExpiredTrash();
@@ -34,29 +34,7 @@ export default async function DashboardPage() {
           No clients yet. Add one to get started.
         </div>
       ) : (
-        <ul className="space-y-3">
-          {clients.map((client) => (
-            <li key={client.id}>
-              <Link
-                href={`/clients/${client.id}`}
-                className="flex items-center justify-between rounded-xl border border-neutral-800 bg-neutral-950 px-5 py-4 transition hover:border-neutral-700"
-              >
-                <div>
-                  <p className="font-medium text-neutral-100">{client.name}</p>
-                  <p className="text-sm text-neutral-500">{client.siteUrl}</p>
-                  {client.createdBy && (
-                    <p className="text-xs text-neutral-600">
-                      Added by {client.createdBy.email ?? client.createdBy.id}
-                    </p>
-                  )}
-                </div>
-                <span className="rounded-full border border-neutral-700 px-3 py-1 text-xs text-neutral-300">
-                  {STATUS_LABEL[client.status] ?? client.status}
-                </span>
-              </Link>
-            </li>
-          ))}
-        </ul>
+        <ClientList clients={clients} />
       )}
     </main>
   );
