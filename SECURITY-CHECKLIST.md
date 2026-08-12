@@ -29,10 +29,14 @@ No new secret was needed for MFA recovery — it reuses your existing `DATABASE_
 Production migrations now deploy automatically via CI (`.github/workflows/ci.yml`'s
 `migrate-deploy` job) on every push to `main`, instead of needing to be run by hand.
 Add `PRODUCTION_DIRECT_URL` as a repository secret (Settings → Secrets and variables →
-Actions) — same value as Vercel's `DIRECT_URL` for the production database (the
-unpooled, port-5432 connection string, not the pgbouncer one). Without it, the
-`migrate-deploy` job fails closed (loudly, in the Actions tab) rather than silently
-skipping — you'll know immediately if it's missing.
+Actions) — same value as your local `.env`'s `DIRECT_URL` (see `.env.example`): the
+**session pooler** connection string (port 5432, same pooler host as `DATABASE_URL`),
+not Supabase's literal "Direct connection". Confirmed live setting this up: the literal
+direct connection (`db.<ref>.supabase.co`) is IPv6-only and GitHub Actions runners can't
+reach it at all (`P1001: Can't reach database server`) — get the session pooler URI from
+Supabase's Connect modal instead. Without the secret at all, the `migrate-deploy` job
+fails closed (loudly, in the Actions tab) rather than silently skipping — you'll know
+immediately if it's missing.
 
 ## Optional: error tracking (Sentry)
 

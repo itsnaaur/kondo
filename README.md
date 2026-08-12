@@ -46,7 +46,12 @@ production).
 1. `npm install`
 2. Copy `.env.example` to `.env` and fill in every value — see the comments in that file
    for what each one is for. `DATABASE_URL`/`DIRECT_URL` come from your Supabase project's
-   connection settings; `NEXT_PUBLIC_SUPABASE_*`/`SUPABASE_SECRET_KEY` from its API
+   Connect modal — `DATABASE_URL` is the **transaction pooler** (port 6543), `DIRECT_URL`
+   is the **session pooler** (port 5432), *not* Supabase's literal "Direct connection".
+   The literal direct connection is IPv6-only and simply won't connect on many networks
+   (confirmed live: `P1001: Can't reach database server`) — the session pooler is the
+   IPv4-reachable equivalent Prisma's migration engine actually needs.
+   `NEXT_PUBLIC_SUPABASE_*`/`SUPABASE_SECRET_KEY` from its API
    settings; `ANTHROPIC_API_KEY` from [console.anthropic.com](https://console.anthropic.com).
    `UPSTASH_REDIS_REST_URL`/`TOKEN` are optional locally (rate limiting just fails open
    with a warning if unset) but required before any real usage — see the security
@@ -74,7 +79,10 @@ migrations are applied automatically by the `migrate-deploy` job in
 build`, which only runs `prisma generate`) nor the Railway worker build touch the schema,
 so there's exactly one place a schema change actually reaches the database. That job needs
 a `PRODUCTION_DIRECT_URL` repository secret set in GitHub (Settings → Secrets and
-variables → Actions) — see the security checklist's "New GitHub secret this round".
+variables → Actions) — the session pooler connection string, same as local `DIRECT_URL`
+above, not Supabase's literal "Direct connection" (GitHub Actions runners can't reach
+that one at all — see the note in Local setup). See the security checklist's "New GitHub
+secret this round" for the full walkthrough.
 
 ## Templates
 

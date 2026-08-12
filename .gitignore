@@ -32,6 +32,11 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# ...except the template itself, which is meant to be committed and is what README.md's
+# setup instructions ("copy .env.example to .env") depend on existing in a fresh clone —
+# confirmed live this was never actually tracked despite the blanket .env* rule above,
+# meaning every edit to it was silently local-only until now.
+!.env.example
 
 # vercel
 .vercel
