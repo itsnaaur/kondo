@@ -110,7 +110,7 @@ export function renderLedger(c: TemplateContent): { body: string; css: string } 
   navLinks.push('<a href="#contact">Contact</a>');
 
   const nav = `
-<header class="tl-nav">
+<header class="tl-nav" data-kondo-section="nav">
   <div class="tl-wrap tl-nav__in">
     <div class="tl-nav__mark">${mark}</div>
     <nav class="tl-nav__links" aria-label="Sections">${navLinks.join("")}</nav>
@@ -130,11 +130,11 @@ export function renderLedger(c: TemplateContent): { body: string; css: string } 
     </div>`;
 
   const hero = hasHero
-    ? `<section class="tl-hero tl-hero--split">
+    ? `<section class="tl-hero tl-hero--split" data-kondo-section="hero">
   ${heroCopy}
   <div class="tl-hero__media"><img src="${esc(c.heroImageUrl)}" alt=""${imgAttrs(heroImage)}></div>
 </section>`
-    : `<section class="tl-hero tl-hero--plain">
+    : `<section class="tl-hero tl-hero--plain" data-kondo-section="hero">
   <div class="tl-hero__field"></div>
   <div class="tl-wrap tl-hero__in">${heroCopy}</div>
 </section>`;
@@ -142,7 +142,7 @@ export function renderLedger(c: TemplateContent): { body: string; css: string } 
   // ---- trust strip (partner / accreditation logos)
   const strip = partners.length || credentials.length
     ? `
-<section class="tl-strip">
+<section class="tl-strip" data-kondo-section="partners">
   <div class="tl-wrap tl-strip__in">
     <p class="tl-strip__label">Trusted partners &amp; accreditations</p>
     ${
@@ -166,7 +166,7 @@ export function renderLedger(c: TemplateContent): { body: string; css: string } 
   // ---- statement band
   const statement = c.aboutCopy
     ? `
-<section class="tl-statement" id="about">
+<section class="tl-statement" id="about" data-kondo-section="about">
   <div class="tl-wrap tl-statement__in tl-statement__grid">
     <div>
       <p class="tl-eyebrow">Who we are</p>
@@ -180,7 +180,7 @@ export function renderLedger(c: TemplateContent): { body: string; css: string } 
   // ---- services ledger
   const servicesSection = services.length
     ? `
-<section class="tl-services" id="services">
+<section class="tl-services" id="services" data-kondo-section="services">
   <div class="tl-wrap tl-services__in">
     <div class="tl-services__head">
       <p class="tl-eyebrow">What we do</p>
@@ -227,7 +227,7 @@ export function renderLedger(c: TemplateContent): { body: string; css: string } 
   const deep =
     gallery.length || facts.length
       ? `
-<section class="tl-deep" id="contact">
+<section class="tl-deep" id="contact" data-kondo-section="deep">
   <div class="tl-wrap tl-deep__in">
     <div class="tl-deep__head">
       <p class="tl-eyebrow">Come and see us</p>
@@ -250,7 +250,7 @@ export function renderLedger(c: TemplateContent): { body: string; css: string } 
   // ---- testimonials: serif pull-quotes, no cards (see styles.ts)
   const quotesSection = quotes.length
     ? `
-<section class="tl-quotes" id="reviews">
+<section class="tl-quotes" id="reviews" data-kondo-section="reviews">
   <div class="tl-wrap tl-quotes__in">
     <p class="tl-eyebrow">In their words</p>
     <h2 class="tl-h2">What people <span class="tl-em">tell us</span></h2>
@@ -272,7 +272,7 @@ export function renderLedger(c: TemplateContent): { body: string; css: string } 
   // ---- closing cta: the number is the action (see styles.ts)
   const cta = c.contactPhone
     ? `
-<section class="tl-cta">
+<section class="tl-cta" data-kondo-section="cta">
   <div class="tl-wrap tl-cta__in">
     <p class="tl-eyebrow">Ready when you are</p>
     <a class="tl-cta__tel" href="${esc(telHref(c.contactPhone))}">${esc(c.contactPhone)}</a>
@@ -284,7 +284,7 @@ export function renderLedger(c: TemplateContent): { body: string; css: string } 
   </div>
 </section>`
     : `
-<section class="tl-cta">
+<section class="tl-cta" data-kondo-section="cta">
   <div class="tl-wrap tl-cta__in">
     <p class="tl-eyebrow">Ready when you are</p>
     <h2 class="tl-h2">Let's talk about <span class="tl-em">what you need</span></h2>
@@ -299,7 +299,7 @@ export function renderLedger(c: TemplateContent): { body: string; css: string } 
   // ---- footer
   const hasContact = Boolean(c.contactPhone || c.contactEmail || c.contactAddress);
   const foot = `
-<footer class="tl-foot">
+<footer class="tl-foot" data-kondo-section="footer">
   <div class="tl-wrap tl-foot__in">
     <div>
       <p class="tl-foot__name">${esc(c.businessName)}</p>

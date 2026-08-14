@@ -263,9 +263,9 @@ model Job {
 }
 
 // Who did what, when — login, client created/trashed/deleted, analysis started/failed,
-// content edited/approved, concept generated/published/unpublished, export downloaded.
-// Deliberately stores only IDs and short event metadata, never prompt text, generated
-// content, or crawled content — logs are the least-protected place data lives.
+// content edited/approved, concept generated/section-edited/published/unpublished, export
+// downloaded. Deliberately stores only IDs and short event metadata, never prompt text,
+// generated content, or crawled content — logs are the least-protected place data lives.
 model AuditLog {
   id        String   @id @default(cuid())
   event     String // LOGIN | CLIENT_CREATED | CLIENT_TRASHED | CLIENT_DELETED |

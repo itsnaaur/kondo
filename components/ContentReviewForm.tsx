@@ -560,8 +560,14 @@ export function ContentReviewForm({
       <section className={CARD_CLASS}>
         <h3 className="mb-3 text-xs font-medium uppercase tracking-wide text-neutral-500">Logo &amp; images</h3>
         <div className="grid gap-4 sm:grid-cols-3">
-          {mainImages.map((img) => (
-            <ImageCard key={img.assetId} clientId={clientId} img={img} />
+          {mainImages.map((img, i) => (
+            // Index in the key, not just assetId — a client analysed before the
+            // download-images.ts content-hash dedup fix can still have two entries
+            // sharing one assetId (the same photo detected as both a hero and a gallery
+            // candidate) until it's re-analysed. This just keeps React's reconciliation
+            // correct for that already-stored case; lib/crawl/download-images.ts is
+            // where the actual duplication is prevented for every analysis from now on.
+            <ImageCard key={`${img.assetId}-${i}`} clientId={clientId} img={img} />
           ))}
           {mainImages.length === 0 && <p className="text-sm text-neutral-500">No images found on the crawled site.</p>}
         </div>
@@ -574,8 +580,8 @@ export function ContentReviewForm({
           Move an image here (or back) using the dropdown on its card if it was bucketed wrong.
         </p>
         <div className="grid gap-4 sm:grid-cols-3">
-          {partnerLogoImages.map((img) => (
-            <ImageCard key={img.assetId} clientId={clientId} img={img} />
+          {partnerLogoImages.map((img, i) => (
+            <ImageCard key={`${img.assetId}-${i}`} clientId={clientId} img={img} />
           ))}
           {partnerLogoImages.length === 0 && (
             <p className="text-sm text-neutral-500">None detected.</p>

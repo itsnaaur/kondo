@@ -6,6 +6,7 @@ import { extractPageData } from "./extract";
 import type { PageExtraction } from "./types";
 import { checkUrlIsSafe, installSsrfGuard } from "@/lib/security/ssrf";
 import { gotoAndSettle } from "./goto-and-settle";
+import { isLikelyChallengePage } from "./detect-challenge-page";
 
 const MAX_PAGES = 150;
 const REQUEST_DELAY_MS = 400;
@@ -32,6 +33,7 @@ export async function crawlClientSite(
   queued.add(firstUrl);
 
   const pageRecords: PageExtraction[] = [];
+  let challengePagesSkipped = 0;
   const browser = await chromium.launch();
 
   try {
@@ -73,25 +75,38 @@ export async function crawlClientSite(
         } else {
           const extracted = await extractPageData(page);
 
-          const record: PageExtraction = { url, ...extracted };
-          pageRecords.push(record);
+          // A 200-status bot/security challenge page (Cloudflare's "Just a moment...",
+          // a "Robot Challenge Screen", a cookie-verification gate) loads exactly like a
+          // real page — the status check above does nothing for it. Confirmed live on
+          // offrisklegaltemplates.com.au: a page titled "Robot Challenge Screen" whose
+          // entire body is "Checking the site connection security" / "requires cookies
+          // to be enabled", well under possibleExtractionCollapse's 20k-char threshold
+          // too, so nothing else downstream would have caught it either. Same treatment
+          // as the status-code case: skip, don't record, don't extract its links.
+          if (isLikelyChallengePage(extracted.title, extracted.text)) {
+            challengePagesSkipped++;
+            console.error(`[crawl] skipped ${url}: looks like a bot/security challenge page, not real content`);
+          } else {
+            const record: PageExtraction = { url, ...extracted };
+            pageRecords.push(record);
 
-          await prisma.crawledPage.create({
-            data: {
-              clientId,
-              url,
-              title: extracted.title,
-              textContent: extracted.text.slice(0, 20_000),
-            },
-          });
+            await prisma.crawledPage.create({
+              data: {
+                clientId,
+                url,
+                title: extracted.title,
+                textContent: extracted.text.slice(0, 20_000),
+              },
+            });
 
-          for (const link of extracted.links) {
-            const normalized = normalizeUrl(link, url);
-            if (!normalized) continue;
-            if (!isCrawlableLink(normalized, origin)) continue;
-            if (!visited.has(normalized) && !queued.has(normalized)) {
-              queued.add(normalized);
-              queue.push(normalized);
+            for (const link of extracted.links) {
+              const normalized = normalizeUrl(link, url);
+              if (!normalized) continue;
+              if (!isCrawlableLink(normalized, origin)) continue;
+              if (!visited.has(normalized) && !queued.has(normalized)) {
+                queued.add(normalized);
+                queue.push(normalized);
+              }
             }
           }
         }
@@ -129,6 +144,16 @@ export async function crawlClientSite(
   // was wrong. Throwing here routes it through the same failure path as any other
   // analysis failure (status -> ANALYSIS_FAILED).
   if (pageRecords.length === 0) {
+    // A more specific, actionable message when we know why — this is exactly what shows
+    // up as Job.lastError in the client's "Analysis failed" banner (see
+    // app/(app)/clients/[id]/page.tsx), so the difference between "the URL was wrong" and
+    // "the site is blocking automated visits" matters to whoever reads it.
+    if (challengePagesSkipped > 0) {
+      throw new Error(
+        `Crawl failed: every page loaded was a bot/security challenge screen, not ${startUrl}'s real content ` +
+          `— this site appears to actively block automated visits.`
+      );
+    }
     throw new Error(`Crawl failed: could not successfully load any page from ${startUrl}`);
   }
 

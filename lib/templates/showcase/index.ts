@@ -156,7 +156,7 @@ export function renderShowcase(c: TemplateContent): { body: string; css: string 
   navLinks.push('<a href="#contact">Contact</a>');
 
   const nav = `
-<header class="sc-nav">
+<header class="sc-nav" data-kondo-section="nav">
   <div class="sc-wrap sc-nav__in">
     <div class="sc-nav__mark">${mark}</div>
     <nav class="sc-nav__links" aria-label="Sections">${navLinks.join("")}</nav>
@@ -169,7 +169,7 @@ export function renderShowcase(c: TemplateContent): { body: string; css: string 
 
   // ---- hero
   const hero = `
-<section class="sc-hero${img.hero ? "" : " sc-hero--noimg"}">
+<section class="sc-hero${img.hero ? "" : " sc-hero--noimg"}" data-kondo-section="hero">
   ${img.hero ? `<div class="sc-hero__bg"><img src="${esc(img.hero.url)}" alt=""${imgAttrs(img.hero)}></div>` : ""}
   <div class="sc-wrap sc-hero__in">
     <div class="sc-hero__copy">
@@ -187,7 +187,7 @@ export function renderShowcase(c: TemplateContent): { body: string; css: string 
   // ---- services: no photographs, deliberately (see styles.ts)
   const servicesSection = services.length
     ? `
-<section class="sc-svc" id="services">
+<section class="sc-svc" id="services" data-kondo-section="services">
   <div class="sc-wrap sc-svc__in">
     <div class="sc-svc__head">
       <p class="sc-eyebrow">What we do</p>
@@ -216,7 +216,7 @@ export function renderShowcase(c: TemplateContent): { body: string; css: string 
   const feature =
     img.feature && featureQuote
       ? `
-<section class="sc-feature">
+<section class="sc-feature" data-kondo-section="feature">
   <img src="${esc(img.feature.url)}" alt=""${imgAttrs(img.feature)}>
   <div class="sc-wrap sc-feature__in">
     <p class="sc-eyebrow">${quotes.length ? "In their words" : "Who we are"}</p>
@@ -229,7 +229,7 @@ export function renderShowcase(c: TemplateContent): { body: string; css: string 
   // ---- about: sticky label column, statement copy, offset photographs
   const about = c.aboutCopy
     ? `
-<section class="sc-about" id="about">
+<section class="sc-about" id="about" data-kondo-section="about">
   <div class="sc-wrap sc-about__in">
     <div class="sc-about__grid">
       <aside class="sc-about__aside">
@@ -259,7 +259,7 @@ export function renderShowcase(c: TemplateContent): { body: string; css: string 
   // ---- mosaic
   const mosaic = img.mosaic.length
     ? `
-<section class="sc-mosaic" id="work">
+<section class="sc-mosaic" id="work" data-kondo-section="mosaic">
   <div class="sc-wrap sc-mosaic__in">
     <div class="sc-mosaic__head">
       <p class="sc-eyebrow">A look around</p>
@@ -281,7 +281,7 @@ export function renderShowcase(c: TemplateContent): { body: string; css: string 
   // ---- partner strip
   const strip = partners.length || credentials.length
     ? `
-<section class="sc-strip">
+<section class="sc-strip" data-kondo-section="partners">
   <div class="sc-wrap sc-strip__in">
     <p class="sc-strip__label">Trusted partners &amp; accreditations</p>
     ${partners.length ? `<div class="sc-strip__row">${partners.map((l) => `<img src="${esc(l.url)}" alt="">`).join("")}</div>` : ""}
@@ -303,7 +303,7 @@ export function renderShowcase(c: TemplateContent): { body: string; css: string 
 
   const quotesSection = remaining.length
     ? `
-<section class="sc-quotes" id="reviews">
+<section class="sc-quotes" id="reviews" data-kondo-section="reviews">
   <div class="sc-wrap sc-quotes__in">
     <blockquote class="sc-quotes__lead">
       “${esc(lead.quote)}”
@@ -347,7 +347,7 @@ export function renderShowcase(c: TemplateContent): { body: string; css: string 
     ctaFacts.push(`<span><b>Areas we serve</b> ${esc(c.serviceAreas.join(", "))}</span>`);
 
   const cta = `
-<section class="sc-cta${img.cta ? "" : " sc-cta--plain"}" id="contact">
+<section class="sc-cta${img.cta ? "" : " sc-cta--plain"}" id="contact" data-kondo-section="cta">
   ${img.cta ? `<div class="sc-cta__bg"><img src="${esc(img.cta.url)}" alt=""${imgAttrs(img.cta)}></div>` : ""}
   <div class="sc-wrap sc-cta__in">
     <p class="sc-eyebrow">Get in touch</p>
@@ -364,7 +364,7 @@ export function renderShowcase(c: TemplateContent): { body: string; css: string 
   // ---- footer
   const hasContact = Boolean(c.contactPhone || c.contactEmail || c.contactAddress);
   const foot = `
-<footer class="sc-foot">
+<footer class="sc-foot" data-kondo-section="footer">
   <div class="sc-wrap sc-foot__in">
     <div>
       <p class="sc-foot__name">${esc(c.businessName)}</p>

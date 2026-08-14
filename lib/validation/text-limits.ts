@@ -17,3 +17,9 @@ export const mediumTextSchema = z.string().trim().max(2_000); // service/testimo
 export const longTextSchema = z.string().trim().max(20_000); // aboutCopy
 export const contactFieldSchema = z.string().trim().max(300); // email/phone/address
 export const hexColorSchema = z.string().trim().regex(/^#[0-9a-fA-F]{6}$/);
+
+// A per-section AI edit instruction (lib/actions/concepts.ts's editConceptSection) — short
+// on purpose. This is a single plain-English request ("make the nav darker"), not a brief;
+// a much longer input is more likely a mistake (pasted content) than a real instruction,
+// and bounds what gets sent to the model on every edit.
+export const sectionEditInstructionSchema = z.string().trim().min(1).max(500);

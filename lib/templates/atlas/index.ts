@@ -79,7 +79,7 @@ export function renderAtlas(c: TemplateContent): { body: string; css: string } {
   navLinks.push('<a href="#contact">Contact</a>');
 
   const nav = `
-<header class="at-nav"><div class="at-wrap at-nav__in">
+<header class="at-nav" data-kondo-section="nav"><div class="at-wrap at-nav__in">
   ${c.logoUrl
     ? `<img class="at-nav__logo" src="${esc(c.logoUrl)}" alt="${esc(c.businessName)}">`
     : `<span class="at-nav__name">${esc(c.businessName)}</span>`}
@@ -101,7 +101,7 @@ export function renderAtlas(c: TemplateContent): { body: string; css: string } {
         .join("")}</dl>`
     : "";
 
-  const heroSection = `<section class="at-hero${statRail ? "" : " at-hero--bare"}">
+  const heroSection = `<section class="at-hero${statRail ? "" : " at-hero--bare"}" data-kondo-section="hero">
   <div class="at-hero__field"></div>
   <div class="at-wrap at-hero__in">
     <div class="at-hero__copy">
@@ -114,7 +114,7 @@ export function renderAtlas(c: TemplateContent): { body: string; css: string } {
 </section>`;
 
   const partnerStrip = partners.length || credentials.length
-    ? `<section class="at-strip" style="border-top:1px solid var(--line)"><div class="at-wrap at-strip__in">
+    ? `<section class="at-strip" style="border-top:1px solid var(--line)" data-kondo-section="partners"><div class="at-wrap at-strip__in">
     <p class="at-strip__label">Trusted partners &amp; accreditations</p>
     ${partners.length ? `<div class="at-partners">${partners.map((l) => `<span><img src="${esc(l.url)}" alt=""></span>`).join("")}</div>` : ""}
     ${credentials.length ? `<div class="at-credentials"${partners.length ? ' style="margin-top:18px"' : ""}>${credentials.map((label) => `<span>${esc(label)}</span>`).join("")}</div>` : ""}
@@ -122,7 +122,7 @@ export function renderAtlas(c: TemplateContent): { body: string; css: string } {
     : "";
 
   const why = diffs.length
-    ? `<section class="at-why" id="why"><div class="at-wrap at-why__in">
+    ? `<section class="at-why" id="why" data-kondo-section="why"><div class="at-wrap at-why__in">
     <div class="at-head at-why__head">
       <p class="at-eyebrow">Why us</p>
       <h2 class="at-h2">What makes ${esc(c.businessName)} <span class="at-em">different</span></h2>
@@ -137,7 +137,7 @@ export function renderAtlas(c: TemplateContent): { body: string; css: string } {
   // One treatment at every length — see styles.ts. The old card/index switch at
   // seven meant a client never knew which page they'd get.
   const servicesSection = services.length
-    ? `<section class="at-svc" id="services"><div class="at-wrap at-svc__in">
+    ? `<section class="at-svc" id="services" data-kondo-section="services"><div class="at-wrap at-svc__in">
     <div class="at-head at-svc__head">
       <p class="at-eyebrow">What we do</p>
       <h2 class="at-h2">Everything ${esc(c.businessName)} <span class="at-em">looks after</span></h2>
@@ -149,7 +149,7 @@ export function renderAtlas(c: TemplateContent): { body: string; css: string } {
     : "";
 
   const processSection = process.length
-    ? `<section class="at-proc" id="process"><div class="at-wrap at-proc__in">
+    ? `<section class="at-proc" id="process" data-kondo-section="process"><div class="at-wrap at-proc__in">
     <div class="at-head at-proc__head">
       <p class="at-eyebrow">How it works</p>
       <h2 class="at-h2">The path from here <span class="at-em">to done</span></h2>
@@ -182,7 +182,7 @@ export function renderAtlas(c: TemplateContent): { body: string; css: string } {
       : "";
 
   const about = c.aboutCopy
-    ? `<section class="at-about" id="about"><div class="at-wrap at-about__in">
+    ? `<section class="at-about" id="about" data-kondo-section="about"><div class="at-wrap at-about__in">
     <div class="at-about__grid"${aside ? "" : ' style="grid-template-columns:minmax(0,1fr)"'}>
       <div>
         <p class="at-eyebrow">${team.length ? "The people behind it" : "About us"}</p>
@@ -197,7 +197,7 @@ export function renderAtlas(c: TemplateContent): { body: string; css: string } {
  const reviews = quotes.length
     ? (() => {
         const [lead, ...rest] = quotes;
-        return `<section class="at-says" id="reviews"><div class="at-wrap at-says__in">
+        return `<section class="at-says" id="reviews" data-kondo-section="reviews"><div class="at-wrap at-says__in">
     <div class="at-head at-says__head">
       <p class="at-eyebrow">In their words</p>
       <h2 class="at-h2">What clients <span class="at-em">actually say</span></h2>
@@ -219,7 +219,7 @@ export function renderAtlas(c: TemplateContent): { body: string; css: string } {
     : "";
 
   const faqSection = faqs.length
-    ? `<section class="at-faq"><div class="at-wrap at-faq__in">
+    ? `<section class="at-faq" data-kondo-section="faq"><div class="at-wrap at-faq__in">
     <div class="at-head">
       <p class="at-eyebrow">Good to know</p>
       <h2 class="at-h2">Questions we <span class="at-em">get asked a lot</span></h2>
@@ -259,7 +259,7 @@ export function renderAtlas(c: TemplateContent): { body: string; css: string } {
   if (c.serviceAreas && c.serviceAreas.length)
     ctaSide.push(`<div><span>Areas we serve</span><strong>${esc(c.serviceAreas.join(", "))}</strong></div>`);
 
-  const cta = `<section class="at-cta${ctaSide.length ? "" : " at-cta--slim"}" id="contact">
+  const cta = `<section class="at-cta${ctaSide.length ? "" : " at-cta--slim"}" id="contact" data-kondo-section="cta">
   <div class="at-wrap at-cta__in">
     <div class="at-cta__panel">
       <div class="at-cta__ask">
@@ -277,7 +277,7 @@ export function renderAtlas(c: TemplateContent): { body: string; css: string } {
 </section>`;
 
   const hasContact = Boolean(c.contactPhone || c.contactEmail || c.contactAddress);
-  const foot = `<footer class="at-foot"><div class="at-wrap at-foot__in">
+  const foot = `<footer class="at-foot" data-kondo-section="footer"><div class="at-wrap at-foot__in">
   <div><p class="at-foot__name">${esc(c.businessName)}</p>${c.tagline ? `<p>${esc(c.tagline)}</p>` : ""}</div>
   ${hasContact ? `<div><h4>Get in touch</h4>
     ${c.contactPhone ? `<a href="${esc(telHref(c.contactPhone))}">${esc(c.contactPhone)}</a>` : ""}

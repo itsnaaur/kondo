@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { publishConcept, unpublishConcept } from "@/lib/actions/publish";
 import { SubmitButton } from "@/components/SubmitButton";
 import { PreviewFrame } from "@/components/PreviewFrame";
+import { ConceptSectionEditor } from "@/components/ConceptSectionEditor";
+import { listConceptSections } from "@/lib/templates/section-editor";
 
 export default async function ConceptPage({
   params,
@@ -18,6 +20,11 @@ export default async function ConceptPage({
   });
 
   if (!concept) notFound();
+
+  // Parsed fresh from this concept's own stored HTML on every render, not a fixed
+  // per-template list — so a section already edited (or one a future template variant
+  // adds or removes) always matches exactly what this concept actually has right now.
+  const sections = listConceptSections(concept.html).map((s) => ({ key: s.key, label: s.label }));
 
   const isPublished = concept.publishStatus === "PUBLISHED";
   const publicUrl = concept.publishSlug ? `/p/${concept.publishSlug}` : null;
@@ -72,7 +79,10 @@ export default async function ConceptPage({
         </div>
       )}
 
-      <PreviewFrame html={concept.html} />
+      <div className="space-y-6">
+        <PreviewFrame html={concept.html} />
+        <ConceptSectionEditor clientId={id} conceptId={conceptId} sections={sections} />
+      </div>
     </main>
   );
 }

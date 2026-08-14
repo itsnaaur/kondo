@@ -207,11 +207,25 @@ export async function downloadCrawlImages(
     if (orderedCandidateUrls.length >= MAX_CANDIDATE_IMAGES) break;
   }
 
+  // Two different source URLs can resolve to byte-identical images (the same photo
+  // hosted at two paths, a resized variant, a query-string-only difference) — the URL
+  // dedup above doesn't catch that, and saveAsset's own content-hash dedup (see
+  // lib/storage/upload-asset.ts's sibling comment there) means the second one now
+  // resolves to the SAME Asset row instead of a fresh upload. Left unguarded here, that
+  // produces two ContentImage entries sharing one assetId — not just a React key
+  // collision downstream (confirmed live), but the same photo genuinely rendering twice
+  // in a client's gallery. First occurrence wins, same convention as
+  // select-relevant-pages.ts's own content dedup.
+  const usedAssetIds = new Set<string>();
+  if (logo) usedAssetIds.add(logo.asset.id);
+
   const candidates: DownloadedCandidate[] = [];
   for (let i = 0; i < orderedCandidateUrls.length; i++) {
     const { url, fromHomepage, nearbyText } = orderedCandidateUrls[i];
     const saved = await saveAsset(clientId, AssetType.IMAGE, url, `site-image-${i + 1}`);
-    if (saved) candidates.push({ ...saved, fromHomepage, nearbyText });
+    if (!saved || usedAssetIds.has(saved.asset.id)) continue;
+    usedAssetIds.add(saved.asset.id);
+    candidates.push({ ...saved, fromHomepage, nearbyText });
   }
 
   return { logo, candidates };

@@ -93,15 +93,43 @@ component (react-dom/server can't be used in Next's Server Component/Action modu
 `lib/templates/registry.ts` is where a new template gets registered and scored for
 suitability against a given client's content.
 
+### Per-section editing (experimental)
+
+A generated concept's individual sections (Hero, About, Services, etc.) can be edited
+with a plain-English instruction from the concept page — "arrange this as a grid of
+cards," "make the nav darker." Two isolation guarantees, from two different mechanisms:
+
+- **Never affects another client or the template.** `Concept.html` is already a frozen,
+  per-client snapshot (see the `Concept` model's comment in `prisma/schema.prisma`) — it
+  was never live-joined to `lib/templates/*`, so editing it can't touch the shared
+  template source or any other client's concept. This part is free, not something this
+  feature had to build.
+- **Never affects another section of the same page.** This one isn't free — a template's
+  sections share CSS classes with each other (the same heading style, the same color
+  variables), so `lib/templates/section-editor.ts` locates and replaces exactly one
+  section's HTML by its `data-kondo-section="<key>"` marker (every template tags each
+  top-level section), and `lib/content/edit-concept-section.ts` sends the model *only*
+  that section's markup, bound to a unique scoped CSS class prefix it must confine any
+  new styling to — enforced by a real (if best-effort, regex-based, not a full CSS
+  parser) validation pass after the call, not just the system prompt asking nicely.
+
+Marked experimental deliberately: it's a real Anthropic call per edit (cost, latency,
+occasional bad output — same retry/validation pattern as the main extraction pipeline,
+see `lib/ai/anthropic-retry.ts`), and the constrained scope (colors/spacing/layout
+tweaks within the section's existing structure) is safer and more predictable than fully
+open-ended regeneration, but it's still generative, not deterministic — review the result
+before publishing, same as everything else in this pipeline.
+
 ## Testing
 
 `npm run test` runs [Vitest](https://vitest.dev) against `**/*.test.ts` (also run in CI).
 Deliberately scoped to pure, deterministic logic only — URL normalization, the
-page-selection budget, template rendering, and the SSRF IP-blocklist — not server actions
-or pages, which would need Prisma/Supabase/Anthropic mocked from scratch. This is real
-but partial coverage: the async pipeline (crawl → extract → structure) and every server
-action are untested. Extend `vitest.config.mts`'s scope as that becomes worth the
-mocking investment.
+page-selection budget, template rendering, the SSRF IP-blocklist, and the section
+extraction/replacement mechanism behind per-section editing — not server actions or
+pages, which would need Prisma/Supabase/Anthropic mocked from scratch. This is real but
+partial coverage: the async pipeline (crawl → extract → structure), the actual AI calls
+behind section editing, and every server action are untested. Extend
+`vitest.config.mts`'s scope as that becomes worth the mocking investment.
 
 ## Known limitations
 
