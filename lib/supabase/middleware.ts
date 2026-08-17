@@ -2,8 +2,15 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { isAllowedEmail } from "@/lib/auth/domain";
 
-export async function updateSession(request: NextRequest) {
-  let supabaseResponse = NextResponse.next({ request });
+// Task 3.0. requestHeaders carries the per-request nonce (and the Content-Security-Policy
+// header itself — see proxy.ts) that Next's App Router needs present on the *request* object,
+// not just the response, to auto-apply it to the flight-data hydration scripts it injects
+// during server rendering. Every NextResponse.next({request}) call below must forward this same
+// Headers instance, not the original `request` unmodified, or the nonce silently never reaches
+// rendering — proxy.ts is this function's only caller, so there's no back-compat path that skips
+// passing it.
+export async function updateSession(request: NextRequest, requestHeaders: Headers) {
+  let supabaseResponse = NextResponse.next({ request: { headers: requestHeaders } });
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -15,7 +22,7 @@ export async function updateSession(request: NextRequest) {
         },
         setAll(cookiesToSet) {
           cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
-          supabaseResponse = NextResponse.next({ request });
+          supabaseResponse = NextResponse.next({ request: { headers: requestHeaders } });
           cookiesToSet.forEach(({ name, value, options }) =>
             supabaseResponse.cookies.set(name, value, options)
           );
