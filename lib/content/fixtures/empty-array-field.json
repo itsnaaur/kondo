@@ -1,0 +1,379 @@
+{
+  "id": "empty-array-field",
+  "scenario": "A field the model correctly returns as an empty array (testimonials, process) — validates the deterministic empty-is-fine path is not mistaken for an error.",
+  "capturedFrom": {
+    "client": "Princeton Dental",
+    "clientId": "cms7rxpku0001f0ffb0pd5wwe",
+    "capturedAt": "2026-08-17",
+    "outputTokens": 4809,
+    "maxOutputTokens": 16000
+  },
+  "synthetic": false,
+  "syntheticNote": null,
+  "imageCandidateAssetIds": [],
+  "expectedAfterReplay": {
+    "testimonials": 0,
+    "process": 0,
+    "faqs": 11,
+    "services": 16
+  },
+  "rawResponse": {
+    "businessName": "Princeton Dental",
+    "businessNameConfidence": "high",
+    "tagline": "Honest, affordable family dentistry in Kenmore — no upsell, just care that feels like home.",
+    "taglineConfidence": "high",
+    "aboutCopy": "For over 25 years, Princeton Dental has been Kenmore's trusted family dental clinic. Dr Nina Ong and Dr Luke Dodd treat every patient like family — straightforward, honest \"everyday\" dentistry with no pressure to buy services you don't need. Whether you're nervous about the dentist or just due for a check-up, you'll get clear explanations, a calm chair-side manner, and affordable care for every generation of your family.",
+    "aboutCopyConfidence": "high",
+    "detectedIndustry": "medical/clinic",
+    "contactAddress": "Suite 9/13 Princeton Street, Kenmore QLD 4069",
+    "contactAddressConfidence": "high",
+    "ctaLabel": "Book Now",
+    "ctaLabelConfidence": "high",
+    "testimonials": [],
+    "stats": [
+      {
+        "value": "25+",
+        "label": "Years serving Kenmore families",
+        "confidence": "high",
+        "flagged": true
+      },
+      {
+        "value": "18+",
+        "label": "Dr Nina Ong's years of experience",
+        "confidence": "high",
+        "flagged": true
+      },
+      {
+        "value": "30+",
+        "label": "Dr Luke Dodd's years of experience",
+        "confidence": "high",
+        "flagged": true
+      },
+      {
+        "value": "5 Star",
+        "label": "Google review rating",
+        "confidence": "medium",
+        "flagged": true,
+        "flagReason": "Stated as '5 Star Review rating on Google' without a specific number of reviews cited."
+      }
+    ],
+    "faqs": [
+      {
+        "question": "What time does the practice open?",
+        "answer": "See our office hours: Mon 8:30am–6:00pm, Tue 9:00am–7:00pm, Wed–Fri 8:30am–5:30pm.",
+        "confidence": "medium",
+        "flagged": true,
+        "flagReason": "Question listed in FAQ section but source did not provide the actual written answer text — answer inferred from the office hours listed elsewhere on the site."
+      },
+      {
+        "question": "What types of services do you offer?",
+        "answer": "General, restorative and cosmetic dentistry including check-ups and cleans, children's dentistry, emergency dentistry, root canal treatment, fillings, dentures, crowns and bridges, teeth whitening, clear aligners and veneers.",
+        "confidence": "medium",
+        "flagged": true,
+        "flagReason": "Question listed in FAQ section but source did not provide the actual written answer text — answer inferred from the services list elsewhere on the site."
+      },
+      {
+        "question": "Do you offer payment plans?",
+        "answer": "Yes, payment plans are available — ask the team for details.",
+        "confidence": "medium",
+        "flagged": true,
+        "flagReason": "Question listed in FAQ section but source did not provide the actual written answer text — answer inferred from 'Payment Plans Available' notes elsewhere on the site."
+      },
+      {
+        "question": "Where in town is your practice located?",
+        "answer": "Princeton Court, Suite 9/13 Princeton Street, Kenmore QLD 4069, around the corner from Single Guys Coffee Shop.",
+        "confidence": "medium",
+        "flagged": true,
+        "flagReason": "Question listed in FAQ section but source did not provide the actual written answer text — answer inferred from the location details elsewhere on the site."
+      },
+      {
+        "question": "Do you have any new patient offers?",
+        "answer": "Yes — a Gap Free or $199 New Patient Check-Up & Clean with Dr Nina.",
+        "confidence": "medium",
+        "flagged": true,
+        "flagReason": "Question listed in FAQ section but source did not provide the actual written answer text — answer inferred from the offer banner elsewhere on the site."
+      },
+      {
+        "question": "What do I do during a dental emergency?",
+        "answer": "Call (07) 3378 2422 during working hours and the team will prioritise you; outside hours, the same number reaches an on-call dentist.",
+        "confidence": "medium",
+        "flagged": true,
+        "flagReason": "Question listed in FAQ section but source did not provide the actual written answer text — answer inferred from the Emergency Dental Care page content."
+      },
+      {
+        "question": "How long does it take to get dentures?",
+        "answer": "Not specified in the source text.",
+        "confidence": "low",
+        "flagged": true,
+        "flagReason": "Question listed under Dentures FAQ section but no answer text was provided in the crawled content."
+      },
+      {
+        "question": "Can dentures be used in implant cases?",
+        "answer": "Not specified in the source text.",
+        "confidence": "low",
+        "flagged": true,
+        "flagReason": "Question listed under Dentures FAQ section but no answer text was provided in the crawled content."
+      },
+      {
+        "question": "Do you offer affordable payment plans?",
+        "answer": "Yes, payment plans are available.",
+        "confidence": "low",
+        "flagged": true,
+        "flagReason": "Question listed under Dentures FAQ section but no specific answer text was provided beyond general payment plan mentions elsewhere on the site."
+      },
+      {
+        "question": "Is the procedure painful?",
+        "answer": "Numbing may not even be necessary depending on cavity depth, and the process is designed to be minimally invasive.",
+        "confidence": "low",
+        "flagged": true,
+        "flagReason": "Question listed under Fillings FAQ but no direct answer text was given in the source; inferred from surrounding filling procedure description."
+      },
+      {
+        "question": "What else should I know?",
+        "answer": "Not specified in the source text.",
+        "confidence": "low",
+        "flagged": true,
+        "flagReason": "Question listed under Fillings FAQ section but no answer text was provided in the crawled content."
+      }
+    ],
+    "differentiators": [
+      {
+        "title": "Our Straightforward Approach",
+        "description": "Caring, compassionate dentistry without pressure to buy extra services you don't need — we explain everything before we do it.",
+        "confidence": "high",
+        "flagged": false
+      },
+      {
+        "title": "Caring for Kenmore Families for 25+ Years",
+        "description": "Multi-generational trust — kids we first treated now bring in their own children.",
+        "confidence": "high",
+        "flagged": false
+      },
+      {
+        "title": "Loved by Our Patients",
+        "description": "5 star Google review rating reflecting the warm, personal care patients experience.",
+        "confidence": "high",
+        "flagged": false
+      },
+      {
+        "title": "Experienced, Compassionate Dentists",
+        "description": "Dr Nina Ong (18+ years) and Dr Luke Dodd (30+ years) combine decades of clinical experience with a gentle approach.",
+        "confidence": "high",
+        "flagged": false
+      },
+      {
+        "title": "Gentle Care for Nervous Patients",
+        "description": "We take things at your pace with no pressure or rushing for anxious or phobic patients.",
+        "confidence": "high",
+        "flagged": false
+      },
+      {
+        "title": "A Family-Friendly Practice",
+        "description": "From a child's first visit to lifelong care, every family member is welcomed with warmth and patience.",
+        "confidence": "high",
+        "flagged": false
+      },
+      {
+        "title": "24/7 Emergency Dental Care",
+        "description": "An on-call dentist is available outside business hours for urgent dental needs.",
+        "confidence": "high",
+        "flagged": false
+      },
+      {
+        "title": "Complete Care Under One Roof",
+        "description": "From routine check-ups to cosmetic dentistry and orthodontics, every stage of your family's smile is covered.",
+        "confidence": "high",
+        "flagged": false
+      },
+      {
+        "title": "Making Dental Care More Accessible",
+        "description": "Preferred provider for BUPA, NIB, HCF and CBHS; accepts CDBS and DVA; part of the SMILE.com.au network with flexible payment via Fund My Dental.",
+        "confidence": "high",
+        "flagged": false
+      }
+    ],
+    "process": [],
+    "serviceAreas": [
+      {
+        "name": "Kenmore",
+        "confidence": "high",
+        "flagged": false
+      }
+    ],
+    "hours": [
+      {
+        "days": "Monday",
+        "hours": "8:30am – 6:00pm",
+        "confidence": "high",
+        "flagged": true
+      },
+      {
+        "days": "Tuesday",
+        "hours": "9:00am – 7:00pm",
+        "confidence": "high",
+        "flagged": true
+      },
+      {
+        "days": "Wednesday",
+        "hours": "8:30am – 5:30pm",
+        "confidence": "high",
+        "flagged": true
+      },
+      {
+        "days": "Thursday",
+        "hours": "8:30am – 5:30pm",
+        "confidence": "high",
+        "flagged": true
+      },
+      {
+        "days": "Friday",
+        "hours": "8:30am – 5:30pm",
+        "confidence": "high",
+        "flagged": true
+      }
+    ],
+    "offers": [
+      {
+        "name": "New Patient Check-Up & Clean (with Dr Nina)",
+        "price": "Gap Free* or $199 (no health fund)",
+        "confidence": "high",
+        "flagged": true,
+        "flagReason": "Conditional pricing — gap free only applies if rebate equals or exceeds offer amount; terms apply."
+      },
+      {
+        "name": "Pola Take-Home Whitening",
+        "price": "$249 (valued at $300)",
+        "confidence": "high",
+        "flagged": true,
+        "flagReason": "T&Cs apply per source; not everyone is a candidate."
+      }
+    ],
+    "credentials": [
+      {
+        "label": "Preferred provider for BUPA, NIB, HCF and CBHS",
+        "confidence": "high",
+        "flagged": true,
+        "flagReason": "Stated explicitly but this is a provider affiliation rather than a licensing credential — verify current status."
+      },
+      {
+        "label": "Accepts Child Dental Benefits Schedule (CDBS) and DVA",
+        "confidence": "high",
+        "flagged": true,
+        "flagReason": "Explicitly stated program acceptance, not a professional license — verify current status."
+      },
+      {
+        "label": "Part of the SMILE.com.au provider network",
+        "confidence": "medium",
+        "flagged": true,
+        "flagReason": "Explicitly stated network membership — verify current status."
+      }
+    ],
+    "services": [
+      {
+        "name": "Checkup and Cleans",
+        "description": "A straightforward way to stay on top of your oral health — exam, early detection, and professional clean for the whole family.",
+        "confidence": "high",
+        "flagged": false
+      },
+      {
+        "name": "Children's Dentistry",
+        "description": "Gentle, patient dental care that helps kids build good habits and feel comfortable in the chair from their very first visit.",
+        "confidence": "low",
+        "flagged": true,
+        "flagReason": "Named in navigation/services list with no dedicated description in the crawled text — description inferred from context."
+      },
+      {
+        "name": "Crowns and Bridges",
+        "description": "Custom-crafted restorations that rebuild damaged or missing teeth for a natural look and reliable function.",
+        "confidence": "low",
+        "flagged": true,
+        "flagReason": "Named in navigation/services list with no dedicated description in the crawled text — description inferred from context."
+      },
+      {
+        "name": "Emergency Dentistry",
+        "description": "Same-day care for toothaches, breakages and dental accidents, with an on-call dentist available outside office hours.",
+        "confidence": "high",
+        "flagged": false
+      },
+      {
+        "name": "General Dentistry",
+        "description": "Everyday preventive and restorative care focused on keeping your whole family's teeth and gums healthy long-term.",
+        "confidence": "low",
+        "flagged": true,
+        "flagReason": "Named in navigation/services list with no dedicated description in the crawled text — description inferred from context."
+      },
+      {
+        "name": "Root Canal Treatment",
+        "description": "Treatment to relieve pain and save an infected or badly damaged tooth rather than losing it.",
+        "confidence": "low",
+        "flagged": true,
+        "flagReason": "Named in navigation/services list with no dedicated description in the crawled text — description inferred from context."
+      },
+      {
+        "name": "Teeth Whitening",
+        "description": "Pola take-home whitening treatment for a brighter, more confident smile.",
+        "confidence": "medium",
+        "flagged": false
+      },
+      {
+        "name": "Sports Mouth Guards",
+        "description": "Custom-fitted guards to protect teeth during sport and physical activity.",
+        "confidence": "low",
+        "flagged": true,
+        "flagReason": "Named only in services list with no description — inferred from name and general industry context."
+      },
+      {
+        "name": "Extractions",
+        "description": "Careful, comfortable tooth removal when a tooth can't be saved, with guidance on replacement options like implants or bridges.",
+        "confidence": "high",
+        "flagged": false
+      },
+      {
+        "name": "Fissure Sealants",
+        "description": "A protective coating applied to the chewing surfaces of back teeth to help prevent decay, especially in children.",
+        "confidence": "low",
+        "flagged": true,
+        "flagReason": "Named only in services list with no description — inferred from name and general industry context."
+      },
+      {
+        "name": "Sleep Apnea – Night Guard/Splints",
+        "description": "Custom night guards and splints to manage teeth grinding and sleep-related jaw issues.",
+        "confidence": "low",
+        "flagged": true,
+        "flagReason": "Named only in services list with no description — inferred from name and general industry context."
+      },
+      {
+        "name": "Fillings",
+        "description": "Tooth-coloured composite fillings that repair decay and blend naturally with your smile, often completed in a single, minimally invasive visit.",
+        "confidence": "high",
+        "flagged": false
+      },
+      {
+        "name": "Dentures",
+        "description": "Acrylic and metal-based removable dentures custom-matched to your remaining teeth and face shape to restore your smile affordably.",
+        "confidence": "high",
+        "flagged": false
+      },
+      {
+        "name": "Dental Implant Crowns",
+        "description": "Implant-supported crowns that replace missing teeth with a durable, natural-looking result.",
+        "confidence": "low",
+        "flagged": true,
+        "flagReason": "Named only in services list with no description — inferred from name and general industry context."
+      },
+      {
+        "name": "Clear Aligners",
+        "description": "Discreet, removable aligners that gradually straighten teeth without traditional braces.",
+        "confidence": "low",
+        "flagged": true,
+        "flagReason": "Named only in services list with no description — inferred from name and general industry context."
+      },
+      {
+        "name": "Veneers",
+        "description": "Porcelain or composite shells bonded to the front of teeth to close gaps, reshape and brighten your smile — including a mock-up appointment to preview results.",
+        "confidence": "high",
+        "flagged": false
+      }
+    ]
+  }
+}

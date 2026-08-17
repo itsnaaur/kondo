@@ -52,3 +52,9 @@ next-env.d.ts
 # local sqlite database
 /dev.db
 /dev.db-journal
+
+# scripts/check-extraction.ts --baseline output — a snapshot of whatever a live model call
+# happened to return on whoever's machine ran it last, not curated reference data (compare
+# lib/content/fixtures/, which is committed deliberately). Committing this would mean every
+# local --baseline run either fights over a shared file or looks like unrelated churn.
+/scripts/baselines
