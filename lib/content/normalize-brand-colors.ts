@@ -62,6 +62,12 @@ const DESTRUCTIVE = "#dc2626";
 // Saturation delta was negligible (median +2.2) and isn't varied separately here.
 const SECONDARY_LIGHTNESS_DELTA = 9;
 
+// Task 1.6b. mist's own saturation/lightness — pulled out as named constants, not left as
+// magic numbers duplicated between the deepening loop below and mist's own hsl(hue, MIST_S,
+// MIST_L) in buildPalette's return, so the two can't silently drift apart.
+const MIST_S = 24;
+const MIST_L = 97;
+
 function hexToHsl(hex: string): { h: number; s: number; l: number } | null {
   const m = /^#?([a-f\d]{6})$/i.exec(hex.trim());
   if (!m) return null;
@@ -167,11 +173,23 @@ export function buildPalette(brandColors: { hex: string }[]): Palette {
   const accentS = isYellowish ? 62 : 58;
   const darkInk = hsl(hue, 24, 12);
 
-  // Action fills should carry white labels. High-luminance hues (greens) at L≈41
-  // fail white AA, and picking dark ink instead produces dark-on-dark buttons —
-  // deepen the fill until white clears, rather than flipping the text colour.
+  // Task 1.6b — deepen against mist, not pure white. High-luminance hues (greens) at L≈41
+  // fail AA against the lightest surface accent actually renders on, and picking dark ink
+  // instead produces dark-on-dark buttons — deepen the fill until that clears, rather than
+  // flipping the text colour. Originally targeted pure white (luminance 1) — 1.6's validation
+  // gate found 41 of 191 real corpus primaries then failed AA on "accent on mist" (a real,
+  // confirmed template usage — lib/templates/atlas/styles.ts's `.at-hero__stats dt`/
+  // `.at-proc__no`), because mist (hsl(hue, 24, 97), a tinted near-white) has measurably lower
+  // luminance than true white, so a hue that barely cleared the old white-only bar predictably
+  // failed the harder mist bar. mist is the lightest surface with confirmed accent-as-text
+  // usage — paper (pure white) is literally lighter, but no template renders accent-coloured
+  // text directly on paper; accentSoft (L=95) is darker than mist (L=97). Deepening against
+  // mist is therefore both the correct fix and, by construction, at least as strict as the old
+  // white-only check (mist's lower luminance can only demand an accentL equal to or darker
+  // than what clearing white alone required), so this cannot make accentInk-on-accent (a
+  // separately, already-passing pair) worse.
   if (!isYellowish) {
-    while (contrast(luminance(hue, accentS, accentL), 1) < 4.5 && accentL > 24) {
+    while (contrast(luminance(hue, accentS, accentL), luminance(hue, MIST_S, MIST_L)) < 4.5 && accentL > 24) {
       accentL -= 2;
     }
   }

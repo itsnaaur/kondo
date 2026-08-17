@@ -32,6 +32,16 @@ function hslStringToHex(value: string): string {
 // the pre-edit file, run against these exact inputs). If any of these 11 fields (the 10
 // original roles plus derivedFrom) ever changes for the same input, that is a real regression
 // in the original derivation — the fix is to the code, not to these golden values.
+//
+// ONE EXCEPTION, REGENERATED IN TASK 1.6b, NOT SILENTLY UPDATED: greenClinic's `accent`
+// changed from "hsl(161 58% 33%)" to "hsl(161 58% 31%)". This is a real, intended behaviour
+// change, not a golden-test drift to paper over — 1.6b retargeted the AA-deepening loop from
+// pure white to `mist` (1.6's validation gate found "accent on mist" failing AA on 41/191 real
+// corpus primaries; #059669 is one of them), so #059669's accent now deepens one further -2
+// step to clear the stricter, more realistic bar. Every other field, for every fixture, is
+// unchanged — confirmed by re-running buildPalette against all 6 fixtures and diffing before
+// regenerating this one value. See docs/kondo-v2-execution.md's 1.6b entry for the full
+// before/after comparison across affected corpus palettes, not just this one fixture.
 const GOLDEN: Record<string, { input: { hex: string }[]; original: Record<string, string> }> = {
   blueTech: {
     input: [{ hex: "#2563EB" }],
@@ -50,11 +60,12 @@ const GOLDEN: Record<string, { input: { hex: string }[]; original: Record<string
     },
   },
   greenClinic: {
-    // Exercises the white-contrast-deepening loop (a high-luminance hue at the default
-    // accentL=41 fails white AA and accentL gets pulled down until it clears).
+    // Exercises the deepening loop (a high-luminance hue at the default accentL=41 fails AA
+    // against the loop's target and accentL gets pulled down until it clears). accent's value
+    // below was regenerated in Task 1.6b — see the GOLDEN comment above.
     input: [{ hex: "#059669" }],
     original: {
-      accent: "hsl(161 58% 33%)",
+      accent: "hsl(161 58% 31%)",
       accentInk: "#ffffff",
       accentSoft: "hsl(161 42% 95%)",
       deep: "hsl(161 28% 9%)",
