@@ -3418,6 +3418,118 @@ the human's go-ahead — not started this session.
 ---
 
 ---
+### 1.1c — does the flake live in the live path or the diagnostic script
+**Timestamp:** 2026-08-17
+**Git SHA at start:** 3fdf7ac
+**Status:** DONE-VERIFIED
+
+**What I did:**
+Ran the real production pipeline — `crawlClientSite`, not a standalone script — against two of the
+five clients from `1.1a`/`1.1b` that hadn't yet been tested on the live path: BC Security (16 pages)
+and Allen Evans Family Lawyers (33 pages). No code changes; this task is entirely investigation, per
+instruction, and made none — `git status --porcelain` is empty for this entry. Did not attempt to
+reproduce the anomalous run in the standalone script, per instruction that doing so is open-ended.
+
+**Result — the live path is clean. Localised, not a defect:**
+
+```
+BC Security — 16 pages crawled
+  computedStyles IS NULL (capture failed to run):                       0
+  computedStyles populated (at least one field non-empty):              16
+  computedStyles ran but every field empty/null (ran, found nothing):    0
+
+Allen Evans Family Lawyers — 33 pages crawled (2 pages 404'd and were correctly skipped,
+  not counted — that's the crawler's own existing 400+ status handling, unrelated to this task)
+  computedStyles IS NULL (capture failed to run):                       0
+  computedStyles populated (at least one field non-empty):              33
+  computedStyles ran but every field empty/null (ran, found nothing):    0
+```
+
+**49 of 49 pages across both clients, zero SQL-null, zero empty-but-ran.** Combined with
+`1.1-VERIFIED`'s 92/92 on Princeton Dental, that's **141 of 141 pages clean across three different real
+sites on the actual production path.** Per instruction: **saying so explicitly — the anomalous
+all-empty run in `1.1b` belongs to the standalone diagnostic script's rapid-fire pattern (one browser
+instance, five real remote pages, back-to-back, no delay), not to `crawler.ts`'s capture code.** The
+real crawler's own pacing (`REQUEST_DELAY_MS = 400ms` between pages, a fresh `page` per URL inside one
+persistent context, one client at a time) evidently doesn't hit whatever the diagnostic script's tighter
+loop hit. `1.2` can proceed treating this source as reliable on the path that actually matters —
+verified, not assumed.
+
+**On whether "ran and found nothing" is distinguishable from "didn't run":** re-read the actual
+`crawler.ts` code rather than reasoning from memory. **They are already distinguishable, structurally,
+at the column level — no code change needed:**
+- **"Didn't run" (the evaluation threw):** the `try/catch` around `captureComputedStyles` (`crawler.ts:
+  ~151-155`) leaves the local `computedStyles` variable at its initial value, `null`; the `create` call
+  stores `Prisma.DbNull` — a genuine SQL `NULL` on the column. A query for `computedStyles IS NULL`
+  finds exactly these rows and only these rows.
+- **"Ran, found nothing":** every internal step completed without the evaluate promise rejecting, so a
+  real JSON object is stored — `{ primaryButtonBg: [], buttonBorderColor: [], linkColor: [],
+  navBackground: null, h1Color: null, customProperties: {} }` is a fully-formed value, not a null
+  column. `computedStyles IS NOT NULL` finds it, and its own sub-fields correctly report their own
+  empty/null state independently.
+
+This is a genuine structural distinction, not a coincidence: any failure *inside* `captureComputedStyles`
+— whether the outer `page.evaluate()` call itself rejects, or something inside the evaluated closure
+throws — surfaces as a rejected promise, caught once, in one place, always producing the SQL-null
+path. There is no code path that can silently collapse a real failure into an empty-but-successful
+result; a "the promise resolved" object is only ever produced when nothing threw. Verified by reading
+every line between the `try` and the `create` call, not inferred from the type signature alone.
+
+**One real nuance worth flagging for `1.2`, not a defect in the capture:** the *data* distinguishes
+these two cases correctly, but a careless downstream check wouldn't. Something like `if
+(!computedStyles?.primaryButtonBg?.length)` treats "the column is null" and "the column is a real
+object with an empty array" identically — both are falsy. `1.2`'s own code needs to check
+`computedStyles === null` (or `!== null`) as a distinct condition from checking individual field
+lengths, if it ever needs to tell "this site's capture failed outright" apart from "this site
+genuinely has no button-colour signal" (which `1.1b`'s Downseal Solutions finding proves is a real,
+legitimate case, not hypothetical). Flagging this now, as a design note for whoever writes `1.2`, not
+as something to fix in `crawler.ts` — the capture side is already correct.
+
+**Files created/modified:** none — investigation only, confirmed via `git status --porcelain` returning
+no output for any tracked file. The throwaway verification script was created and deleted within this
+entry, never committed.
+
+**Verification command:**
+```
+(throwaway script, deleted after use: calls the real crawlClientSite against BC Security and Allen
+Evans Family Lawyers, then queries the newly-created CrawledPage rows and classifies each by
+whether computedStyles is SQL NULL, a populated object, or a real-but-fully-empty object)
+git status --porcelain
+```
+
+**Output:** the full per-client breakdown is quoted above, verbatim, not summarised further.
+```
+$ git status --porcelain
+(no output)
+```
+
+**Failures, retries and dead ends:** none — both crawls completed on the first attempt. Allen Evans
+Family Lawyers had 2 pages return 404 (existing, unrelated crawler behaviour — logged and skipped, not
+counted in the 33 successfully-crawled pages, and not a computedStyles concern).
+
+**Shortcuts taken:** none.
+
+**Deviations from the task spec:** none — did not attempt to reproduce the flake in the standalone
+script, exactly as instructed.
+
+**Not run / not verified:**
+- The remaining two of the five `1.1a`/`1.1b` clients (Downseal Solutions, Propell Property) on the
+  live path specifically — not tested this entry; `1.1-VERIFIED` already covered Princeton Dental, and
+  the task asked for two clients, not all five, to keep this cheap as instructed.
+- The exact cause of the diagnostic script's anomalous run — still not root-caused, and per instruction
+  this entry didn't try to be; it only needed to establish which side of the boundary the flake sits on,
+  and it does: not the live path.
+
+**Confidence:** High — real production code, real sites, real database rows counted directly, not
+inferred. The distinguishability claim is backed by a direct re-read of the exact code path between
+`try` and `create`, not the type signature or documentation alone.
+
+**Next task:** `1.2` — rework brand colour source ranking. The live path is confirmed reliable and the
+data already supports telling "failed" apart from "found nothing," so nothing here should hold `1.2`
+back further. Awaiting the human's go-ahead — not started this session.
+---
+
+---
 
 # PART E — For the human reviewing this log
 
