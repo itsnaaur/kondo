@@ -3253,6 +3253,171 @@ proven elsewhere in this codebase (`isNearNeutral`, frequency-ranking), not a gu
 ---
 
 ---
+### 1.1b — ranked colour candidates, borderColor, re-verified against the same five clients
+**Timestamp:** 2026-08-17
+**Git SHA at start:** 024b815
+**Status:** DONE-VERIFIED
+
+**What I did:**
+Implemented the approved strategy in `lib/crawl/crawler.ts`. `captureComputedStyles` now collects
+every matching button/link element's colour (not just the first), and a new `rankColorCandidates`
+function — ordinary, named, Node-side TypeScript, not inside the `page.evaluate()` closure — filters
+near-neutral/transparent samples, counts occurrences of each surviving colour, and sorts by count
+descending, with "at least one occurrence sat inside `<main>`" as a soft tiebreak only, and the colour
+string itself as the final, explicit tiebreak (same discipline as `0.1a`'s sort fixes — not
+array-position-dependent). `primaryButtonBg`, the new `buttonBorderColor`, and `linkColor` are now all
+`ColorCandidate[]` (`{ color, count, inMain }`, best first, `[]` when nothing survives the filter) —
+`navBackground` and `h1Color` are unchanged, still single first-match scalars, a deliberate scope
+decision explained below.
+
+**No migration — confirmed, as anticipated.** `computedStyles` is still `Json?`; only the *shape*
+stored inside it changed, which is an application-level convention, not a schema change. Ran `npx
+prisma generate` (schema-only, no DB connection) to refresh types; `prisma/migrations/` gained no new
+directory — the last one is still `1.1`'s `20260817000000_add_crawled_page_computed_styles`.
+
+**Scope decision, stated plainly rather than silently assumed:** the approved strategy and the
+candidate shape you gave (`{ color, count, inMain }`) both map naturally onto button/link elements,
+where "inside `<main>`" is a meaningful distinction. `navBackground` (one `<nav>`/`<header>` background)
+and `h1Color` (heading text colour) were **not** part of `1.1a`'s investigation or proposal, and
+`isNearNeutral`-style filtering would be actively wrong for `h1Color` specifically — headings are
+legitimately near-black text on most sites by design, and filtering that out as "neutral" would
+discard the common, correct case, not a decoy. Left both as unranked single values, unchanged from
+`1.1`. Flagging this so it can be corrected if broader scope was actually intended.
+
+**A real bug, found only by testing against real data, not by reasoning about the code.** My first
+implementation reused `lib/content/extract-colors.ts`'s `isNearNeutral` formula verbatim (`max > 235 ||
+min < 20 || max - min < 12`). Ran it against the same five clients from `1.1a` and got **empty
+candidate arrays for BC Security, Downseal Solutions, and Propell Property's `primaryButtonBg`** —
+including BC Security, whose real brand navy (`rgb(2, 68, 112)`, 16 of 23 button matches, literally
+classed `bricks-background-primary`) `1.1a` had already confirmed exists in the data. Traced it: `min <
+20` flags *any* colour with one near-zero channel as neutral — correct for near-black greys, wrong for
+a highly saturated, low-lightness hue like navy (red channel = 2, but 96% saturated). That check is
+fine in its original home, where it's applied only to the *accent* role among a logo's dominant pixel
+buckets — a narrower context where this edge case is rare. Applied broadly to arbitrary real website
+colours, it silently zeroed out three of five clients' correct answer. Replaced it with a proper
+HSL-based test (`rgbToHsl`, then `l >= 97 || l <= 3 || s < 15`) — true near-white, true near-black, or
+true low-saturation grey, regardless of which raw channel happens to be small. This is documented
+directly in the code comment at `isNearNeutralOrTransparent`, not just here, so the next person reading
+it sees the rejected alternative and why, not just the final answer.
+
+**One transient anomaly during verification, reported rather than smoothed over.** Mid-way through
+re-testing, one full run returned **empty results across all five clients for every field**, including
+`navBackground`/`h1Color`, which don't go through any of this task's new ranking code at all — a
+same-run regression that couldn't be explained by the colour-ranking logic. A standalone debug script
+against Princeton Dental alone, run immediately after, loaded normally (status 200, real title, 1 real
+`<h1>` found). Re-ran the full five-client verification a third time and got fully consistent, sensible
+results matching `1.1a`'s independently-gathered data. Treating the anomalous run as a one-off — most
+likely resource/timing contention from one browser instance opening five real remote pages back-to-back
+with no delay (the diagnostic script's own pattern, not `crawler.ts`'s, which uses a fresh context per
+crawl and a 400ms `REQUEST_DELAY_MS` between pages) — not a defect in the ranking code, which never
+touches `navBackground`/`h1Color`. Not discarding this as noise without saying so: it's a real, observed
+instance of exactly the kind of flakiness that makes automated crawling unreliable in the small, and
+it's not explained away, just not reproducible on demand.
+
+**Per-client result — which colour won, by what margin, and whether it's plausibly the site's real
+brand colour** (from the third, consistent run):
+
+| Client | `primaryButtonBg` winner | Margin | Plausible brand colour? |
+|---|---|---|---|
+| Princeton Dental | `rgb(78, 142, 154)` (teal) | 13 vs. next candidate's 1 | **Yes** — matches `1.1a`'s finding exactly; this is the site's `.btn` CTA colour used 13 times across the page |
+| BC Security | `rgb(2, 68, 112)` (navy) | 16 vs. nothing else surviving | **Yes** — the sole survivor, literally classed `bricks-background-primary` in the site's own markup |
+| Downseal Solutions | *(none — `[]`)* | — | **No candidate** — confirmed genuinely correct, not a filter miss (see below) |
+| Propell Property | `rgb(14, 30, 57)` (dark navy) | 4 vs. nothing else surviving, `inMain: true` | **Yes** — matches `1.1a`'s finding, classed `btnPrimary` |
+| Allen Evans Family Lawyers | `rgb(84, 201, 234)` (cyan) | 6 vs. nothing else surviving | **Yes** — matches `1.1a`; also the top `linkColor` candidate at 28 occurrences, strong cross-signal agreement |
+
+**4 of 5 sites now correctly surface their real brand colour as the top-ranked candidate, by a clear
+margin every time a second candidate existed at all.** This is a direct improvement over first-match,
+which got 1 of 5 right in `1.1a`.
+
+**Downseal specifically — does `borderColor` recover it? No, confirmed with a concrete reason, not just
+absence of a result.** Inspected the real buttons' full computed style directly
+(`borderColor`/`borderWidth`/`borderStyle`/`boxShadow`/`outlineColor`, not just background). The real
+"Work With Us"/"View Projects" buttons *do* have a real 2px solid border — but its colour is
+**white (`rgb(255,255,255)`) on dark-section instances and black (`rgb(0,0,0)`) on light-section
+instances**, matching each button's own text colour, not a distinct brand hue. This is a legitimate
+outline-button pattern where the border deliberately tracks the surrounding section's text colour for
+contrast, not a place the brand accent lives at all. `buttonBorderColor` correctly returns `[]` here —
+the neutral filter is working as intended, not failing to find something that's there. Whatever carries
+this site's actual brand identity (if anything does, on a page this
+neutral/monochrome-by-design) is not recoverable from button fill or button border; `1.2` would need a
+different source entirely for this specific client.
+
+**On the null-degradation path, noted again as instructed:** still unfired. Every real navigation this
+entry made succeeded (aside from the one anomalous run, which returned empty *values*, not a thrown
+exception — `computedStyles` itself was never `null` even then, just its sub-fields). The `try/catch`
+around `captureComputedStyles` in `crawler.ts:151-155` (unchanged from `1.1`) remains exercised only in
+reasoning, never in a real failure.
+
+**Files created/modified:**
+```
+$ git diff --stat -- lib/crawl/crawler.ts prisma/schema.prisma
+ lib/crawl/crawler.ts | 136 +++++++++++++++++++++++++++++++++++++++++++++------
+ prisma/schema.prisma |  17 +++++--
+ 2 files changed, 134 insertions(+), 19 deletions(-)
+```
+No new migration directory. Also exported `captureComputedStyles` (previously module-private) so this
+entry's verification script could call the real function directly rather than a reimplementation —
+kept exported, since a capture function being testable in isolation is a reasonable permanent state,
+not something worth reverting.
+
+**Verification command:**
+```
+npx prisma generate
+npx tsc --noEmit && npm run lint && npx vitest run
+(throwaway script, deleted after use: imports the real captureComputedStyles, runs it against each
+of the same five clients' real homepages, run three times total — once revealing the isNearNeutral
+bug, once anomalous, once clean)
+(second throwaway script, deleted after use: full computed-style dump of Downseal's real buttons,
+including borderColor/borderWidth/borderStyle/boxShadow/outlineColor, to answer the borderColor
+question with a concrete cause)
+```
+
+**Output:**
+```
+$ npx tsc --noEmit
+(no output — exit 0)
+$ npm run lint
+(no output — exit 0)
+$ npx vitest run
+ Test Files  7 passed (7)
+      Tests  61 passed | 1 todo (62)
+```
+Per-client results and the Downseal border dump are quoted in full above, not summarized.
+
+**Failures, retries and dead ends:**
+1. First implementation (copied `isNearNeutral` verbatim) silently zeroed out 3 of 5 clients' correct
+   answer — caught by re-running against real data, not by review. Fixed with a proper HSL-based check.
+2. One anomalous all-empty verification run, cause not conclusively identified, not reproduced on a
+   third attempt — reported above rather than quietly re-run until it looked clean and left
+   unmentioned.
+
+**Shortcuts taken:** none in the implementation itself. The verification scripts sample only what's
+needed to answer the task's specific questions (per-client winner + margin, Downseal's border
+specifically) rather than re-dumping every raw element the way `1.1a` did — `1.1a`'s exhaustive dump
+already exists and didn't need repeating in full here.
+
+**Deviations from the task spec:** `navBackground`/`h1Color` left unranked — see the scope decision
+above, stated plainly rather than silently expanded or silently ignored.
+
+**Not run / not verified:**
+- Whether a human would agree these are the "right" colours by eye (not just plausible by inspection
+  of the matched markup) — not independently checked against a screenshot or the live rendered page for
+  any of the five.
+- The cause of the one anomalous run — reported, not root-caused.
+- Whether `buttonBorderColor` recovers a useful signal on *any* real site, having only confirmed it does
+  not for Downseal specifically (none of the other four clients had a background-neutral primary button
+  to test the border path against in the first place).
+- The null-degradation path, per above.
+
+**Confidence:** High on the implementation and the per-client results (real code, real sites, real
+output, cross-checked against `1.1a`'s independent data and largely matching). Medium on the one
+anomalous run's explanation, which is a reasonable inference, not a confirmed root cause.
+
+**Next task:** `1.2` — rework brand colour source ranking, the actual consumer of this data. Awaiting
+the human's go-ahead — not started this session.
+---
+
+---
 
 # PART E — For the human reviewing this log
 
