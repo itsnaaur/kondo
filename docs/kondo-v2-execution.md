@@ -7847,6 +7847,173 @@ was caught by the tests actually failing, not overlooked.
 ---
 
 ---
+### PHASE-2-VERIFY — fresh re-verification of every Phase 2 item, not a trust-the-log pass
+**Timestamp:** 2026-08-18
+**Git SHA at start:** 54c89c4
+**Status:** DONE-VERIFIED
+
+Re-ran every task's verification directly against the current code, plus a fresh full
+`vitest`/`tsc`/`lint`/`build` pass, rather than citing prior log entries as sufficient — same
+discipline as the original `PHASE-0-VERIFY`. **This is not the phase sign-off** — that's
+explicitly the human's, per Part D's own rules, and no sign-off block appears below.
+
+**2.1 — `DONE-VERIFIED`, reconfirmed fresh.**
+```
+$ npx tsx lib/design/build/validate-fonts.ts --source ../ui-ux-pro-max-skill
+Loaded 1934 families from .../ui-ux-pro-max-skill/src/ui-ux-pro-max/data/google-fonts.csv.
+Checked 61 pairings, 88 distinct families referenced, 414 family/weight checks.
+
+SUMMARY: 88/88 families resolved, 414/414 weight/style checks passed.
+
+$ node -e "const p=require('./lib/design/data/typography.json'); console.log(p.length, p.filter(x=>x.singleFamily).length)"
+61 13
+```
+Identical to `2.1`'s original result — 61 imported rows, 13 tagged single-family, 88/88 families
+and 414/414 weight checks still pass against a fresh read of `google-fonts.csv` from the pinned
+clone.
+
+**2.2 — `DONE-VERIFIED`, reconfirmed fresh.**
+```
+$ npx vitest run lib/design/resolve-typography.test.ts
+ Test Files  1 passed (1)
+      Tests  42 passed (42)
+```
+Identical to `2.2`'s original result — all 100-repeat determinism checks and all 28 mood/tier
+coverage cases still pass unchanged.
+
+**2.3 — `DONE-VERIFIED`, reconfirmed fresh, with the same visual-verification caveat still
+open (see `2.3-CARRY-FORWARD`, not re-litigated here).**
+```
+$ node -e "const b=require('./lib/design/data/style-bundles.json'); console.log(b.length, b.map(x=>x.id).join(', '), b.every(x=>x.mode==='light'), b.some(x=>JSON.stringify(x.tokens).match(/#[0-9a-fA-F]{6}/)))"
+6 crisp-formal, warm-approachable, trusted-established, clinical-precise, grounded-property, structural-industrial true false
+```
+Still 6 bundles, still all `mode: "light"`, still zero colour literals anywhere in any bundle's
+`tokens`. The original verification harness (`scripts/_tmp-2.3-render-bundles.ts`) was a
+throwaway script, deleted after use, so it can't be literally re-run here — but `2.5`'s golden
+tests now provide a permanent, code-level successor check on exactly the values that harness
+verified once, ad hoc (see `2.5`'s own re-check below). The screenshot gap `2.3-CARRY-FORWARD`
+recorded is still open — not re-verified as resolved, because it isn't.
+
+**2.4 — `DONE-VERIFIED`, reconfirmed fresh** (the exact done-when grep, re-run byte-for-byte):
+```
+$ grep -rn "font-family\|#[0-9a-fA-F]\{6\}" lib/templates/
+lib/templates/atlas/styles.ts:45:  font-family: var(--font-body);
+lib/templates/atlas/styles.ts:67:  font-family: var(--font-heading);
+lib/templates/ledger/styles.ts:46:  font-family: var(--font-body);
+lib/templates/ledger/styles.ts:87:  font-family: var(--font-heading);
+lib/templates/ledger/styles.ts:467:  font-family: var(--font-heading);
+lib/templates/render.test.ts:21:  brandColors: [{ hex: "#1c3d5a", role: "primary" }],
+lib/templates/section-editor.test.ts:27:  brandColors: [{ hex: "#1c3d5a", role: "primary" }],
+lib/templates/shell.ts:23:    color: #9ca3af;
+lib/templates/shell.ts:24:    background: #111827;
+lib/templates/showcase/styles.ts:45:  font-family: var(--font-body);
+lib/templates/showcase/styles.ts:80:  font-family: var(--font-heading);
+```
+Identical, line-for-line, to `2.4`'s original output — same two named exception categories, same
+count, nothing drifted since.
+
+**2.5 — `DONE-VERIFIED`, reconfirmed fresh:**
+```
+$ npx vitest run lib/design/
+ Test Files  3 passed (3)
+      Tests  91 passed (91)
+```
+Identical to `2.5`'s original result — all 35 golden values (28 mood/tier + 6 bundles + 1 default)
+plus the separate blur-current-value check and determinism test still pass unchanged.
+
+**Full fresh `vitest`/`tsc`/`lint`/`build` pass** (all four run just now, not quoted from any
+earlier entry):
+```
+$ npx vitest run
+ Test Files  11 passed (11)
+      Tests  170 passed | 1 todo (171)
+
+$ npx tsc --noEmit
+(exit 0)
+
+$ npm run lint
+(exit 0)
+
+$ npm run build
+✓ Generating static pages using 7 workers (4/4) in 389ms
+(exit 0, full route list unchanged: /, /clients/[id], /clients/new, /login, /mfa, /p/[slug],
+/trash, plus API routes — nothing added or removed by Phase 2, as expected: this phase touched
+only lib/design/ and lib/templates/, no routes)
+```
+
+**Test count against phase start.** Phase 1 ended (confirmed from `1.10`'s and the Phase 1
+sign-off's own pasted output, both reading identically) at **9 test files, 89 tests passing plus
+1 todo (90)**. Phase 2 ends at **11 test files, 170 tests passing plus 1 todo (171)** — **+2 test
+files, +81 tests**, both new files real and isolated to confirm the arithmetic, not just taken on
+faith: `resolve-typography.test.ts` alone is **42** tests (added in `2.2`; `89 + 42 = 131`, matching
+`2.2`'s own pasted full-suite result exactly) and `resolve-tokens.test.ts` alone is **39** tests
+(added in `2.5`; `131 + 39 = 170`, matching this entry's own fresh full-suite run above).
+`lib/design/`'s own 91-test total is these two files (42 + 39 = 81) plus `contrast.test.ts`'s
+pre-existing 10 (from Task `1.3`, not new this phase) — `81 + 10 = 91`, confirmed by running each
+file in isolation just now, not derived by subtraction from a total and assumed correct (an
+earlier draft of this exact paragraph did exactly that and got `resolve-tokens.test.ts`'s count
+wrong — `91 − 42 = 49`, not the real, isolated **39** — caught by actually running the file alone
+before this was written down, not left as an unchecked arithmetic claim). No test was removed,
+skipped, or weakened to reach this number — the 1 pre-existing `test.todo` (`0.1c`'s
+deliberately-open `validateShape`-retry fixture gap) is still visibly open, not silently resolved
+or dropped.
+
+**Every shortcut and stub logged during this phase, collected into one list** (scanned every
+Phase 2 entry's "Shortcuts taken" section, plus `2.3-CARRY-FORWARD`'s own content since it
+carries two real open items with no "Shortcuts taken" heading of its own; "none" entries
+omitted, only real items listed):
+
+| Entry | Shortcut / stub |
+|---|---|
+| `2.1` | `moodKeywords`/`bestFor` imported as single strings, not split into arrays — `2.2`'s resolver (built the same session) ended up not needing this, since it matches on a small hand-curated `MOOD_SIGNAL_PRIORITY` vocabulary rather than parsing the corpus's own free-text keywords, but a future consumer wanting individual-keyword matching would still need to parse the string itself. |
+| `2.2` | `MOOD_SIGNAL_PRIORITY`'s specific order (`professional` > `traditional` > `elegant` > `bold` > `friendly` > `modern` > `minimal`) is a stated judgement call — "what a business literally sells itself as should outrank a softer atmospheric adjective" — not derived from the corpus or any build-plan rule. |
+| `2.3` | The verification harness's `!important` CSS override is a demonstration mechanism proving the six bundles' token *values* render sensibly against real templates, not the production stylesheet-generation system (build plan §6.4, still unbuilt) — disclosed in the harness's own header so this task's real output (`style-bundles.json`) isn't mistaken for having also shipped production wiring. |
+| `2.3-CARRY-FORWARD` | Two real, still-open items, not resolved by anything in this phase: (1) visual review of the six style bundles is outstanding — no screenshot was ever obtained this session (Browser pane unavailable, retried five times across two tabs and two static-server ports); computed-CSS verification is a narrower claim than "looked at it and it reads well." (2) All 6 bundles declare `mode: "light"`, so Task `3.5`'s mode-coherence assertion (the mechanism meant to prevent the optometry bug) has no bundle that can exercise its failing branch yet — needs either a dark-capable bundle (which itself needs `buildPalette()` to support a dark base, not yet scoped) or a synthetic fixture in `3.5`'s own test suite. |
+| `2.4` | The generic font fallback (`ui-sans-serif, system-ui, -apple-system, sans-serif`) is used for both `--font-body` and `--font-heading`, not a serif-specific fallback for the heading role — a deliberate simplification (a resolved heading font can be sans just as easily as serif; the pre-`2.4` serif fallback only existed because Newsreader itself was always serif) rather than threading `typography.json`'s `Category` column through for a case that only matters if a Google Font fails to load. Separately, and not a shortcut so much as a disclosed real consequence: wiring `--surface-blur` for real makes Showcase's frosted nav a no-op under all 6 current bundles (all declare `blur: "0px"`) — same root cause as the `2.3-CARRY-FORWARD` mode-coherence gap, a `2.3` bundle-authoring gap surfacing through correctly-built `2.4` plumbing, not a `2.4` defect. |
+| `2.5` | No new shortcut in `2.5` itself — its one disclosed boundary (`blur` excluded from every golden via `toMatchObject`, no 168-entry mood×tier×bundle cross-product) restates the same `2.3`/`2.4` gap and a deliberate scope decision already covered above, not a new one. |
+
+Nothing found across the phase that was stubbed, mocked, or hardcoded and left **undisclosed** —
+every item above was already flagged in its own entry (or `2.3-CARRY-FORWARD`) at the time this
+phase produced it; this is a consolidation, not a discovery of anything new.
+
+**Files created/modified:** none — this entry re-runs verification commands and reads existing
+files; no application code touched.
+
+**Verification command:** all commands are pasted inline above, in the section they verify,
+rather than batched separately — same convention as the original `PHASE-0-VERIFY`.
+
+**Output:** see above, inline per task.
+
+**Failures, retries and dead ends:** one, in this entry's own writing, not in any Phase 2 task —
+the first draft of the "Test count against phase start" paragraph above computed
+`resolve-tokens.test.ts`'s count as `91 − 42 = 49` by subtraction instead of running the file in
+isolation, and got it wrong (the real, isolated count is 39; `contrast.test.ts`'s pre-existing 10
+tests were the missing piece). Caught by actually isolating each file with its own `vitest run`
+call before finalising the paragraph, not left as an unchecked derived number — fixed in place,
+documented above rather than quietly corrected. Every fresh command re-run against the actual
+Phase 2 tasks (2.1 through 2.5) reproduced its original result exactly — no drift found anywhere
+in the phase's actual verification claims, only in this entry's own first-pass arithmetic.
+
+**Shortcuts taken:** none in this entry itself — the table above is a report of shortcuts taken
+*during the phase*, not one taken while writing this entry.
+
+**Deviations from the task spec:** none.
+
+**Not run / not verified:** the two `2.3-CARRY-FORWARD` items remain genuinely unverifiable from
+this session under any circumstance, fresh or otherwise — visual review needs a working Browser
+pane (not this session's to fix), and the mode-coherence gap needs either a dark-capable palette
+or a `3.5`-authored synthetic fixture, neither of which exists yet.
+
+**Confidence:** High on everything re-verified — every one of the five tasks' checks, plus the
+full `vitest`/`tsc`/`lint`/`build` pass, produced identical, real, freshly-executed output to what
+its own original entry reported. Nothing in this phase's verification story depends on trusting
+the log instead of the code.
+
+**Next task:** not specified — awaiting direction. No sign-off block written here, per instruction
+— that belongs to the human, same as Phase 1.
+---
+
+---
 
 # PART E — For the human reviewing this log
 
