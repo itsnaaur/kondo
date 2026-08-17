@@ -8276,6 +8276,42 @@ an inference, stated as one, not a substitute for the human's own planned verifi
 ---
 
 ---
+### 3.0-NOTE — `/p/[slug]`'s `script-src 'self'` becomes load-bearing in `3.4`; Part C's dependency is satisfied
+**Timestamp:** 2026-08-18
+**Git SHA at start:** 4a94f74
+**Status:** NOTE — no code change, nothing to verify by command.
+
+**Not a correction to `3.0`** — that entry's result stands. Recording what `3.0` actually buys,
+stated plainly rather than left implicit.
+
+Today, `/p/[slug]` serves only hand-authored template HTML — `script-src 'self'`, no
+`'unsafe-inline'`, is real but not yet doing load-bearing work, since nothing untrusted reaches
+that route to begin with. Part C's `3.4` note (line 311 of this file) names the actual
+dependency: **after `3.4`, the entire page at `/p/[slug]` is model-authored and served to an
+anonymous public visitor.** From that point on, `script-src 'self'` (no nonce, no
+`'unsafe-inline'`, confirmed in `3.0`) is what stands between a validator gap in `3.4`'s own
+output-checking step and an inline `<script>` an attacker got the model to emit actually
+executing in a prospect's browser. `3.4`'s own validation (build plan §6.5: parses as
+well-formed HTML, no `<script>`/inline handlers/`javascript:`/`data:` URIs) is the first line of
+defense; this CSP is the second, and per Part C's own framing it's the one that has to already be
+in place before `3.4` ships, not added after.
+
+**Part C's hard dependency is satisfied. `3.4` is unblocked.** `'unsafe-inline'` is confirmed
+absent from `/p/[slug]`'s `script-src` (`3.0`'s own `curl -I` output). Whoever builds `3.4` should
+still treat this as a floor, not a substitute for the validator actually working — a CSP with no
+`'unsafe-inline'` blocks *inline* script execution specifically; it does nothing about a
+malicious `<img onerror=...>` handler or a `javascript:` URI the HTML-parsing validation step is
+supposed to catch on its own.
+
+**Files created/modified:** none.
+
+**Confidence:** High — restates `3.0`'s own already-verified `curl -I` result and Part C's own
+already-recorded dependency; no new claim made here beyond connecting the two explicitly.
+
+**Next task:** `3.1` — Lift and extend `suitability.ts`, begun immediately after.
+---
+
+---
 
 # PART E — For the human reviewing this log
 
