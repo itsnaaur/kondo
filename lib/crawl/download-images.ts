@@ -5,11 +5,13 @@ import { AssetType, type Asset } from "@/app/generated/prisma/client";
 import type { PageExtraction } from "./types";
 import { checkUrlIsSafe } from "@/lib/security/ssrf";
 import { isJunkByUrlOrText } from "@/lib/content/filter-junk-images";
+import { computeImageMetrics, type ImageMetrics } from "@/lib/content/image-metrics";
 
 type AssetTypeValue = (typeof AssetType)[keyof typeof AssetType];
 
 export type DownloadedAsset = { asset: Asset; buffer: Buffer };
-export type DownloadedCandidate = DownloadedAsset & { fromHomepage: boolean; nearbyText: string };
+export type DownloadedCandidate = DownloadedAsset & { fromHomepage: boolean; nearbyText: string; metrics: ImageMetrics };
+export type DownloadedLogo = DownloadedAsset & { metrics: ImageMetrics };
 
 // Total across every source page combined, not per-page — previously this was "5 images
 // from the homepage only," which meant a real hero photo living on an /about or
@@ -94,6 +96,22 @@ function pickBestLogoCandidate(pages: PageExtraction[]): string | null {
   return pages[0]?.favicon ?? pages[0]?.ogImage ?? null;
 }
 
+// Task 1.7's crossPageFrequency metric for an ordinary content image — how many distinct
+// crawled pages (allPages, not just the ones selected as content-analysis candidates)
+// reference this exact source URL. Same "count across every crawled page" scope as
+// pickBestLogoCandidate above, applied to a single URL rather than tallying every candidate
+// at once.
+function countPagesWithImageUrl(url: string, pages: PageExtraction[]): number {
+  return pages.filter((p) => p.images.some((img) => img.src === url)).length;
+}
+
+// Same metric for the logo specifically — logoCandidate is a separate field from images (see
+// PageExtraction), so this counts pages whose logoCandidate matches, mirroring
+// pickBestLogoCandidate's own counting rather than searching the images array.
+function countPagesWithLogoUrl(url: string, pages: PageExtraction[]): number {
+  return pages.filter((p) => p.logoCandidate === url).length;
+}
+
 async function saveAsset(
   clientId: string,
   type: AssetTypeValue,
@@ -171,7 +189,7 @@ export async function downloadCrawlImages(
   clientId: string,
   allPages: PageExtraction[],
   candidateSourcePages: PageExtraction[]
-): Promise<{ logo: DownloadedAsset | null; candidates: DownloadedCandidate[] }> {
+): Promise<{ logo: DownloadedLogo | null; candidates: DownloadedCandidate[] }> {
   // Respect a manually-uploaded logo (or one from a prior analysis — assets are
   // append-only, see lib/storage/upload-asset.ts) instead of overriding it with a guess.
   const existingLogo = await prisma.asset.findFirst({
@@ -179,33 +197,50 @@ export async function downloadCrawlImages(
     orderBy: { createdAt: "desc" },
   });
 
-  let logo: DownloadedAsset | null = null;
+  let logo: DownloadedLogo | null = null;
   if (existingLogo) {
-    logo = await fetchExistingAssetBytes(existingLogo);
+    const fetched = await fetchExistingAssetBytes(existingLogo);
+    if (fetched) {
+      // crossPageFrequency is 0 here, not "unknown" — Asset.url is our own Storage URL by
+      // this point, not the site's original logoCandidate URL, so there is nothing in this
+      // crawl's allPages to match it against. Not a gap in this crawl's data, a real
+      // property of a reused asset: pagePosition is null for the same "not sourced from a
+      // single page position" reason every logo gets.
+      const metrics = await computeImageMetrics(fetched.buffer, { pagePosition: null, crossPageFrequency: 0 });
+      logo = { ...fetched, metrics };
+    }
   } else {
     const logoUrl = pickBestLogoCandidate(allPages);
     if (logoUrl) {
-      logo = await saveAsset(clientId, AssetType.LOGO, logoUrl, "logo-from-crawl");
+      const saved = await saveAsset(clientId, AssetType.LOGO, logoUrl, "logo-from-crawl");
+      if (saved) {
+        const metrics = await computeImageMetrics(saved.buffer, {
+          pagePosition: null,
+          crossPageFrequency: countPagesWithLogoUrl(logoUrl, allPages),
+        });
+        logo = { ...saved, metrics };
+      }
     }
   }
 
   const homepageUrl = candidateSourcePages[0]?.url;
   const seen = new Set<string>();
-  const orderedCandidateUrls: { url: string; fromHomepage: boolean; nearbyText: string }[] = [];
+  const orderedCandidateUrls: { url: string; fromHomepage: boolean; nearbyText: string; pagePosition: number }[] = [];
   for (const page of candidateSourcePages) {
-    for (const img of page.images) {
-      if (img.src.startsWith("data:") || seen.has(img.src)) continue;
+    page.images.forEach((img, pageIndex) => {
+      if (orderedCandidateUrls.length >= MAX_CANDIDATE_IMAGES) return;
+      if (img.src.startsWith("data:") || seen.has(img.src)) return;
       seen.add(img.src);
       // Rejected before download — a cookie-consent icon or tracking pixel costs a wasted
       // Supabase upload if this check runs after, not before. See filter-junk-images.ts.
-      if (isJunkByUrlOrText(img.src, img.nearbyText)) continue;
+      if (isJunkByUrlOrText(img.src, img.nearbyText)) return;
       orderedCandidateUrls.push({
         url: img.src,
         fromHomepage: page.url === homepageUrl,
         nearbyText: img.nearbyText,
+        pagePosition: pageIndex,
       });
-      if (orderedCandidateUrls.length >= MAX_CANDIDATE_IMAGES) break;
-    }
+    });
     if (orderedCandidateUrls.length >= MAX_CANDIDATE_IMAGES) break;
   }
 
@@ -223,11 +258,15 @@ export async function downloadCrawlImages(
 
   const candidates: DownloadedCandidate[] = [];
   for (let i = 0; i < orderedCandidateUrls.length; i++) {
-    const { url, fromHomepage, nearbyText } = orderedCandidateUrls[i];
+    const { url, fromHomepage, nearbyText, pagePosition } = orderedCandidateUrls[i];
     const saved = await saveAsset(clientId, AssetType.IMAGE, url, `site-image-${i + 1}`);
     if (!saved || usedAssetIds.has(saved.asset.id)) continue;
     usedAssetIds.add(saved.asset.id);
-    candidates.push({ ...saved, fromHomepage, nearbyText });
+    const metrics = await computeImageMetrics(saved.buffer, {
+      pagePosition,
+      crossPageFrequency: countPagesWithImageUrl(url, allPages),
+    });
+    candidates.push({ ...saved, fromHomepage, nearbyText, metrics });
   }
 
   return { logo, candidates };

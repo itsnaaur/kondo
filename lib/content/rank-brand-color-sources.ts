@@ -31,8 +31,13 @@ export type BrandColorRankingResult = {
 // couple these two areas over. Same formula, same reasoning — see crawler.ts's own comment
 // on why min-channel<20 (the original lib/content/extract-colors.ts isNearNeutral rule) is
 // wrong for arbitrary saturated brand colours.
+//
+// Exported (Task 1.7) so lib/content/image-metrics.ts can reuse this corrected check and
+// rgbToHsl directly, rather than adding a third copy of the same ~15 lines — this file is
+// already the lib/content-side canonical copy, so a second lib/content consumer importing it
+// doesn't cross the lib/crawl boundary this comment originally exists to explain avoiding.
 
-function rgbToHsl(r: number, g: number, b: number): { h: number; s: number; l: number } {
+export function rgbToHsl(r: number, g: number, b: number): { h: number; s: number; l: number } {
   const rn = r / 255, gn = g / 255, bn = b / 255;
   const max = Math.max(rn, gn, bn), min = Math.min(rn, gn, bn);
   const l = (max + min) / 2;
@@ -47,7 +52,7 @@ function rgbToHsl(r: number, g: number, b: number): { h: number; s: number; l: n
   return { h: h * 360, s: s * 100, l: l * 100 };
 }
 
-function isNearNeutralHsl(r: number, g: number, b: number): boolean {
+export function isNearNeutralHsl(r: number, g: number, b: number): boolean {
   const { s, l } = rgbToHsl(r, g, b);
   // l >= 90, not 97 — found live against Downseal Solutions while verifying this task: its
   // theme's near-white page background, rgb(246, 243, 238), is l~=95%/s~=31%, so it
@@ -218,7 +223,12 @@ function quantize(v: number): number {
   return Math.min(255, Math.round(v / LOGO_BUCKET_SIZE) * LOGO_BUCKET_SIZE);
 }
 
-async function bucketImageColors(buffer: Buffer): Promise<{ r: number; g: number; b: number; count: number }[]> {
+export type PixelBucket = { r: number; g: number; b: number; count: number };
+
+// Exported (Task 1.7) — image-metrics.ts reuses this exact bucketing (resize+quantize) for
+// colour entropy and its own saturation-filtered dominant-colour metric, rather than a second
+// pixel-sampling implementation with possibly-different resize/bucket parameters.
+export async function bucketImageColors(buffer: Buffer): Promise<PixelBucket[]> {
   const { data, info } = await sharp(buffer)
     .resize(LOGO_SAMPLE_SIZE, LOGO_SAMPLE_SIZE, { fit: "cover" })
     .removeAlpha()
