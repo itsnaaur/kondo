@@ -5126,6 +5126,149 @@ started this session.
 ---
 
 ---
+### 1.6b — retarget the deepening loop from white to mist
+**Timestamp:** 2026-08-17
+**Git SHA at start:** b873745
+**Status:** DONE-VERIFIED — result is 191/191, exactly the expected outcome, no residual failures
+to report.
+
+**What I did:** one change to `buildPalette`'s existing AA-deepening `while` loop
+(`lib/content/normalize-brand-colors.ts`) — its target background, from pure white
+(`luminance` argument `1`) to `mist` (`luminance(hue, MIST_S, MIST_L)`, `MIST_S=24`/`MIST_L=97`
+pulled out as named constants shared with `mist`'s own `hsl(hue, MIST_S, MIST_L)` in the return
+statement, so the two can't silently drift apart). Structure and step size (`accentL -= 2`, floor
+`accentL > 24`) are byte-for-byte unchanged, per instruction.
+
+**Which surface is genuinely lightest, and why `mist` specifically, stated as asked:** `paper`
+(pure white, `#ffffff`) is literally lighter than `mist` (`L=97` vs `L=100`) — but grepping all
+three shipped templates' CSS again confirmed no template renders accent-coloured *text* directly on
+`paper`; the two real, confirmed usages (`.at-hero__stats dt`, `.at-proc__no` — both
+`color: var(--accent)` inside a `background: var(--mist)` context) are on `mist`. `accentSoft`
+(`L=95`) is darker than `mist`, so among surfaces with confirmed accent-as-text usage, `mist` is the
+lightest. Deepening against `paper` (a background nothing actually uses for this) would have been
+solving a problem that doesn't occur in the app; deepening against `mist` targets the real one.
+
+**Checked, not assumed, that this couldn't make the already-passing `accentInk`-on-`accent` pair
+worse.** Computed `luminance(hue, 24, 97)` across all 360 integer hues: **maximum 0.9466, always
+strictly below white's 1.0.** Since contrast ratio decreases monotonically as the lighter colour's
+luminance decreases, requiring `contrast(accent, mist) >= 4.5` is, for every hue, at least as strict
+as the old `contrast(accent, white) >= 4.5` — so any `accentL` that now clears the mist bar was
+already guaranteed to clear the old white bar too, with equal or more margin. `accentInk`'s own
+white-vs-dark-ink decision (a separate, correct check — "would white text actually read on this
+fill") was left targeting white, unchanged, since that's a genuinely different, correct question
+from what the loop's target is.
+
+**Result — the actual done-when:**
+```
+$ npx tsx lib/design/build/validate-contrast.ts
+Checked 191 palettes, 12 pairs each (2292 total checks), AA minimum 4.5:1.
+
+SUMMARY: 191/191 palettes fully AA-passing across all 12 checked pairs.
+```
+Exit code 0. **191/191 — the expected outcome, no residual failures.** Every hue the deepening loop
+covers (all 41 previously-failing primaries, confirmed none are in the `isYellowish` branch that
+skips the loop — checked directly, not assumed) was able to reach the required contrast within the
+loop's existing floor (`accentL > 24`); nothing hit the floor without passing.
+
+**How far `accent` actually moved — checked across all 191, not just a few, since the instruction
+asked to see the real visual consequence before Phase 2 builds on it:**
+```
+41 palettes changed (exactly the 41 that previously failed accent-on-mist — the same set, confirmed
+by diffing IDs), 150 unchanged. Every single changed palette moved by exactly -2 lightness points
+(one loop iteration) — no palette needed two or more additional steps. Full list, not a sample:
+
+#3   #059669  L 33 -> 31   #58  #0891B2  L 37 -> 35   #114 #D97706  L 39 -> 37
+#8   #0891B2  L 37 -> 35   #59  #15803D  L 33 -> 31   #117 #D97706  L 39 -> 37
+#14  #F59E0B  L 37 -> 35   #62  #15803D  L 33 -> 31   #122 #15803D  L 33 -> 31
+#25  #0891B2  L 37 -> 35   #72  #0369A1  L 41 -> 39   #123 #D97706  L 39 -> 37
+#29  #0369A1  L 41 -> 39   #80  #00FF41  L 33 -> 31   #124 #15803D  L 33 -> 31
+#31  #059669  L 33 -> 31   #87  #00FF41  L 33 -> 31   #134 #15803D  L 33 -> 31
+#41  #0369A1  L 41 -> 39   #90  #059669  L 33 -> 31   #143 #059669  L 33 -> 31
+#44  #0891B2  L 37 -> 35   #94  #D97706  L 39 -> 37   #145 #0284C7  L 41 -> 39
+#47  #0369A1  L 41 -> 39   #99  #0284C7  L 41 -> 39   #146 #0284C7  L 41 -> 39
+#50  #15803D  L 33 -> 31   #104 #0284C7  L 41 -> 39   #151 #22C55E  L 33 -> 31
+#54  #F59E0B  L 37 -> 35   #106 #059669  L 33 -> 31   #165 #059669  L 33 -> 31
+#57  #0369A1  L 41 -> 39   #112 #059669  L 33 -> 31   #166 #16A34A  L 33 -> 31
+                                                        #170 #15803D  L 33 -> 31
+                                                        #173 #D97706  L 39 -> 37
+                                                        #182 #0284C7  L 41 -> 39
+                                                        #187 #F59E0B  L 37 -> 35
+                                                        #190 #0891B2  L 37 -> 35
+```
+**This is a small, uniform, one-step shift, not a blanket darkening.** The old default `accentL`
+(41, or 32 for yellowish hues — untouched, none of the 41 affected primaries are yellowish) was
+already close enough to the mist bar that one extra `-2` step closed the gap for every single
+affected hue; none needed the loop to run further or hit its floor. Worth seeing before Phase 2, as
+instructed, but not a finding that changes the palette's overall character — accents get a couple of
+points darker on roughly a fifth of real primaries (41/191 ≈ 21%), not a systemic shift.
+
+**Golden test regenerated, not silently updated — exactly as instructed.** `greenClinic`'s (`#059669`)
+`accent` golden value changed from `"hsl(161 58% 33%)"` to `"hsl(161 58% 31%)"`, matching the real
+`-2` shift measured above. Every other field, for every one of the 6 fixtures, was re-run and
+diffed against the prior golden values first — confirmed unchanged — before touching anything, so
+only the one legitimately-changed value was edited. Both the shared `GOLDEN` comment and the
+`greenClinic` fixture's own comment now state plainly that this value was regenerated in `1.6b` and
+why, with a pointer back to this entry — not left to look like an untouched original golden.
+
+**Files created/modified:**
+```
+$ git status --porcelain
+ M lib/content/normalize-brand-colors.test.ts
+ M lib/content/normalize-brand-colors.ts
+```
+
+**Verification command:**
+```
+npx tsc --noEmit && npm run lint && npx vitest run
+npx tsx lib/design/build/validate-contrast.ts
+```
+
+**Output:**
+```
+$ npx tsc --noEmit
+(exit 0)
+$ npm run lint
+(exit 0)
+$ npx vitest run
+ Test Files  9 passed (9)
+      Tests  89 passed | 1 todo (90)
+$ npx tsx lib/design/build/validate-contrast.ts
+Checked 191 palettes, 12 pairs each (2292 total checks), AA minimum 4.5:1.
+
+SUMMARY: 191/191 palettes fully AA-passing across all 12 checked pairs.
+```
+
+**Failures, retries and dead ends:** none in the implementation — the fix worked on the first
+attempt. The two checks the task required before reporting (verifying mist's luminance is always
+below white's; measuring the real accent-lightness deltas across all 191, not a sample) were both
+done as real computations, not assumed true from the reasoning alone.
+
+**Shortcuts taken:** none.
+
+**Deviations from the task spec:** none — target changed, structure and step size untouched, gate
+re-run, golden regenerated and disclosed, movement reported across the full corpus rather than "a
+few" palettes as a stronger version of what was asked.
+
+**Not run / not verified:**
+- Whether a *visual* review (not just the numeric contrast check) of the ~41 slightly-darker
+  accents looks acceptable — out of this task's scope, which was the contrast gate specifically; a
+  2-point lightness shift is small but this entry doesn't claim to have eyeballed rendered pages.
+- Whether `MIST_S`/`MIST_L` should themselves be reconsidered (e.g., is 97 the right lightness for
+  `mist`) — not questioned here; this task retargeted the loop to the *existing* `mist` definition,
+  not revisited what `mist` itself should be.
+
+**Confidence:** High — every claim is backed by a real computation: the mist-luminance-below-white
+check ran across all 360 hues, not a spot check; the accent-movement report ran across all 191 real
+corpus primaries, not extrapolated from a sample; the 191/191 result is the gate's own real output,
+and the affected-palette set was diffed against `1.6`'s own recorded failures to confirm it's the
+identical set, not just the same count.
+
+**Next task:** awaiting the human's direction. Both contrast-gate root causes from `1.6` are now
+resolved (`1.6a` fixed `accentInk`-on-`secondary`; `1.6b` fixed `accent`-on-`mist`) — the corpus is
+clean at 191/191. Not started this session.
+---
+
+---
 
 # PART E — For the human reviewing this log
 
