@@ -7468,6 +7468,56 @@ question needs eyes on a real render, which this session could not provide.
 ---
 
 ---
+### 2.3-CARRY-FORWARD — visual review outstanding; mode-coherence check has no failing case to exercise
+**Timestamp:** 2026-08-17
+**Git SHA at start:** b887aa6
+**Status:** NOTE — no code change, nothing to verify by command; flagging for the human and for
+Phase 3.
+
+**Not a correction to `2.3`** — that entry's result and reasoning are unchanged: 6 bundles
+authored, every declared token confirmed reaching the DOM at its exact authored value via real
+computed CSS, no console errors, real content on every render. Both points below were already
+named as open in `2.3`'s own entry; recorded here as standalone carry-forwards per instruction,
+not restated because the original entry was wrong.
+
+**1. Visual review of the six bundles is outstanding, not done.** `2.3`'s own "Not run / not
+verified" section already said this plainly — the Browser pane would not produce a screenshot
+that session (retried across two tabs, two static-server ports, five attempts total), so
+verification fell back to `getComputedStyle` reads: proof every token reached the DOM at the
+right value, not proof any of it reads well. The human has said they'll look at the six rendered
+files themselves. **Phase 2 must not be signed off as including visual verification of the style
+bundles — it doesn't, yet.** This doesn't block `2.4` (token plumbing doesn't depend on whether
+the bundle *numbers* are good, only on the plumbing existing), so proceeding to `2.4` is correct;
+signing off Phase 2 without this check landing first would not be.
+
+**2. All 6 bundles declare `mode: "light"` — so Task 3.5's mode-coherence assertion (`palette
+lightness matches the style bundle's declared mode`, build plan §6.5, the exact mechanism meant
+to prevent the optometry bug: a dark-mode dev-tool palette shipped to an eye clinic and reported
+as success) currently has no bundle that can exercise its failing branch.** `2.3`'s own entry
+already stated why every bundle is `light`: `normalize-brand-colors.ts`'s `buildPalette()` always
+derives `paper: "#ffffff"` as the base surface, so there is no dark-capable palette in this
+codebase for a `dark`/`either` bundle to be honestly tested against yet. The risk this leaves: a
+validator that has never once seen its own assertion fail is exactly the "computed but never
+asserted" shape build plan §6.5 calls out as the original bug — except here the gap is one level
+earlier (no failing input exists to assert against, not an unasserted computation). **Carry-forward
+for whoever builds `3.5`: either (a) a genuinely dark-capable bundle needs to exist by then, which
+itself requires `buildPalette()` to support a dark base first (a real, not-yet-scoped change to
+`normalize-brand-colors.ts`), or (b) `3.5`'s own test suite needs a synthetic fixture — a
+hand-constructed dark palette paired against one of these 6 light bundles — specifically to prove
+the mismatch assertion actually fires and doesn't just silently pass because it was never given a
+mismatched pair.** Not resolved here; a decision for `3.5`, stated as a real risk rather than left
+implicit in "all bundles are light" and hoped to be noticed later.
+
+**Files created/modified:** none.
+
+**Confidence:** High — both points restate what `2.3`'s own entry already established as real and
+verified (the screenshot failure was retried and reproducible; the light-only mode declaration is
+a direct, checked consequence of `buildPalette()`'s current behaviour, not a guess).
+
+**Next task:** `2.4` — Token plumbing, begun immediately after.
+---
+
+---
 
 # PART E — For the human reviewing this log
 
