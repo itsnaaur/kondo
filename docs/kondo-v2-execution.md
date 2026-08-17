@@ -4042,6 +4042,202 @@ other direction. Not started this session, per instruction.
 ---
 
 ---
+### 1.2b — lexical exclusion, form-landmark exclusion, weak-winner abstention
+**Timestamp:** 2026-08-17
+**Git SHA at start:** f0097c3
+**Status:** DONE-VERIFIED — implemented as specified; done-when re-run below did **not** fully match
+the expected outcome for Princeton Dental, reported honestly rather than patched to match.
+
+**What I did — the three items, as specified, no more:**
+
+**1. Lexical exclusion pass** (`lib/crawl/crawler.ts`): `CONSENT_BANNER_VOCABULARY = ["cookie",
+"consent", "gdpr"]`, one small named constant, checked by substring match against a `context` string
+built per sample (element's own id/class/first-60-chars-of-text, plus up to 5 ancestors' id/class,
+lowercased) — collected inside `captureComputedStyles`'s `page.evaluate()` callback with plain loops
+(no named functions, per the existing esbuild `__name()` house convention), matched Node-side in a new
+`isExcludedByVocabulary` function. Commented with exactly why this is a maintained keyword list and not
+a structural check — the reasoning `1.2a` established.
+
+**2. Form-landmark exclusion**, same file: `FORM_LANDMARK_VOCABULARY = ["comment", "gform", "wpforms",
+"wpcf7", "ninja-forms"]`, checked against the nearest `<form>` ancestor's *own* id/class specifically
+(a separate `formLandmarkContext` string, not the general `context` blob) — deliberately not "any
+button inside any `<form>`", so a site whose real primary CTA happens to be a plain lead-capture form
+isn't excluded just for being a form.
+
+**3. Abstain when the winner is weak** (`lib/content/rank-brand-color-sources.ts`): added
+`MIN_COMPUTED_STYLES_COVERAGE = 0.1` and `pageCoverageOf()` — the fraction of crawled pages a colour
+actually appears on, not just its summed occurrence count. `isWeakComputedStylesWinner()` rejects a
+field's winner if coverage is under 10%, *or* if `computedStylesConfidence` would already call it
+"low" (reusing that function's existing count/margin cutoffs rather than duplicating new ones).
+`rankComputedStylesSource`'s field loop now `continue`s past a weak winner to the next field
+(`primaryButtonBg` → `buttonBorderColor` → `linkColor`) instead of returning it — a rejected field
+behaves exactly like a field that found nothing, falling through to the next field, then to logo, then
+imagery, same path an all-neutral field already took.
+
+**Both exclusions confirmed directly against real data, not inferred from the final ranking.** Queried
+Princeton Dental's fresh `primaryButtonBg` candidates after re-crawling with the new code:
+
+```
+rgb(78, 142, 154)    totalCount=13  pages=1/92   (the real teal .btn)
+rgb(24, 148, 47)     totalCount=3   pages=3/92   (the real green .btn)
+
+rgb(37, 99, 235) [cookie banner] present? false
+rgb(50, 80, 86) [WP comment-submit] present? false
+```
+Both contamination sources `1.2a`/`1.2-CORRECTION` identified are completely gone from the candidate
+pool — not just outranked, absent. Items 1 and 2 work exactly as designed.
+
+**Re-crawl methodology, same discipline as `1.2`'s own fix:** deleted every stale `CrawledPage` row and
+re-crawled all five clients fresh via the real `crawlClientSite` (not a standalone script) before any
+verification, since the new capture logic only takes effect on newly-crawled pages. Deleted-row counts
+matched the prior clean-generation page counts exactly (92/16/150/150/33) — confirms no contamination
+had reaccumulated since `1.2`'s own cleanup, and this run started from one clean generation, not a
+mixed one.
+
+**Full five-client result, real `rankBrandColorSources()` run against the fresh data, real logo/imagery
+buffers fetched from Supabase Storage (not synthetic):**
+
+| Client | Chosen hex | Source | Margin | Confidence | Changed from `1.2`? |
+|---|---|---|---|---|---|
+| Princeton Dental | `#2a5db0` | computed-styles (`buttonBorderColor`) | 153, sole survivor | high | **Yes — see below, not the abstention expected** |
+| BC Security | `#024470` | computed-styles (`primaryButtonBg`) | 34, sole survivor | high | No — identical to `1.2` |
+| Downseal Solutions | `#606040` | imagery | saturation 20%, sole survivor | low | No in character — abstains through computed-styles and logo exactly as before; exact hex differs from `1.2`'s `#c0c0a0` only because this run's throwaway verification script sampled a different, correctly-real content photo (see below) |
+| Propell Property | `#0e1e39` | computed-styles (`primaryButtonBg`) | 344, sole survivor | high | No — identical to `1.2` |
+| Allen Evans Family Lawyers | `#54c9ea` | computed-styles (`primaryButtonBg`) | 216 vs 2 | high | No — identical to `1.2` |
+
+**Item 3's coverage gate worked exactly as designed on `primaryButtonBg` — confirmed, not assumed.**
+Post-exclusion, `primaryButtonBg`'s only two survivors are the real teal (13 occurrences, but only
+1/92 pages, ~1.1% coverage) and the real green (3 occurrences, 3/92 pages, ~3.3% coverage). Both fall
+under the 10% floor — `primaryButtonBg` is correctly rejected as a weak field, exactly the "not a
+resolved teal" outcome the task asked for. This part behaved exactly as intended.
+
+**But Princeton Dental does not fully abstain — a real, honest finding, not patched to match the
+expected outcome.** After `primaryButtonBg` is rejected, the field loop falls through to
+`buttonBorderColor` per the existing field-preference order (established in `1.1b`, unchanged by this
+task). There, `rgb(42, 93, 176)` (`#2a5db0`) is the *sole* surviving candidate — 51/92 pages (~55%
+coverage, comfortably over the 10% floor), 153 total occurrences, `computedStylesConfidence(153, null)`
+= `"high"` (`winner >= 5`). It passes the gate cleanly and is returned as Princeton's answer.
+
+**What `#2a5db0` actually is, traced during `1.2a`'s live DOM dump:** the border colour of Princeton's
+`.social_share_button` icons (Share on X/Facebook/Email, transparent background, coloured border only)
+— and, not coincidentally, the *same* colour as the site's default anchor-link blue (`linkColor`'s own
+91/92-page winner). It is neither a consent banner nor inside a comment/contact form landmark, so
+neither of this task's two exclusions touch it. It reads as this WordPress/Vortala theme's default link
+colour, inherited by an unstyled icon border — generic theme chrome, not a deliberately chosen brand
+colour, by the same reasoning that made the cookie banner and the WP comment-submit button wrong
+answers. It just wasn't one of the two specific contamination sources `1.2a` investigated, because
+`1.2a`'s investigation was scoped to `primaryButtonBg`, the field that was actually failing at the
+time — this is a new instance of a known category, not a new category.
+
+**Deliberately not patched.** A fourth ad hoc rule (e.g. "also exclude social-share icon borders," or
+"require `buttonBorderColor`'s winner to clear a stricter bar than `primaryButtonBg`'s") would close
+this specific instance, but that is exactly the kind of reactive, one-case tuning the task instructed
+against — each new field or client would risk needing its own patch, discovered the same way this one
+was: by testing, after the fact. This task implemented the three specified items, verified them
+directly against real data, and is reporting the real, measured result rather than a fourth undiscussed
+change invented to make the number match.
+
+**What full abstention would have looked like, checked for comparison, not adopted:** re-ran
+`rankBrandColorSources` with Princeton's `computedStylesValues` forced empty (simulating a full
+computed-styles abstention) against its real logo asset. Result: `hex: "#002000"`, `source: "logo"`,
+`confidence: "low"`, winner and runner-up both at 100% saturation (a tie — plausibly edge-pixel
+anti-aliasing on a small transparent-background logo PNG, not independently confirmed further). This is
+philosophically the outcome the task expected — an honest, low-confidence hand-off — but it is not what
+the implemented code actually produces, because `buttonBorderColor` intervenes first. Not adopted or
+implemented; shown here only so the gap between "what was expected" and "what happened" is concrete,
+not hand-wavy.
+
+**Downseal's hex changed from `1.2`'s `#c0c0a0` to `#606040` — a verification-script artifact, not a
+code change, confirmed and corrected before reporting.** This run's first attempt at fetching a real
+content-image buffer picked the most-recently-created `IMAGE` asset for each client; for Downseal that
+was a 480-byte near-empty placeholder (`site-image-10.webp`), not a real photo, and for Princeton a
+2,981-byte one — both would have silently produced meaningless imagery-tier results. Caught by checking
+asset sizes directly (`site-image-9.webp`, 2.3MB, is Downseal's actual largest real photo) before
+trusting the output; the table above uses the largest `IMAGE` asset per client, not the most recent.
+Princeton never reaches the imagery tier regardless (it resolves on `buttonBorderColor` first), so this
+mistake didn't affect Princeton's reported result, only the discarded comparison run.
+
+**Files created/modified:**
+```
+$ git status --porcelain
+ M lib/content/rank-brand-color-sources.ts
+ M lib/crawl/crawler.ts
+```
+No schema change, no migration — no new persisted field.
+
+**Verification command:**
+```
+npx tsc --noEmit && npm run lint && npx vitest run
+(throwaway script, deleted after use: delete all CrawledPage rows per client, re-crawl all 5 via the
+real crawlClientSite, matching production's delete-then-crawl behaviour)
+(throwaway script, deleted after use: query Princeton Dental's fresh primaryButtonBg candidates
+directly, confirm the cookie-banner and WP-comment-submit colours are absent)
+(throwaway script, deleted after use: run the real rankBrandColorSources against all 5 clients' fresh
+computedStyles plus real logo/imagery Asset buffers fetched from Supabase Storage, largest IMAGE asset
+per client)
+(throwaway script, deleted after use: simulate a full computed-styles abstention for Princeton Dental
+to see what the logo tier alone would produce, for comparison only)
+```
+
+**Output:**
+```
+$ npx tsc --noEmit
+(no output — exit 0)
+$ npm run lint
+(no output — exit 0)
+$ npx vitest run
+ Test Files  7 passed (7)
+      Tests  61 passed | 1 todo (62)
+
+$ (re-crawl) — deleted-row counts: Princeton 92, BC Security 16, Downseal 150, Propell 150,
+  Allen Evans 33 — all match the prior clean-generation counts exactly, all re-crawls exited 0
+```
+Per-client ranking results and the exclusion-confirmation query are quoted in full above.
+
+**Failures, retries and dead ends:**
+1. First verification pass picked each client's most-recently-created `IMAGE` asset rather than a
+   properly-sized one — silently wrong for Downseal (480 bytes) and Princeton (2,981 bytes). Caught by
+   checking asset sizes before trusting the imagery-tier output, not after. Princeton's reported result
+   is unaffected (it never reaches the imagery tier); Downseal's table entry uses the corrected,
+   largest-asset pick.
+2. Princeton Dental does not abstain as expected — reported as a real finding above, not a retry-until-
+   it-works loop. No further attempt was made to force it to abstain.
+
+**Shortcuts taken:** the ancestor-walk depth for lexical/form-landmark context is capped at 5 levels
+(matching the existing convention already used elsewhere in this file, e.g. `1.1a`'s ancestry dumps) —
+not exhaustive to the document root, disclosed rather than silently assumed sufficient.
+
+**Deviations from the task spec:** none in what was implemented — all three items match the
+specification exactly. The *outcome* deviates from the task's stated expectation (Princeton was
+expected to abstain; it doesn't), and that deviation is the substance of this entry, not a shortcut
+taken to avoid it.
+
+**Not run / not verified:**
+- Whether `#002000` (the simulated full-abstention logo result) is itself a meaningful colour or a
+  bucketing artifact from anti-aliased edge pixels on a small transparent PNG — not investigated
+  further, since it was never actually reached by the real code path.
+- Whether `buttonBorderColor`'s generic-chrome-color risk exists on other real sites beyond Princeton —
+  none of the other four clients' `buttonBorderColor` fields were reached in this run (all four either
+  resolved on `primaryButtonBg` or, for Downseal, never had a `buttonBorderColor` survivor either),
+  so there's no second data point one way or the other.
+- Whether narrowing the field-fallback chain (e.g., not falling through to `buttonBorderColor` when
+  `primaryButtonBg` found real-but-weak candidates, versus falling through only when a field found
+  nothing at all) would resolve this without a lexical patch — reasoned about above as a possible
+  direction, not implemented or tested.
+
+**Confidence:** High on what was implemented and measured — every claim above is backed by a real code
+change, a real re-crawl, and a real query against real data, not inferred. Medium-to-low on whether
+Princeton Dental's `buttonBorderColor` case is a one-off or representative of a broader pattern this
+task's scope didn't examine — one client, one instance, not generalised.
+
+**Next task:** awaiting the human's direction on Princeton Dental specifically — whether the
+field-fallback-chain question above is worth pursuing as a `1.2c`, whether `buttonBorderColor`-sourced
+answers should be held to a stricter bar than `primaryButtonBg`-sourced ones, or whether this is
+accepted as a known, disclosed limitation for now. Not started this session, per "one task, log it,
+stop after."
+---
+
+---
 
 # PART E — For the human reviewing this log
 
