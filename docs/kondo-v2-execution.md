@@ -6188,6 +6188,236 @@ metrics and this task's classification together) or wiring `classify-images.ts` 
 ---
 
 ---
+### 1.9 — Role assignment and capability summary
+**Timestamp:** 2026-08-17
+**Git SHA at start:** dc16ed1
+**Status:** DONE-VERIFIED — run across all 5 available clients, real data throughout. Honest
+per-client assessment below, including specific calls I don't fully trust — not a clean sweep.
+
+**What I did:** new file `lib/content/assign-image-roles.ts`, rules-based, no model call anywhere in
+it. `assignImageRoles(assets)` takes a client's full asset set (not one image independently — hero
+is a relative "best of" pick, see below) and returns one of `logo | hero | section-background |
+gallery | team | feature-inline | unusable` per asset, each with a stated `reason` string naming
+which source (metrics/classification/structural) drove the call. `summarizeCapabilities` +
+`describeCapabilities` produce exactly the "1 hero-grade, 4 gallery-grade, 0 team, logo present"
+shape asked for.
+
+**Getting real data to test against first — this task needed 1.8 to have actually run, not just
+exist.** Only Allen Evans Family Lawyers had real classification data going in (from `1.8`'s own
+verification). Ran `classifyImages` for real against the remaining 4 clients' unclassified assets —
+one real batched Claude call each, `Princeton Dental` (11), `BC Security` (11), `Downseal Solutions`
+(10), `Propell Property` (10) — so this task's own verification is against real vision output across
+every available client, not one client generalised from. (One real bug hit and fixed along the way:
+a throwaway script's `where: { classification: null }` threw a Prisma validation error — JSONB
+columns need `Prisma.DbNull` in a filter, not plain `null`, the same distinction `1.1`/`1.7a` already
+established for writes; fixed to `{ equals: Prisma.DbNull }` and re-ran.)
+
+**Constraint 1 — no single-entropy-threshold plan, and exactly which rule uses which source, stated
+per rule, not just once at the top.**
+- **Structural (`Asset.type`), no metric or classification at all:** `logo` — the crawler's own
+  designated logo is authoritative; not re-derived from pixels.
+- **Classification-primary:** the photo/non-photo split (`subject`), `team` (`isHeadshot`),
+  `feature-inline` (`subject` in `product`/`equipment`), and hero-eligibility itself
+  (`heroSuitable.suitable`, gated on `confidence !== "low"`) — every one of these is a judgement `1.8`
+  already made; this file only reads the field, never re-derives it.
+- **Metrics as a cross-validation safety net, not a primary signal:** `min(width,height)` and
+  `hasAlpha` — `1.7b`'s own real 41-asset numbers (98% best-possible split accuracy for
+  `min(width,height)`, 90% for `hasAlpha`, vs. entropy's 85% with a wide overlap band) — used to
+  **distrust a classification that disagrees with them strongly enough to matter**, not to make the
+  primary photo/graphic call. Colour entropy is not used anywhere in this file, per the carry-forward.
+  `REAL_PHOTO_MIN_DIM_PX = 500` is `1.7b`'s own smallest real-photo `min(width,height)` observation
+  (BC Security's 980×500 product shots) — reused for a related-but-not-identical question (this task's
+  own "is this specific image too small," not `1.7b`'s "does this metric separate photo from
+  graphic"), and that reuse is disclosed as such, not presented as a second independent validation.
+- **Metrics-only fallback**, used only when `1.8` hasn't classified an asset at all: capped at
+  `gallery`/`unusable`, never `hero`/`team`/`feature-inline`/`section-background` — those four all
+  need a judgement this file has no authority to invent when the judgement-maker hasn't run.
+
+**Constraint 2 — rules, not judgement.** Every branch is a fixed comparison against a named field or
+a stated threshold; nothing in this file asks "does this look right." The one place a rule
+*resolves ambiguity between two AI judgements* (the hero tiebreak — see Princeton Dental below) uses
+an explicit, stated order (confidence, then size, then assetId) — not a subjective pick.
+
+**Constraint 3 — thresholds and provenance, listed once, not scattered:**
+- `REAL_PHOTO_MIN_DIM_PX = 500` — `1.7b`'s real ground truth (smallest observed real-photo
+  `min(width,height)`).
+- `hasAlpha === true` as a disqualifying cross-check — `1.7b`'s real ground truth (17/20 real
+  graphics carry alpha vs. 1/21 real photos).
+- `confidence !== "low"` gating hero-eligibility — not from `1.7b` (nothing to ground it there); a
+  direct, disclosed policy choice that a low-confidence hero-suitability call shouldn't drive the
+  single highest-stakes role a client gets. Stated as a policy, not dressed up as data-derived.
+- Everything else (`isHeadshot`, `subject` category membership, `clearSpace !== "none"`,
+  `hasWatermark`) is a direct read of a field `1.8` already computed — no threshold to justify, the
+  "threshold" is the classification itself.
+
+**Real run, all 5 clients, full results:**
+
+| Client | Assets | logo | hero | section-bg | gallery | team | feature-inline | unusable |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Princeton Dental | 11 | 1 | 1 | 2 | 2 | 0 | 0 | 5 |
+| BC Security | 11 | 1 | 0 | 0 | 0 | 0 | 4 | 6 |
+| Downseal Solutions | 10 | 1 | 1 | 3 | 0 | 0 | 0 | 5 |
+| Propell Property | 10 | 1 | 1 | 4 | 2 | 0 | 0 | 2 |
+| Allen Evans Family Lawyers | 10 | 1 | 0 | 0 | 0 | 0 | 0 | 9 |
+
+Full per-asset assignments with reasons are in this entry's accompanying chat reply, not condensed
+further here.
+
+**Honest per-client assessment, as instructed — including what I think is wrong, not just what
+passed:**
+
+**Propell Property — highest confidence, cleanest result.** Real estate marketing photos routed
+sensibly: an aerial cityscape as the sole hero candidate (no tiebreak needed), four clear-space
+photos as section-backgrounds, a 14-person group shot and a candid single-person shot as gallery, two
+SVG logo graphics correctly excluded. **One real, named gap, not a wrong call so much as a missed
+one:** five single-person "studio portrait" photos (site-image-6/7/8/9/10) — `1.8`'s own reason text
+for one of them literally says *"Vertical studio **headshot-style** portrait"* while its structured
+`isHeadshot` field is `false`. My rule trusts the structured field, not the free text, so **zero of
+Propell's likely agent-portrait photos became `team`** despite at least one plausibly being exactly
+that. This isn't a bug in this file (it did exactly what it says: read `isHeadshot` literally) — it's
+a real, visible symptom of `1.8`'s own `isHeadshot` field possibly under-firing relative to its own
+stated reasoning, worth someone's attention, not fixed here.
+
+**Princeton Dental — the hero pick is a real, disclosed coin-flip between two comparable photos, not
+an obviously right or wrong choice.** Three dental-office photos were `heroSuitable`: `site-image-2`
+(confidence high, 1440×768, min-dim 768), `site-image-3` (confidence medium, 1199×695, eliminated by
+the confidence tiebreak), `site-image-4` (confidence high, 1572×928, min-dim 928 — won on the size
+tiebreak over `site-image-2`). Both `site-image-2` and `-4` are genuinely comparable dental-practice
+photos: this comparison is real (dimensions pulled directly from the database, not estimated), and it
+shows the tiebreak did exactly what it says — but a mechanical size-tiebreak between two similarly
+plausible candidates is a coin-flip dressed as a rule, not a considered "which is the better photo"
+judgement, and I'm not claiming otherwise. Low-stakes: the runner-up became `section-background`, a
+real, still-shown role, not discarded — this is a labelling ambiguity, not an unusable-boundary risk.
+Five insurance-fund partner logos (Bupa/HCF/nib/CBHS + one duplicate of the client's own logo) were
+correctly excluded as `graphic` — but this surfaces a genuine, disclosed **gap in the task's own role
+list**, not a rule failure: partner-fund logos are legitimate trust-signal content a real dental
+practice would want to show (an "we accept these health funds" bar), and this task's seven roles have
+no home for that concept except `unusable`, which understates what they actually are. Flagging this
+as a real limitation of the fixed role taxonomy given for this task, not something to quietly patch
+around by inventing an eighth role I wasn't asked for.
+
+**Downseal Solutions — the one case I'd call most likely genuinely wrong, and I said so rather than
+smoothing it over.** `site-image-4.webp` — 1185×1777, `professional` shot quality, `interior`
+subject, `heroSuitable: true`, `confidence: high` — was excluded as `unusable`, **solely** because
+`hasAlpha: true`. This is not a small, borderline case the way `1.7b`'s marginal calls tended to be:
+the image is large and the classification is confident. `hasAlpha` is a real, `1.7b`-validated
+90%-accurate signal, not invented — but 90% still means roughly one in ten real photos with alpha get
+this wrong, and this specific image has every other property of a genuine, high-quality interior
+photo. I don't have a way to visually confirm which side of that 10% this actually falls on from
+this task alone, and I'm not guessing — reporting it as the single case in this whole run I'd most
+want a human to actually look at before trusting `unusable` here. Two other Downseal exclusions
+(`site-image-3`/`-2.webp`, both `abstract`, `confidence: low`, described by the model as "extremely
+narrow sliver image with no discernible subject") independently confirm `1.7b`'s own finding from
+real crawl data: these are the literal 6×167px spacer/divider images `1.7b` found with
+`colorEntropy: 0.00` — real cross-task agreement between two independent signals (entropy-based
+observation in `1.7b`, vision classification in `1.8`) landing on the same conclusion, which is
+exactly the kind of corroboration that should raise confidence, not just a coincidence to note in
+passing.
+
+**BC Security — the most defensible-looking client also has the most real uncertainty underneath
+it, on inspection, not on first read.** Four camera/access-control product shots correctly became
+`feature-inline` — a strong, clean fit for a security-equipment company. But **zero hero, zero
+section-background, zero gallery** for a real, active business is a stark result worth checking hard
+before trusting, not accepting because the number is round. Broken down:
+- `site-image-5`/`-6.png` (both 300×189, `hasAlpha: true`) — excluded by *both* the size floor (189
+  is nowhere near 500) *and* the alpha check independently. High confidence these are correctly
+  excluded; the alpha signal isn't even the deciding factor here.
+- `site-image-9.jpg` (595×336, `product`, described as "close-up... dense labeling") — 336 is well
+  under the 500 floor and the image sounds like a spec-sheet close-up anyway. Reasonably confident
+  this exclusion is correct, though less certain than the pair above.
+- **`site-image-10.png` (1024×409, `people`, `heroSuitable: true`, `confidence: medium`, described as
+  "a handshake with soft lighting... suited to a banner format") is the case I'd flag as the most
+  likely false exclusion in this entire run.** Its `min(width,height)` is 409 — under the 500 floor,
+  but only by 91px (18%), not a wide margin, and everything else about it (the model's own
+  description, `heroSuitable: true`) argues it's a genuinely usable, even hero-plausible image.
+  Reusing `1.7b`'s validated-for-a-different-question number cost this client its only real
+  hero/section-background/gallery candidate. I'm reporting this plainly rather than nudging the
+  threshold down to rescue it — that would be tuning to a single case, exactly what this task's own
+  instruction warned against.
+
+**Allen Evans Family Lawyers — 9 of 9 unusable, and I have high, cross-task-grounded confidence this
+is correct, not a rule failure.** This matches `1.7`'s own original finding, independently: this
+client's downloaded candidate pool never contained substantial real photography in the first place —
+confirmed back in `1.7`'s real crawl (small icon-shaped PNGs, no large photos among the selected
+candidates) and now confirmed again by real vision classification calling every one of them
+`icon`/`graphic`. Two independent tasks, two independent signals, the same conclusion — this is the
+strongest-grounded result in this run, not the weakest, even though the number (`9 unusable`) looks
+the most alarming on its face.
+
+**The `unusable` boundary specifically, stated plainly as instructed.** Across 52 real assets, 5
+clients: **I found no case of something that should have been excluded slipping through into
+hero/gallery/section-background/team/feature-inline** — no watermarked, tiny, alpha-flagged, or
+non-photo image was ever assigned a showcase role. Every miss I found runs the other direction:
+2–3 plausibly-legitimate photos (BC Security's handshake shot most clearly, Downseal's alpha-flagged
+interior less certainly) excluded when they may not have deserved to be. **That is the safer failure
+mode this task asked about directly — a missing gallery photo is a smaller cost than an embarrassing
+hero — and this run's real evidence supports that the rules lean that way, not the other.** I would
+call myself **high confidence nothing embarrassing gets through**, and **medium confidence the
+boundary isn't costing a real client 1–2 genuinely usable photos it shouldn't** — not by rounding up
+from "looks fine," but from two specific, named, dimension-and-alpha-driven cases found by actually
+reading every exclusion's stated reason, not by trusting the summary counts.
+
+**Files created/modified:**
+```
+$ git status --porcelain
+?? lib/content/assign-image-roles.ts
+```
+
+**Verification command:**
+```
+npx tsc --noEmit && npm run lint && npx vitest run
+(throwaway script, deleted after use: classifyImages for real against Princeton Dental/BC Security/
+Downseal Solutions/Propell Property's previously-unclassified assets)
+(throwaway script, deleted after use: assignImageRoles + summarizeCapabilities/describeCapabilities
+across all 5 clients' real Asset rows, full per-asset output)
+(throwaway script, deleted after use: pulled exact width/height/hasAlpha for the specific
+tiebreak/exclusion cases discussed above, to report them precisely rather than approximately)
+```
+
+**Output:**
+```
+$ npx tsc --noEmit
+(exit 0)
+$ npm run lint
+(exit 0)
+$ npx vitest run
+ Test Files  9 passed (9)
+      Tests  89 passed | 1 todo (90)
+```
+Full per-client, per-asset role assignments (with reasons) and the raw classification output behind
+them are pasted in full in this entry's accompanying chat reply.
+
+**Failures, retries and dead ends:**
+1. A throwaway classification script's `where: { classification: null }` threw a real Prisma
+   validation error (JSONB filters need `Prisma.DbNull`, not plain `null`) — fixed, re-ran, no other
+   issues.
+
+**Shortcuts taken:** the hero tiebreak (confidence, then size, then assetId) is a simple, fully
+deterministic order, not a weighted score — disclosed above as a real coin-flip in the one case where
+it mattered (Princeton Dental), not presented as a considered visual-quality ranking.
+
+**Deviations from the task spec:** none — rules-based throughout, every threshold's provenance
+stated, ran across all 5 available clients (not a subset), honest assessment includes specific named
+wrong-or-uncertain calls rather than a clean summary.
+
+**Not run / not verified:**
+- Whether the `confidence !== "low"` hero-gating policy is well-calibrated — stated as a policy
+  choice, not validated against data, since there's no ground truth for "should a medium-confidence
+  heroSuitable call be trusted" the way `1.7b` had for photo-vs-graphic.
+- Visual confirmation of the two most-uncertain exclusions (BC Security's handshake photo, Downseal's
+  alpha-flagged interior) — flagged as worth a human look, not resolved here.
+- Partner-logo handling — named as a real gap in the task's seven-role list, not addressed (would
+  need an eighth role, out of this task's scope to add unilaterally).
+
+**Confidence:** High on the mechanism (every rule traced to a real field or a real `1.7b` number, no
+invented thresholds) and on the `unusable` boundary's safe-direction bias (checked by reading every
+exclusion's actual reason across 52 real assets, not inferred from the counts). Medium on whether 2–3
+specific real photos were wrongly excluded — named precisely rather than rounded away.
+
+**Next task:** awaiting the human's direction. Not started this session.
+---
+
+---
 
 # PART E — For the human reviewing this log
 
