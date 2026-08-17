@@ -225,3 +225,44 @@ describe("buildPalette — Princeton Dental carry-forward", () => {
     expect(result.derivedFrom).toBe("fallback");
   });
 });
+
+describe("buildPalette — Task 3.3a: pickHue's lightness floor lowered from 26 to 10", () => {
+  // The two real, high-confidence dark colours the carry-forward named — both previously
+  // rejected by the old l<26 floor, both real client brand colours (docs/kondo-v2-execution.md's
+  // Phase 1 sign-off, item 3). Values captured from the real, current implementation (per this
+  // session's own golden-value discipline), not hand-predicted.
+  test("BC Security's real navy (#024470, L≈22%) now derives from brand, not fallback", () => {
+    const result = buildPalette([{ hex: "#024470" }]);
+    expect(result.derivedFrom).toBe("brand");
+    expect(result.accent).toBe("hsl(204 58% 41%)");
+  });
+
+  test("Propell Property's real navy (#0e1e39, L≈14%) now derives from brand, not fallback", () => {
+    const result = buildPalette([{ hex: "#0e1e39" }]);
+    expect(result.derivedFrom).toBe("brand");
+    expect(result.accent).toBe("hsl(218 58% 41%)");
+  });
+
+  // The two real colours that must STAY rejected, for two different reasons, neither touched by
+  // this change — named directly so a future edit that accidentally starts accepting either one
+  // fails loudly here, not just in a scan of real client data.
+  test("Princeton Dental's near-black (#002000, L≈6.3%) still falls back — below the new floor too", () => {
+    const result = buildPalette([{ hex: "#002000" }]);
+    expect(result.derivedFrom).toBe("fallback");
+  });
+
+  test("Downseal Solutions' low-saturation olive (#606040, S≈20%) still falls back — via the unchanged s<25 gate, not the lightness floor", () => {
+    const result = buildPalette([{ hex: "#606040" }]);
+    expect(result.derivedFrom).toBe("fallback");
+  });
+
+  // Pins the exact new threshold value (10) rather than leaving it an untested magic number —
+  // synthetic, fully-saturated reds chosen so only lightness varies. l < 10 rejects, l >= 10
+  // accepts (a strict inequality in the source), confirmed empirically against the real
+  // hexToHsl computation, not hand-derived HSL math that could round differently.
+  test("boundary: L=10% exactly (#330000) is accepted; L≈8.4% (#2b0000) is rejected; L≈12% (#3d0000) is accepted", () => {
+    expect(buildPalette([{ hex: "#330000" }]).derivedFrom).toBe("brand");
+    expect(buildPalette([{ hex: "#2b0000" }]).derivedFrom).toBe("fallback");
+    expect(buildPalette([{ hex: "#3d0000" }]).derivedFrom).toBe("brand");
+  });
+});

@@ -151,11 +151,35 @@ function pickHue(colors: { hex: string }[]): { hue: number; source: "brand" | "f
   for (const c of colors) {
     const parsed = hexToHsl(c.hex);
     if (!parsed) continue;
-    // Reject greys/near-black/near-white: they carry no hue worth building on.
+    // Reject greys/near-white: they carry no hue worth building on.
     if (parsed.s < 25) continue;
-    // A dark muddy tint (BC Security's #402020, L=19%) is a shadow, not a brand
-    // colour. Building a whole palette on it produces a red security company.
-    if (parsed.l < 26 || parsed.l > 82) continue;
+    // Task 3.3a. Lowered from 26 to 10 — the 26 floor rejected genuine, high-confidence dark
+    // brand colours, not just noise. BC Security's real brand colour is #024470 (a saturated
+    // navy, L≈22%) and Propell Property's is #0e1e39 (L≈14%) — both real, sitewide-consistent,
+    // high-confidence extractions (see docs/kondo-v2-execution.md's Phase 1 sign-off, item 3),
+    // both rejected outright by the old 26 floor even though buildPalette never actually uses
+    // the INPUT colour's own lightness for anything downstream — accentL is always one of two
+    // fixed constants (32 or 41, set a few lines below), independent of how dark or light the
+    // extracted colour was. Rejecting on lightness was filtering for "is this hue reliable,"
+    // not "is this the right lightness to render at" — the palette is always re-lightened to a
+    // controlled value regardless, so a dark-but-real hue was never actually unusable, only
+    // treated as if it were.
+    //
+    // Still rejects genuine near-black: Princeton Dental's #002000 (a near-black green, L≈6.3%)
+    // stays rejected — pinned directly by this file's own test
+    // (normalize-brand-colors.test.ts's "Princeton Dental carry-forward" describe block). 10 was
+    // chosen with real margin on both sides of the two real cases it has to separate: comfortably
+    // above Princeton's 6.3% (near-black — at this lightness a colour reads as black to the eye
+    // regardless of hue, independent of what the saturation formula computes) and comfortably
+    // below Propell's 14% (a colour genuinely perceptible, and describable, as navy). Not derived
+    // from the 191-palette corpus like MIST_S/SECONDARY_LIGHTNESS_DELTA/DESTRUCTIVE above — the
+    // corpus is pre-designed "good" primaries, not raw noisy extractions, so it has no examples
+    // of this specific near-black-vs-dark-navy boundary to derive a number from. A disclosed
+    // design judgement, not a corpus-derived constant.
+    //
+    // Downseal Solutions' #606040 (a low-saturation olive, S≈20%) is unaffected by this change —
+    // it was already, and remains, rejected by the `s < 25` check above, untouched here.
+    if (parsed.l < 10 || parsed.l > 82) continue;
     if (!best || parsed.s > best.sat) best = { hue: parsed.h, sat: parsed.s };
   }
 
