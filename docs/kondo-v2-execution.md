@@ -8312,6 +8312,203 @@ already-recorded dependency; no new claim made here beyond connecting the two ex
 ---
 
 ---
+### 3.1 — Lift and extend `suitability.ts`
+**Timestamp:** 2026-08-18
+**Git SHA at start:** 18b0a79
+**Status:** DONE-VERIFIED — existing tests pass (12 files, 184 tests, +14 new), and the extended
+model ran against all five real clients' current, freshly-recomputed capability summaries,
+reporting eligibility against four clearly-labelled hypothetical pattern profiles. One real
+discrepancy found and reported honestly (Allen Evans), and two real bugs found and fixed in this
+task's own verification script before trusting its output — both detailed below.
+
+**What I did:** Deleted `lib/templates/suitability.ts`; new `lib/design/pattern-eligibility.ts`
+(and its first-ever test file, `pattern-eligibility.test.ts`, 14 tests — no test file existed for
+the old module). Deliberately imports nothing from `lib/templates/` — not `TemplateContent`, not
+`TemplateMeta` — since that whole directory is deleted in `3.8` and this module must still exist
+afterward. Two narrow, self-contained inputs instead: a new `ContentCoverage` type (services/
+testimonials counts, phone/pricing/credentials booleans — a small subset of what `TemplateContent`
+already exposes, redefined locally rather than imported) and `1.9`'s own `CapabilitySummary`
+(`lib/content/assign-image-roles.ts`, untouched, not template-shaped, survives `3.8` on its own).
+`scorePatternEligibility(requirements, content, images, industryMatches?)` replaces `scoreTemplate`
+— extended `requires` model (`minTestimonials`, `needsPricing`, `needsTeamPhotos`,
+`needsCredentials` added to the original `heroImage`/`phone`/`minServices`/`minGallery`), and now
+returns **every** unmet requirement (`reasons: string[]`), not just the first — a deliberate,
+stated behavioural change from the original's "return on the first unmet requirement" (which made
+sense when no template declared more than one requirement; with 8 fields now, seeing everything a
+client is missing at once is more useful than the old shortcut).
+
+**`registry.ts` (itself deleted in `3.8`, same as the templates it scores) needed updating to keep
+compiling and working, not left broken until `3.8` catches up to it.** Its own `scoreAllTemplates`
+now calls the new function through two small, explicitly-commented transitional adapters defined
+*in `registry.ts` itself*, not in the new module: `contentCoverageFromTemplateContent` (a direct,
+lossless field mapping) and `approximateCapabilitySummary` — the latter genuinely approximate,
+built from `TemplateContent`'s older `heroImageUrl`/`galleryImages` fields because this render-time
+gallery view has no real per-client `assignImageRoles()` data wired in. Stated plainly in its own
+comment: this is exactly "mechanism 2" from `1.10`'s three-mechanism finding, used here narrowly
+and only to keep this doomed file's existing behaviour working until `3.8` deletes it outright —
+not a model for anything built after that. `TemplateGallery.tsx`'s own `t.reason` (singular) UI
+read was left untouched — `scoreAllTemplates`'s public return shape still joins the new `reasons[]`
+into one string, so a file that's also on `3.8`'s delete list didn't need touching for this.
+
+**Carry-forward 1 — Allen Evans: a real discrepancy between the carry-forward's own stated premise
+and today's real, freshly-verified data, reported plainly rather than silently reconciled to
+match.** The task's own text states "1 hero-grade, nothing else" (`1.9a`'s original finding).
+Re-ran `assignImageRoles` fresh, right now, against Allen Evans' real, current `Asset` rows — the
+actual, current capability summary is **`0 hero-grade, nothing else`**, not 1. This matches
+`1.10`'s own real production-wiring finding exactly (not `1.9a`'s standalone-testing finding): the
+one real photo Allen Evans has is misclassified as a partner logo by `classify-partner-logos.ts`
+(pre-existing, untouched by any task in this phase) before `1.9`/`1.9a` ever see it, confirmed
+again just now by reading `record.images` directly — its persisted `role` is `"partner-logo"`,
+not `"gallery"` or `"hero"`. **The eligibility routing this carry-forward asked for still holds,
+just for a slightly different real reason than the task text states**: `photo-led-split`
+(`heroImage: true`) correctly scores `not-suited` (`heroGrade: 0`), and `typographic-adaptive` (no
+`requires` at all) correctly scores `works` — Allen Evans routes to the no-image-requirement
+pattern either way, whether its real number is 0 or 1. Not treated as settled by that coincidence,
+though — the discrepancy itself is real and worth carrying forward again: `1.9a`'s own carry-
+forward table (`1.9a`'s entry) and this task's own instructions both still cite the pre-`1.10`
+number, and neither has been corrected until now.
+
+**Carry-forward 2 — BC Security: confirmed, the harder case.** Real, fresh capability summary:
+`0 hero-grade, 0 section-background, 0 gallery, 0 team, 1 feature-inline`. `image-gallery`
+(`minGallery: 3`) correctly scores `not-suited` (1 usable photo total, across every role, not 3);
+`photo-led-split` correctly scores `not-suited`; `typographic-adaptive` correctly scores `works`.
+The one asset it does have (a product shot, `feature-inline`) isn't enough to clear even the
+gallery pattern's bar, let alone the hero one — exactly the "harder version" the task named, and
+the module routes it correctly.
+
+**Carry-forward 3 — which hero-selection mechanism this module trusts, stated directly per
+instruction, not fixed.** `1.10` found three unreconciled mechanisms: `selectHeroAssetId`
+(crawl-time geometry), `to-template-content.ts`'s tier1/tier2 chain (fed Ledger/Showcase, both
+deleted `3.8`), and `content-guards.ts`'s `pickHero` (fed only Atlas, also deleted `3.8`). This
+module trusts **`1.9`/`1.9a`'s `assignImageRoles`/`CapabilitySummary` exclusively** — stated in its
+own header comment, not just here — the only one of the three that is not template-specific, the
+only one informed by real vision-classification confidence rather than geometry alone, and the one
+this task was explicitly told to consume. It never reads `heroImageUrl` or `galleryImages` (the
+other two mechanisms' own outputs) anywhere in its own logic — by construction, not by omission.
+(`registry.ts`'s transitional adapter is the one narrow, disclosed exception, and it's named as
+exactly that above — not a second endorsement of the old mechanisms.)
+
+**Two real bugs found and fixed in this task's own verification script, before trusting a single
+number from it — the same discipline this session has applied to itself throughout.**
+1. First draft queried every historical `Asset` row for a client (`type === "LOGO" || "IMAGE"`) —
+   but `Asset` is append-only forever, so this silently re-included assets
+   `classify-partner-logos.ts` had already excluded in the most recent real run (exactly Allen
+   Evans' misclassified photo, re-appearing as a plain `IMAGE` and getting assigned `hero` again,
+   producing a false "1 hero-grade" that looked like it *confirmed* the carry-forward's stated
+   premise — which would have been the wrong lesson to take from a methodology bug). Fixed by
+   deriving the candidate pool from `record.images`' own currently-persisted roles instead of the
+   full `Asset` history.
+2. That fix undercounted `heroGrade` for clients that already have a resolved hero — `1.10`'s own
+   wiring tags its hero winner `role: "hero"` in the persisted record, never `"gallery"`, so a
+   `role === "gallery"`-only filter silently excluded the current hero asset from re-evaluation
+   every time. Caught by comparing this run's numbers against `1.10`'s own recorded ones before
+   trusting the script, not assumed correct because it ran without error. Fixed by including both
+   `"gallery"` and `"hero"` roles in the candidate pool.
+
+**Real five-client run, both fixes applied, four hypothetical patterns (see below for what these
+are and aren't):**
+
+| Client | Capability summary (real, fresh) | photo-led-split (`heroImage:true`) | image-gallery (`minGallery:3`) | typographic-adaptive (no requires) | SYNTHETIC full-trust-signals |
+|---|---|---|---|---|---|
+| Princeton Dental | 0 hero, 3 section-bg, 2 gallery, 0 team, 0 feature-inline | not-suited | works | works | not-suited (0 testimonials, 0 team) |
+| BC Security | 0 hero, 0 section-bg, 0 gallery, 0 team, 1 feature-inline | not-suited | not-suited (1 of 3) | works | not-suited (0 team) |
+| Propell Property | 1 hero, 4 section-bg, 2 gallery, 0 team, 0 feature-inline | works | works | works | not-suited (no pricing, 0 team) |
+| Allen Evans Family Lawyers | 0 hero, 0 section-bg, 0 gallery, 0 team, 0 feature-inline | not-suited | not-suited (0 of 3) | works | not-suited (1 testimonial, 0 team) |
+| Downseal Solutions | 1 hero, 4 section-bg, 0 gallery, 0 team, 0 feature-inline | works | works | works | not-suited (0 testimonials, no pricing, 0 team) |
+
+**What was actually evaluated against, stated plainly per instruction — no pattern library exists
+yet.** `landing.csv` was never imported (Task `3.2`'s own scope note, `2.1`'s log entry, build plan
+§3.2), and Phase 3 authors eligibility rather than importing a pattern library — so there is no
+real, named set of patterns to test against. The four profiles in the table above are **hypothetical,
+explicitly labelled placeholders**, not a preview of real Phase 3 patterns: three mirror the three
+real (`3.8`-doomed) templates' own actual `requires` declarations exactly (traceable to
+`lib/templates/{ledger,showcase,atlas}/meta.ts`), and the fourth is synthetic, built specifically to
+exercise all 4 of this task's own new requirement fields at once, since no existing template or
+real pattern declares that combination. **What's still missing, stated directly:** a real pattern
+library (a later Phase 3 task's job — this task builds the eligibility *machinery*, not the
+patterns it will eventually be run against) and `industryMatches` wiring (the function accepts it
+as an optional parameter, defaulting to `false`, but nothing in this task computes a real value for
+it, since no pattern has a real `industries` list to match against yet either).
+
+**One discrepancy left honestly unresolved, not chased to false precision.** Princeton Dental's
+`section-background` count reads 3 in this run vs. `1.10`'s own recorded 2 (and Propell/Downseal
+show small ±1 variances in similar fields too). Not fully root-caused — plausibly an imperfect
+reconstruction of `1.10`'s exact original candidate-set composition from persisted data alone
+(some pipeline-intermediate state, like the pre-pass geometry check's own verdicts, isn't retained
+anywhere `record.images` or `Asset` can reconstruct it from). Explicitly **not** chased further
+because none of this task's four eligibility profiles read `sectionBackgroundGrade` at all — the
+discrepancy doesn't change a single eligibility outcome reported above — but naming it here rather
+than letting a close-enough number pass as an exact match.
+
+**Files created/modified:**
+```
+$ git status --porcelain
+ D lib/templates/suitability.ts
+?? lib/design/pattern-eligibility.ts
+?? lib/design/pattern-eligibility.test.ts
+ M lib/templates/registry.ts
+```
+
+**Verification command:**
+```
+npx tsc --noEmit && npm run lint && npx vitest run
+(throwaway scripts, deleted after use: scripts/_tmp-3.1-verify.ts — real 5-client run per the
+table above, including the two methodology fixes described; scripts/_tmp-3.1-diagnose.ts —
+compared record.images against full Asset history for Allen Evans specifically, which is what
+surfaced bug #1 above)
+```
+
+**Output:**
+```
+$ npx tsc --noEmit
+(exit 0)
+$ npm run lint
+(exit 0)
+$ npx vitest run
+ Test Files  12 passed (12)
+      Tests  184 passed | 1 todo (185)
+```
+(184 = 170 from Phase 2's own end count + 14 new `pattern-eligibility.test.ts` tests; the pre-3.1
+suite's own tests are unchanged, confirming "existing tests pass" — no test was edited to
+accommodate this task, only added.)
+
+**Failures, retries and dead ends:** both described at length above (the append-only-`Asset`
+over-inclusion, and the `role:"hero"`-vs-`"gallery"` filter gap) — real methodology bugs in this
+task's own verification script, caught by comparing output against `1.10`'s own recorded numbers
+rather than trusting a script that ran without error, and fixed before any number in this entry was
+written down.
+
+**Shortcuts taken:** the `industryMatches` parameter is accepted but never given a real value in
+this task (see "what's still missing" above) — a real, disclosed gap, not silently defaulted and
+left unexplained.
+
+**Deviations from the task spec:** none. All three named carry-forwards addressed directly; the
+extended model ran against all five real clients as asked, using real (twice-corrected) capability
+summaries, not synthetic ones.
+
+**Not run / not verified:**
+- The Princeton/Propell/Downseal small-number discrepancies against `1.10`'s own recorded values —
+  named above, not root-caused, confirmed not to affect any eligibility outcome in this task's own
+  test matrix.
+- Whether a real pattern library, once authored, will actually declare requirement combinations
+  this module's 8-field model can express — not knowable before that library exists.
+- `registry.ts`'s `approximateCapabilitySummary` against real client data — not separately
+  verified in this task (it inherits whatever `pickDefaultTemplate`'s own existing, unchanged
+  logic already relied on; not this task's own scope to re-verify a file that's deleted in `3.8`
+  regardless).
+
+**Confidence:** High on the eligibility machinery itself (14 real tests, all passing, covering
+every field including the 4 new ones) and on the two carry-forward routing questions (Allen Evans
+and BC Security both verified against real, twice-corrected capability data, not assumed). Medium
+on the exact capability-summary numbers for Princeton/Propell/Downseal specifically, given the
+named, unresolved small discrepancy — high confidence the *eligibility conclusions* are right
+regardless, lower confidence the underlying counts are pixel-perfect reconstructions of `1.10`'s
+own historical run.
+
+**Next task:** not specified — awaiting direction.
+---
+
+---
 
 # PART E — For the human reviewing this log
 
