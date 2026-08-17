@@ -4708,6 +4708,138 @@ would change the done-when command itself). Not started this session.
 ---
 
 ---
+### 1.5 — Extend `normalize-brand-colors.ts` with four roles
+**Timestamp:** 2026-08-17
+**Git SHA at start:** 9efd0c7
+**Status:** DONE-VERIFIED
+
+**What I did:** extended `lib/content/normalize-brand-colors.ts`'s `Palette` type and
+`buildPalette()` with `secondary`, `ring`, `destructive`, `onDestructive` — additions only; every
+line producing the original 10 roles is untouched (confirmed by diff, and by the golden test
+below). New test file `lib/content/normalize-brand-colors.test.ts`.
+
+**Each new role implements the specific invariant the uupm audit derived from the 191/192 imported
+palettes, re-verified directly against `lib/design/data/palettes.json` before writing any
+derivation code — not taken on the audit's word alone:**
+
+- **`ring = accent`, exactly.** The audit's own number: `Ring == Primary` in 161/192 (84%) of
+  source palettes — the clear majority pattern, and the one the task named directly. Implemented as
+  the literal same `hsl(hue, accentS, accentL)` call, not a separate derivation that happens to
+  match.
+- **`secondary` is a tint of `accent` — same hue and saturation, lighter.** Computed the actual
+  HSL relationship between every imported `Primary`/`Secondary` pair directly (a throwaway script,
+  `hexToHsl` on both columns of all 191 rows): **median hue delta 4.0°** (matches the audit's own
+  stated number exactly — a real cross-check, not a coincidence), **median saturation delta +2.2**
+  (negligible), **median lightness delta +9.0**, secondary lighter than primary in **87%** of rows.
+  Modelled as same hue, same saturation, `accentL + 9` (clamped to 92 so an already-light accentL
+  can't push past white) — the 4° hue "delta" in the source data reads as noise around the true
+  invariant "same hue" in hand-picked palettes, not something to deliberately reproduce as an
+  offset, which the audit's own prose says explicitly ("a tint/shade, not a second brand colour").
+- **`destructive` — fixed, not hue-derived; stated plainly why.** Queried the actual distribution
+  in the imported corpus rather than assuming: **`#DC2626` in 172/191 rows (90%)**, `#EF4444` in the
+  remaining 19 — no other value survived the drop of row 89. `#DC2626` (Tailwind red-600) is a
+  fixed constant, same reasoning as the existing `paper: "#ffffff"` literal — an error colour that
+  changed with the brand hue would stop reading as "this is an error," and the source data treats
+  it as a controlled constant (only 3 values across the whole original 192-row corpus), not a
+  per-brand derivation.
+- **`onDestructive` — `pickOnColor(destructive)`, Task 1.3's first real consumer.** Checked against
+  the corpus first: **`#DC2626` pairs with `#FFFFFF` onDestructive in all 172 of 172 rows that use
+  it.** `pickOnColor("#dc2626")` returns `"#FFFFFF"` — confirmed by running the real function, not
+  assumed — matching the corpus exactly. `contrastRatio("#dc2626", "#FFFFFF")` is 4.83, clearing AA
+  (4.5) with real margin, corroborating why every source palette made the same choice.
+
+**Golden-file verification — the actual done-when, done the honest way:** captured true "before"
+values by extracting the pre-edit file from git (`git show HEAD:lib/content/normalize-brand-colors.ts`),
+running its `buildPalette` against 6 fixed inputs chosen to exercise different code paths (a plain
+hue, a hue that triggers the white-contrast-deepening loop, a neutral-skipped mixed input, the
+yellowish branch, a single-neutral fallback, and an empty-array fallback) — not values I assumed
+would be unchanged, actually run and captured. Then ran the **new** code against the same 6 inputs
+and confirmed every one of the 10 original fields plus `derivedFrom` matched exactly, before writing
+those captured values into the test file as its golden fixtures.
+
+**Files created/modified:**
+```
+$ git status --porcelain
+ M lib/content/normalize-brand-colors.ts
+?? lib/content/normalize-brand-colors.test.ts
+```
+No other file touched — the three template callers (`atlas`, `ledger`, `showcase`) that already
+call `buildPalette(c.brandColors || [])` are unaffected; `tsc --noEmit` passing confirms adding
+fields to `Palette` didn't break anything that destructures it.
+
+**Verification command (the task's stated done-when):**
+```
+npx vitest run lib/content/normalize-brand-colors.test.ts
+```
+
+**Output:**
+```
+ RUN  v4.1.10 C:/Users/acer/Documents/project room/JRNY-Digital/kondo
+
+ Test Files  1 passed (1)
+      Tests  17 passed (17)
+   Start at  14:33:02
+   Duration  404ms (transform 104ms, setup 0ms, import 127ms, tests 10ms, environment 0ms)
+```
+Full suite, confirming no regressions elsewhere:
+```
+$ npx tsc --noEmit && npm run lint && npx vitest run
+(tsc: exit 0; lint: exit 0)
+ Test Files  9 passed (9)
+      Tests  88 passed | 1 todo (89)
+```
+
+**The Princeton `#002000` carry-forward, answered directly, not deferred again.** Ran
+`buildPalette([{ hex: "#002000" }])` for real (both before writing the test and as the test's own
+final assertion). Result: `derivedFrom: "fallback"`, hue reverts to `FALLBACK_HUE` (222). **The
+near-black input never reaches hue-selection at all** — `pickHue`'s own pre-existing filter
+(`parsed.l < 26`, written long before this session, unrelated to Task 1.5) already rejects anything
+this dark; `#002000` has `l ≈ 6.3%`. So `secondary`/`ring`/`destructive` all safely derive from the
+*fallback* slate-indigo hue in this case, not from a broken near-black hue — `secondary` is not
+"indistinguishable from primary" because it never touches the near-black value in the first place.
+**This is not a fix — `buildPalette`'s input source is unchanged by this task** (still the existing
+`ContentColor[]` from `extractDominantColors`, not `rankBrandColorSources`' output; that wiring is a
+separate, not-yet-scoped task). It's a direct answer, verified by running the actual code: *if* a
+future task wires `rankBrandColorSources`' logo-tier output into this function's input array, a
+value like Princeton's `#002000` specifically would already be filtered out by existing code,
+before Task 1.5's four new roles ever see it. This only covers the *l < 26* case specifically —
+it says nothing about a low-confidence value that happens to have real saturation and land above
+that lightness floor, which would still flow through as if it were a confident input, since
+`pickHue` has no notion of the `confidence` field `rankBrandColorSources` returns. That gap is real
+and unaddressed, flagged for whoever does the actual wiring task.
+
+**Failures, retries and dead ends:** none — implementation matched the audit's invariants on the
+first attempt, cross-checked against the real imported corpus rather than the audit's prose alone,
+and the golden test passed against real captured pre-edit values without needing adjustment.
+
+**Shortcuts taken:** none.
+
+**Deviations from the task spec:** none — extended, did not rewrite; wired in `pickOnColor` from
+Task 1.3 as its first consumer, as instructed; answered the Princeton carry-forward directly rather
+than restating it as still-open.
+
+**Not run / not verified:**
+- Whether `SECONDARY_LIGHTNESS_DELTA = 9` and the 92-point clamp are well-calibrated beyond the 6
+  fixed test inputs — they're grounded in the real corpus median, not guessed, but only exercised
+  against a handful of hues here, not all 191 real primaries. `validate-contrast.ts` (build plan
+  §3.4, not built by any task so far) is the eventual place a full-corpus check like that belongs.
+- Whether `secondary`/`ring`/`destructive`/`onDestructive` pass their own AA contrast checks against
+  the roles they'd realistically sit on (e.g. `onDestructive` on `destructive` — checked directly
+  above; `ring` against `mist`/`paper` backgrounds — not checked, out of this task's scope, likely
+  `1.6`'s "contrast gate" per the task's own phrasing).
+- The gap noted above — `pickHue` has no way to treat a low-confidence-but-not-near-black value
+  from a future `rankBrandColorSources` integration with any extra caution — not fixed, not this
+  task's scope, flagged for whoever does that wiring.
+
+**Confidence:** High — every invariant implemented was re-derived from the real imported corpus
+before being coded (not just quoted from the audit), the golden values are real captured pre-edit
+output (not assumed unchanged), and the Princeton carry-forward question was answered by actually
+running the code, not by reasoning alone.
+
+**Next task:** awaiting the human's direction. Not started this session.
+---
+
+---
 
 # PART E — For the human reviewing this log
 
