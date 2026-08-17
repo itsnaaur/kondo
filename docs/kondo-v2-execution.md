@@ -4879,6 +4879,144 @@ immediately after.
 ---
 
 ---
+### 1.6 — Contrast validation gate against the corpus
+**Timestamp:** 2026-08-17
+**Git SHA at start:** 3ea263e
+**Status:** DONE-VERIFIED — ran as specified; **result is 129/191, not a clean 191.** Not patched,
+per instruction — reported below with the real reason for both failure modes.
+
+**What I did:** new build-time script, `lib/design/build/validate-contrast.ts`
+(`npx tsx lib/design/build/validate-contrast.ts`). For each of the 191 imported palettes
+(`lib/design/data/palettes.json`), takes only its `primary` hex, calls the real `buildPalette()`
+exactly as production does, and checks 12 text-on-background pairs against WCAG AA's 4.5:1 normal-
+text minimum, using `contrastRatio` from Task 1.3 — its second real consumer, after `1.5`'s
+`onDestructive`.
+
+**The 12 pairs are grounded in real template CSS, not invented.** Grepped all three shipped
+templates (`lib/templates/{atlas,ledger,showcase}/styles.ts`) for `background: var(--X)` and what
+colour actually renders as text inside each context, before writing the pair list:
+`ink`/`paper`, `inkMuted`/`paper`, `ink`/`mist`, `inkMuted`/`mist`, `accent`/`mist` (confirmed via
+`.at-hero__stats dt{color:var(--accent)}` inside `.at-hero{background:var(--mist)}`),
+`ink`/`accentSoft`, `inkMuted`/`accentSoft` (confirmed via `.tl-row__desc{color:var(--ink-muted)}`
+on `.tl-row:hover{background:var(--accent-soft)}`), `accentInk`/`accent`, `paper`/`deep`,
+`paper`/`deepSoft` (both confirmed directly via `.at-why{background:var(--deep);color:var(--paper)}`
+and its nested `.at-why__card{background:var(--deep-soft)}`, no colour override), and
+`onDestructive`/`destructive` (by definition). One pair, `accentInk`/`secondary`, is **not**
+directly observed — nothing consumes `secondary` yet (`1.5` added the role; no template renders
+text on it) — and is flagged as an inferred analogy in the script's own comment, not presented as
+confirmed usage. `ring` and `line` are deliberately excluded and the reason stated in the script:
+`ring` is a focus-outline colour (WCAG SC 1.4.11 non-text contrast, not SC 1.4.3 text contrast — no
+text sits "on" a focus ring) and `line` is a decorative hairline, not a background anything renders
+on.
+
+**Result — the actual done-when, pasted in full:**
+```
+Checked 191 palettes, 12 pairs each (2292 total checks), AA minimum 4.5:1.
+
+FAILURES (103 pair-failures across 62 of 191 palettes):
+[full 103-line list — see this entry's chat reply for the complete paste, reproduced in full
+there per the human's explicit "paste ... every failure" instruction; abbreviated here to the
+shape of the finding, since the full list is long and every line follows the same two patterns]
+
+  palette #3 (primary #059669): accent on mist — ratio 4.29:1 (needs 4.5:1)
+  palette #3 (primary #059669): accentInk on secondary (inferred pairing — see comment above) — ratio 2.95:1 (needs 4.5:1)
+  ... [101 more lines, same two shapes, spanning palette IDs #8 through #190]
+
+SUMMARY: 129/191 palettes fully AA-passing across all 12 checked pairs.
+Not patched — see docs/kondo-v2-execution.md's 1.6 entry.
+```
+
+**Every failure is exactly one of two pairs — confirmed by grepping the output, not eyeballed:**
+`accent on mist` (41 failures, 41 distinct palettes) and `accentInk on secondary` (62 failures, 62
+distinct palettes). **No other pair failed even once across all 191×10 = 1,910 other checks** — all
+41 `accent`-on-`mist` failures are a strict subset of the 62 `accentInk`-on-`secondary` failures
+(every palette that fails the first also fails the second; 21 fail only the second). This is a
+clean, two-cause result, not scattered noise.
+
+**Cause 1 — `accent on mist`, a real gap in the existing derivation, not something Task 1.5 or 1.6
+introduced.** `buildPalette`'s own contrast-deepening loop (unchanged by any task this session)
+only enforces `accent` vs. **pure white** (`contrast(luminance(...), 1) >= 4.5`), and stops the
+moment it clears 4.5 — no safety margin. `mist` is `hsl(hue, 24, 97)` — a tinted near-white, not
+true white, and a colour with real saturation at 97% lightness always has *slightly* lower relative
+luminance than luminance-1.0 white. Lower background luminance means lower contrast against the
+same foreground. So any hue whose `accent` clears the white check by a thin margin — which the loop
+guarantees will happen often, since it stops as soon as it passes rather than aiming for headroom —
+predictably fails the very similar but measurably harder `mist` check. Every one of the 41 failing
+ratios (4.29–4.49) sits just under 4.5, exactly consistent with this mechanism, not a random spread.
+**This is a latent gap in `normalize-brand-colors.ts` that predates Task 1.5** — `accent`-on-`mist`
+was never checked before this task existed to check it.
+
+**Cause 2 — `accentInk on secondary`, a direct consequence of Task 1.5's own formula.**
+`secondary = hsl(hue, accentS, accentL + 9)` — always *lighter* than `accent` by construction (the
+uupm audit's own real 87%-lighter finding, which `1.5` correctly implemented). `accentInk` is
+chosen to satisfy contrast against **`accent`'s** lightness specifically, not `secondary`'s. Pairing
+white (the common `accentInk` case) against a background that's deliberately 9 points *lighter*
+than the one it was chosen for reliably drops contrast — sometimes far below 4.5 (as low as 2.95:1
+here), not just marginally. **This is the inferred pairing flagged in the script's own comment as
+unconfirmed by real template usage** — no template renders text on `secondary` today, so this
+failure describes a real risk in the role's *contract*, not a bug currently visible to any user.
+
+**Neither failure was patched — exactly as instructed.** Fixing Cause 1 would mean adding
+`mist` (or a small safety margin) to the existing white-contrast loop; fixing Cause 2 would mean
+either giving `secondary` its own `pickOnColor`-style ink role (following `1.5`'s own precedent for
+`onDestructive`) or capping how much lighter `secondary` can get before contrast fails. Both are
+real, specific, buildable fixes — deliberately not built here, since the task's instruction was
+explicit that a failure here is information, not something to patch past in the same entry that
+found it.
+
+**Files created/modified:**
+```
+$ git status --porcelain
+?? lib/design/build/validate-contrast.ts
+```
+Standalone script — no other file touched, nothing wired into the app.
+
+**Verification command (the task's stated done-when), full output above and in the accompanying
+chat reply:**
+```
+npx tsx lib/design/build/validate-contrast.ts
+```
+Exit code 1 (failures present — the gate correctly reports non-zero, ready to wire into CI as a
+real gate later, not just a script that always exits 0).
+
+Also ran, confirming this addition breaks nothing:
+```
+$ npx tsc --noEmit && npm run lint && npx vitest run
+(tsc: exit 0; lint: exit 0)
+ Test Files  9 passed (9)
+      Tests  88 passed | 1 todo (89)
+```
+
+**Failures, retries and dead ends:** none in building the script itself — it ran correctly on the
+first attempt. The *result* is a real failure set, reported per instruction, not a bug in this
+task's own code.
+
+**Shortcuts taken:** none. The `accentInk`/`secondary` pair's inferred (not directly observed)
+status is disclosed in the script's own comment, not silently presented as confirmed.
+
+**Deviations from the task spec:** none — script runs over all 191, reports pass/fail per palette,
+logs every failure with input hex/pair/ratio, does not patch.
+
+**Not run / not verified:**
+- Large-text (3:1) thresholds — every pair is checked against the stricter 4.5:1 normal-text
+  minimum uniformly, since role colours are used at varying sizes across templates and the
+  derivation code has no notion of font size. A pair that fails 4.5:1 might still clear 3:1; not
+  computed separately here, since the task asked for "AA-passing," and 4.5:1 is the safe,
+  conservative reading of that for arbitrary text size.
+- Whether either fix proposed above (a mist-aware deepening loop; a `secondary`-specific ink role)
+  would actually resolve all 62 failures without breaking the 129 currently-clean palettes — not
+  attempted, per instruction not to patch in this entry.
+
+**Confidence:** High — the script's pair list is grounded in real, grepped template CSS (not
+invented), the two failure causes are explained by direct mechanism (the deepening loop's
+white-only target; `secondary`'s deliberate lightening), not just correlation, and the full 191-run
+output is real, pasted output, not a summary standing in for unseen detail.
+
+**Next task:** awaiting the human's direction on Causes 1 and 2 — whether either or both get fixed
+now, deferred to a numbered task, or left as a known, documented gap. Not started this session.
+---
+
+---
 
 # PART E — For the human reviewing this log
 
