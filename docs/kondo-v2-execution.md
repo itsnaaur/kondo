@@ -7727,6 +7727,126 @@ logic and assumed to reach the template correctly.
 ---
 
 ---
+### 2.5 — Golden files
+**Timestamp:** 2026-08-18
+**Git SHA at start:** d531254
+**Status:** DONE-VERIFIED — `npx vitest run lib/design/` and the full suite both pass, pasted
+below.
+
+**Named the file for what it actually covers, not what the task first named it.** New file is
+`lib/design/resolve-tokens.test.ts`, not `resolve-design-system.test.ts` — `resolve-design-system.ts`
+doesn't exist; it's Task 3.2's discriminated-union resolver (palette + typography + style bundle +
+pattern + anti-patterns, per build plan §6.1, returning `{ok:true; system}|{ok:false; reason;
+partial}`). This file freezes only what's actually built today: `resolve-typography.ts` (`2.2`)
+and style-bundle selection (`resolveTemplateTokens`/`resolveStyleBundle` in `resolve-tokens.ts`,
+`2.4`, itself wrapping `2.3`'s `style-bundles.json`). Stated directly in the file's own header
+comment: when `3.2` lands, these goldens need extending to cover its new surface (palette
+resolution, pattern eligibility, the `ok` union) — this file doesn't pretend to be that resolver's
+test suite.
+
+**Coverage, matching the task's three-part list exactly:**
+1. All 28 mood/tier combinations `2.2`'s `TABLE` supports (7 canonical moods × 4 tiers) — full
+   `resolveTypography()` result objects frozen (`pairingId`, `slug`, `name`, `headingFont`,
+   `bodyFont`, `googleFontsUrl`, `matchedMoodSignal`, `isDefault`), not just `.slug` the way
+   `resolve-typography.test.ts`'s own narrower behaviour tests do — this file would catch a
+   `googleFontsUrl` or `name` drift those tests wouldn't.
+2. Each of the 6 style bundles — `resolveTemplateTokens({ styleBundleId })` with a **fixed**
+   typography input (the no-match default) across all 6, so only the bundle axis varies and each
+   golden isolates exactly what that bundle changes.
+3. The no-match neutral default path — both `resolveTypography`'s own default and
+   `resolveTemplateTokens()`'s full zero-argument default (the exact call `registry.ts` makes).
+
+Deliberately did **not** golden the full cross-product of 28 mood/tier combinations × 6 bundles
+(168 cases) — the combination inside `resolveTemplateTokens` is a trivial merge of two
+independently-resolved objects, not independently risky, and `2.4`'s own entry already
+live-verified one real combined case end-to-end. Freezing both axes separately (35 goldens total:
+28 + 6 + 1) covers what could actually silently drift; a 168-entry cross-product would mostly be
+restating the same 35 facts in combination, not finding new risk.
+
+**Goldens generated from the current implementation on 2026-08-18, stated as such — same
+discipline as `1.6b`.** Wrote a throwaway probe script (`scripts/_tmp-2.5-goldens.ts`, deleted
+after use) that called `resolveTypography`/`resolveTemplateTokens`/`resolveStyleBundle` directly
+for all 35 cases plus a sanity check, printed the real JSON output, and copied those exact values
+into the test file's `GOLDEN_TYPOGRAPHY`/`GOLDEN_DEFAULT_TYPOGRAPHY`/`GOLDEN_BUNDLE_TOKENS`
+constants — not hand-predicted from reading the source. The file's own header comment states this
+plainly and points to `1.6b`'s own regenerated-golden entry as the precedent for what happens if
+one of these values legitimately needs to change later: regenerate and say so in the log, never
+silently update to make a failing test pass.
+
+**`blur` deliberately excluded from every golden — the task's own instruction to decide and state
+which, not work around it.** All 6 `2.3` bundles resolve `blur` to `"0px"` today, but not because
+six independent design judgements agreed on "no blur" — `2.3-CARRY-FORWARD`'s own entry (and
+`2.4`'s live finding that this makes Showcase's frosted nav a no-op under every current bundle)
+already established that none of the six bundles actually explored blur as a design axis; it's a
+uniform non-choice, not six real choices that happen to agree. Freezing `"0px"` into a golden now
+would create a diff this task already knows is coming the moment `2.3`'s bundles are revisited —
+noise, not the reviewed-diff signal goldens exist to provide. Radius/shadow/border-weight/spacing
+values ARE frozen despite also being visually unverified (`2.3-CARRY-FORWARD`'s other open item) —
+a deliberately different call, reasoned through rather than applied uniformly: those vary
+meaningfully per bundle with a stated rationale each (a real, distinguishing choice not yet
+confirmed to look good), which is a materially weaker uncertainty than blur's "never actually
+chosen at all." Implemented via `toMatchObject` (partial match) instead of `toEqual` for the
+bundle-token goldens specifically, so `blur`'s absence from the golden object means "not checked,"
+not "expected to be undefined." Added one small, separate, clearly-labelled test asserting blur's
+real current value (`"0px"`, every bundle) outside the frozen comparison — so the exclusion is
+visible and self-documenting, not a silent gap a future reader would need to notice on their own.
+
+**Files created/modified:**
+```
+$ git status --porcelain
+?? lib/design/resolve-tokens.test.ts
+```
+
+**Verification command:**
+```
+npx vitest run lib/design/
+npx vitest run
+npx tsc --noEmit && npm run lint
+```
+
+**Output:**
+```
+$ npx vitest run lib/design/
+ Test Files  3 passed (3)
+      Tests  91 passed (91)
+
+$ npx vitest run
+ Test Files  11 passed (11)
+      Tests  170 passed | 1 todo (171)
+
+$ npx tsc --noEmit
+(exit 0)
+$ npm run lint
+(exit 0)
+```
+
+**Failures, retries and dead ends:** the determinism test's first draft passed a typography
+*slug* (`"real-estate-luxury"`) where a style bundle *id* was required, and `resolveStyleBundle`
+threw — caught immediately by the real test run (`Unknown style bundle id "real-estate-luxury"`),
+not a silent pass; fixed to a real bundle id (`"grounded-property"`) and re-ran clean. Also fixed
+one lint warning (`resolveStyleBundle` imported but unused once the final test structure settled
+on calling it only through `resolveTemplateTokens`).
+
+**Shortcuts taken:** none beyond what's already disclosed above (blur exclusion, no cross-product).
+
+**Deviations from the task spec:** the file name — `resolve-tokens.test.ts`, not the
+`resolve-design-system.test.ts` named at the top of the task, per the task's own correction one
+sentence later. Everything else matches as specified.
+
+**Not run / not verified:**
+- Whether `3.2`'s eventual `resolve-design-system.ts` will reuse `resolveTemplateTokens` directly
+  or re-implement equivalent logic against a richer input shape — not knowable before `3.2` exists,
+  flagged in the file header as the reason these goldens will need extending then, not replacing
+  now.
+
+**Confidence:** High — every golden value was captured from a real, immediate run of the current
+implementation, not predicted; the one real mistake made while writing the tests (wrong id type)
+was caught by the tests actually failing, not overlooked.
+
+**Next task:** `PHASE-2-VERIFY`, begun immediately after, per instruction.
+---
+
+---
 
 # PART E — For the human reviewing this log
 
