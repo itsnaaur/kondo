@@ -1,6 +1,8 @@
 import type { TemplateContent } from "../types";
 import { buildPalette } from "../../content/normalize-brand-colors";
 import { ledgerStyles } from "./styles";
+import { resolveTemplateTokens, type TemplateTokens } from "../../design/resolve-tokens";
+import type { ResolveTypographyInput } from "../../design/resolve-typography";
 
 function esc(v: unknown): string {
   return String(v ?? "")
@@ -71,8 +73,13 @@ function imgAttrs(img: { subject?: string } | null | undefined): string {
   return img?.subject === "people" ? ' style="object-position:center 30%"' : "";
 }
 
-export function renderLedger(c: TemplateContent): { body: string; css: string } {
+// Task 2.4. See atlas/index.ts's renderAtlas for the full reasoning on designInput's default.
+export function renderLedger(
+  c: TemplateContent,
+  designInput?: { typography?: ResolveTypographyInput; styleBundleId?: string }
+): { body: string; css: string } {
   const p = buildPalette(c.brandColors || []);
+  const tokens: TemplateTokens = resolveTemplateTokens(designInput);
   const { head, tail } = splitTagline(c.tagline);
   const services = c.services || [];
   const quotes = c.testimonials || [];
@@ -330,7 +337,7 @@ export function renderLedger(c: TemplateContent): { body: string; css: string } 
 </footer>`;
 
   return {
-    css: ledgerStyles(p),
+    css: ledgerStyles(p, tokens),
     body: [nav, hero, strip, statement, servicesSection, deep, quotesSection, cta, foot].join("\n"),
   };
 }

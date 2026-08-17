@@ -1,6 +1,7 @@
 import type { Palette } from "../../content/normalize-brand-colors";
+import { type TemplateTokens, scaledBand } from "../../design/resolve-tokens";
 
-export function atlasStyles(p: Palette): string {
+export function atlasStyles(p: Palette, tokens: TemplateTokens): string {
   return `
 :root {
   --accent: ${p.accent};
@@ -18,9 +19,20 @@ export function atlasStyles(p: Palette): string {
   --ring: ${p.ring};
   --destructive: ${p.destructive};
   --on-destructive: ${p.onDestructive};
+  --font-body: ${tokens.fontBody};
+  --font-heading: ${tokens.fontHeading};
+  --radius-btn: ${tokens.radiusBtn};
+  --radius-card: ${tokens.radiusCard};
+  --radius-image: ${tokens.radiusImage};
+  --radius-pill: ${tokens.radiusPill};
+  --shadow-card: ${tokens.shadowCard};
+  --shadow-elevated: ${tokens.shadowElevated};
+  --border-weight: ${tokens.borderWeight};
+  --surface-blur: ${tokens.surfaceBlur};
+  --focus-ring-width: ${tokens.focusRingWidth};
   --maxw: 1240px;
   --gutter: clamp(18px, 3.4vw, 46px);
-  --band: clamp(62px, 8vw, 118px);
+  --band: ${scaledBand(62, 8, 118, tokens.bandMultiplier)};
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -30,7 +42,7 @@ body.tpl-atlas {
   margin: 0;
   background: var(--paper);
   color: var(--ink);
-  font-family: "Instrument Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  font-family: var(--font-body);
   font-size: 17px; line-height: 1.6;
   -webkit-font-smoothing: antialiased;
 }
@@ -52,7 +64,7 @@ body.tpl-atlas {
   margin: 0; text-wrap: balance;
 }
 .at-em {
-  font-family: "Newsreader", Georgia, serif;
+  font-family: var(--font-heading);
   font-style: italic; font-weight: 400; letter-spacing: -0.008em;
   color: var(--accent);
 }
@@ -75,9 +87,9 @@ body.tpl-atlas {
 
 .at-btn {
   display: inline-flex; align-items: center; gap: 9px;
-  padding: 15px 26px; border-radius: 2px;
+  padding: 15px 26px; border-radius: var(--radius-btn);
   font-size: 0.95rem; font-weight: 600; letter-spacing: -0.01em;
-  text-decoration: none; border: 1px solid transparent;
+  text-decoration: none; border: var(--border-weight) solid transparent;
   transition: transform 0.15s ease, background-color 0.15s ease, color 0.15s ease;
 }
 .at-btn:hover { transform: translateY(-1px); }
@@ -88,7 +100,7 @@ body.tpl-atlas {
 
 /* ---------- nav ---------- */
 
-.at-nav { border-bottom: 1px solid var(--line); background: var(--paper); }
+.at-nav { border-bottom: var(--border-weight) solid var(--line); background: var(--paper); }
 .at-nav__in { display: flex; align-items: center; gap: 18px; min-height: 76px; padding-block: 14px; }
 .at-nav__logo { max-height: 40px; width: auto; }
 .at-nav__name { font-weight: 600; font-size: 1.06rem; letter-spacing: -0.02em; white-space: nowrap; }
@@ -96,7 +108,7 @@ body.tpl-atlas {
 .at-nav__links a {
   font-size: 0.93rem; font-weight: 500; letter-spacing: -0.012em;
   text-decoration: none; padding: 6px 0;
-  border-bottom: 1px solid transparent; transition: border-color 0.15s ease; white-space: nowrap;
+  border-bottom: var(--border-weight) solid transparent; transition: border-color 0.15s ease; white-space: nowrap;
 }
 .at-nav__links a:hover { border-bottom-color: var(--accent); }
 .at-nav__side { display: flex; align-items: center; gap: 18px; flex: none; margin-left: clamp(18px, 2.6vw, 40px); }
@@ -126,7 +138,7 @@ body.tpl-atlas {
    bare ground — no cards, hairline dividers only. */
 .at-hero__stats {
   margin-top: clamp(44px, 5.5vw, 78px);
-  border-top: 1px solid var(--line);
+  border-top: var(--border-weight) solid var(--line);
   display: grid; grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
 }
 .at-hero__stats > div { padding: clamp(24px, 3vw, 38px) clamp(14px, 1.8vw, 26px) clamp(28px, 3.4vw, 44px); position: relative; }
@@ -145,14 +157,14 @@ body.tpl-atlas {
 
 /* ---------- stat / partner strip ---------- */
 
-.at-strip { border-bottom: 1px solid var(--line); background: var(--paper); }
+.at-strip { border-bottom: var(--border-weight) solid var(--line); background: var(--paper); }
 .at-strip__in { padding-block: clamp(40px, 4.6vw, 64px); }
 .at-partners {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(146px, 100%), 1fr));
   gap: 1px;
   background: var(--line);
-  border: 1px solid var(--line);
+  border: var(--border-weight) solid var(--line);
 }
 .at-partners > span {
   background: var(--paper);
@@ -177,7 +189,7 @@ body.tpl-atlas {
 .at-credentials { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
 .at-credentials > span {
   font-size: 0.82rem; color: var(--on-secondary); padding: 8px 16px;
-  border: 1px solid var(--line); border-radius: 999px; background: var(--secondary);
+  border: var(--border-weight) solid var(--line); border-radius: var(--radius-pill); background: var(--secondary);
 }
 
 /* ---------- differentiators: the strongest reliable content ---------- */
@@ -208,8 +220,8 @@ body.tpl-atlas {
 .at-why__card {
   position: relative;
   background: var(--deep-soft);
-  border: 1px solid rgb(255 255 255 / 0.12);
-  border-radius: 4px;
+  border: var(--border-weight) solid rgb(255 255 255 / 0.12);
+  border-radius: var(--radius-card);
   padding: clamp(26px, 2.6vw, 34px) clamp(24px, 2.4vw, 32px);
   transition: transform 0.22s ease, border-color 0.22s ease;
 }
@@ -252,9 +264,9 @@ body.tpl-atlas {
 .at-svc__item {
   break-inside: avoid;
   padding-block: clamp(13px, 1.5vw, 19px);
-  border-bottom: 1px solid var(--line);
+  border-bottom: var(--border-weight) solid var(--line);
 }
-.at-svc__item:first-child { border-top: 1px solid var(--line); }
+.at-svc__item:first-child { border-top: var(--border-weight) solid var(--line); }
 .at-svc__item dt {
   font-size: 1.02rem; font-weight: 600;
   letter-spacing: -0.024em; line-height: 1.25;
@@ -307,13 +319,13 @@ body.tpl-atlas {
    two of nine sections identical in construction. */
 .at-team { display: flex; flex-wrap: wrap; gap: clamp(14px, 2vw, 26px); }
 .at-team figure { margin: 0; flex: 1 1 clamp(130px, 15vw, 180px); max-width: 200px; }
-.at-team img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; border-radius: 3px; }
+.at-team img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; border-radius: var(--radius-image); }
 .at-team figcaption { padding-top: 12px; }
 .at-team b { display: block; font-size: 1rem; font-weight: 600; letter-spacing: -0.02em; }
 .at-team span { display: block; margin-top: 3px; font-size: 0.86rem; color: var(--ink-muted); line-height: 1.4; }
 
 .at-scenes { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: clamp(12px, 1.6vw, 18px); }
-.at-scenes figure { margin: 0; overflow: hidden; border-radius: 3px; background: var(--mist); position: relative; }
+.at-scenes figure { margin: 0; overflow: hidden; border-radius: var(--radius-image); background: var(--mist); position: relative; }
 .at-scenes img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; }
 .at-scenes figcaption {
   position: absolute; left: 0; right: 0; bottom: 0;
@@ -353,7 +365,7 @@ body.tpl-atlas {
   gap: clamp(24px, 4vw, 64px);
   margin-top: clamp(44px, 5.4vw, 78px);
   padding-top: clamp(28px, 3.4vw, 42px);
-  border-top: 1px solid color-mix(in srgb, var(--accent-ink) 28%, transparent);
+  border-top: var(--border-weight) solid color-mix(in srgb, var(--accent-ink) 28%, transparent);
 }
 .at-says__rest blockquote { margin: 0; }
 .at-says__rest blockquote:nth-child(2) { margin-top: clamp(18px, 2.4vw, 34px); }
@@ -364,8 +376,8 @@ body.tpl-atlas {
 /* ---------- faq ---------- */
 
 .at-faq__in { padding-block: var(--band); }
-.at-faq__list { border-top: 1px solid var(--line); max-width: min(100%, 860px); }
-.at-faq details { border-bottom: 1px solid var(--line); }
+.at-faq__list { border-top: var(--border-weight) solid var(--line); max-width: min(100%, 860px); }
+.at-faq details { border-bottom: var(--border-weight) solid var(--line); }
 .at-faq summary {
   cursor: pointer; list-style: none; padding: 22px 40px 22px 2px;
   font-size: 1.04rem; font-weight: 600; letter-spacing: -0.02em;
@@ -392,9 +404,9 @@ body.tpl-atlas {
 .at-cta__panel {
   display: grid;
   grid-template-columns: minmax(0, 1.06fr) minmax(0, 0.94fr);
-  border-radius: 5px;
+  border-radius: var(--radius-card);
   overflow: hidden;
-  box-shadow: 0 30px 64px -34px rgb(16 24 40 / 0.34);
+  box-shadow: var(--shadow-elevated);
 }
 .at-cta__ask {
   background: var(--accent); color: var(--accent-ink);
@@ -459,7 +471,7 @@ body.tpl-atlas {
   html { scroll-behavior: auto; }
   .tpl-atlas *, .tpl-atlas *::before { transition-duration: 0.01ms !important; }
 }
-.tpl-atlas a:focus-visible, .tpl-atlas summary:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; }
+.tpl-atlas a:focus-visible, .tpl-atlas summary:focus-visible { outline: var(--focus-ring-width) solid var(--ring); outline-offset: 3px; }
 .at-why a:focus-visible, .at-cta a:focus-visible, .at-foot a:focus-visible { outline-color: currentColor; }
 `;
 }

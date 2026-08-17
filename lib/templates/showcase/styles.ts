@@ -1,6 +1,7 @@
 import type { Palette } from "../../content/normalize-brand-colors";
+import { type TemplateTokens, scaledBand } from "../../design/resolve-tokens";
 
-export function showcaseStyles(p: Palette): string {
+export function showcaseStyles(p: Palette, tokens: TemplateTokens): string {
   return `
 :root {
   --accent: ${p.accent};
@@ -18,9 +19,20 @@ export function showcaseStyles(p: Palette): string {
   --ring: ${p.ring};
   --destructive: ${p.destructive};
   --on-destructive: ${p.onDestructive};
+  --font-body: ${tokens.fontBody};
+  --font-heading: ${tokens.fontHeading};
+  --radius-btn: ${tokens.radiusBtn};
+  --radius-card: ${tokens.radiusCard};
+  --radius-image: ${tokens.radiusImage};
+  --radius-pill: ${tokens.radiusPill};
+  --shadow-card: ${tokens.shadowCard};
+  --shadow-elevated: ${tokens.shadowElevated};
+  --border-weight: ${tokens.borderWeight};
+  --surface-blur: ${tokens.surfaceBlur};
+  --focus-ring-width: ${tokens.focusRingWidth};
   --maxw: 1320px;
   --gutter: clamp(18px, 3.4vw, 44px);
-  --band: clamp(60px, 8vw, 116px);
+  --band: ${scaledBand(60, 8, 116, tokens.bandMultiplier)};
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -30,7 +42,7 @@ body.tpl-showcase {
   margin: 0;
   background: var(--paper);
   color: var(--ink);
-  font-family: "Instrument Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: var(--font-body);
   font-size: 17px;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
@@ -65,7 +77,7 @@ body.tpl-showcase {
   text-wrap: balance;
 }
 .sc-em {
-  font-family: "Newsreader", Georgia, "Times New Roman", serif;
+  font-family: var(--font-heading);
   font-style: italic;
   font-weight: 400;
   letter-spacing: -0.008em;
@@ -99,9 +111,9 @@ body.tpl-showcase {
 
 .sc-btn {
   display: inline-flex; align-items: center; gap: 9px;
-  padding: 15px 26px; border-radius: 2px;
+  padding: 15px 26px; border-radius: var(--radius-btn);
   font-size: 0.95rem; font-weight: 600; letter-spacing: -0.01em;
-  text-decoration: none; border: 1px solid transparent;
+  text-decoration: none; border: var(--border-weight) solid transparent;
   transition: transform 0.15s ease, background-color 0.15s ease, color 0.15s ease;
 }
 .sc-btn:hover { transform: translateY(-1px); }
@@ -112,7 +124,7 @@ body.tpl-showcase {
 
 /* ---------- nav ---------- */
 
-.sc-nav { border-bottom: 1px solid var(--line); background: var(--paper); }
+.sc-nav { border-bottom: var(--border-weight) solid var(--line); background: var(--paper); }
 .sc-nav__in {
   display: flex; align-items: center; gap: 20px;
   min-height: 76px; padding-top: 14px; padding-bottom: 14px;
@@ -127,7 +139,7 @@ body.tpl-showcase {
 .sc-nav__links a {
   font-size: 0.94rem; font-weight: 500; letter-spacing: -0.012em;
   text-decoration: none; padding: 6px 0;
-  border-bottom: 1px solid transparent; transition: border-color 0.15s ease;
+  border-bottom: var(--border-weight) solid transparent; transition: border-color 0.15s ease;
   white-space: nowrap;
 }
 .sc-nav__links a:hover { border-bottom-color: var(--accent); }
@@ -148,9 +160,9 @@ body.tpl-showcase {
   top: 0;
   z-index: 20;
   background: color-mix(in srgb, var(--paper) 76%, transparent);
-  -webkit-backdrop-filter: blur(16px) saturate(160%);
-  backdrop-filter: blur(16px) saturate(160%);
-  border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  -webkit-backdrop-filter: blur(var(--surface-blur)) saturate(160%);
+  backdrop-filter: blur(var(--surface-blur)) saturate(160%);
+  border-bottom: var(--border-weight) solid color-mix(in srgb, var(--line) 70%, transparent);
 }
 /* No backdrop-filter support — fall back to an opaque bar rather than a
    see-through one, which is the failure this change exists to avoid. */
@@ -236,14 +248,14 @@ body.tpl-showcase {
 .sc-svc__in { padding-top: var(--band); padding-bottom: var(--band); }
 .sc-svc__head { max-width: 40ch; margin-bottom: clamp(34px, 4.4vw, 62px); }
 
-.sc-svc__list { border-top: 1px solid var(--line); }
+.sc-svc__list { border-top: var(--border-weight) solid var(--line); }
 .sc-svc__row {
   display: grid;
   grid-template-columns: clamp(48px, 6vw, 88px) minmax(0, 1fr) minmax(0, 1.15fr);
   gap: clamp(14px, 2.6vw, 46px);
   align-items: baseline;
   padding: clamp(18px, 2.2vw, 30px) 4px;
-  border-bottom: 1px solid var(--line);
+  border-bottom: var(--border-weight) solid var(--line);
   transition: padding-left 0.22s cubic-bezier(0.2, 0, 0.1, 1);
 }
 .sc-svc__row:hover { padding-left: 16px; }
@@ -343,8 +355,8 @@ body.tpl-showcase {
   align-items: start;
 }
 .sc-about__shots figure {
-  margin: 0; border-radius: 4px; overflow: hidden; background: var(--paper);
-  box-shadow: 0 18px 40px -26px rgb(16 24 40 / 0.3);
+  margin: 0; border-radius: var(--radius-image); overflow: hidden; background: var(--paper);
+  box-shadow: var(--shadow-card);
 }
 /* Natural aspect — nothing cropped, whatever shape the crawl returns. */
 .sc-about__shots img { width: 100%; height: auto; display: block; }
@@ -372,7 +384,7 @@ body.tpl-showcase {
 .sc-mosaic__grid figure {
   break-inside: avoid;
   margin: 0 0 clamp(12px, 1.6vw, 20px);
-  border-radius: 4px;
+  border-radius: var(--radius-image);
   overflow: hidden;
   background: var(--paper);
   position: relative;
@@ -408,13 +420,13 @@ body.tpl-showcase {
 }
 .sc-quotes__rest {
   margin-top: clamp(44px, 5.4vw, 78px);
-  border-top: 1px solid var(--line);
+  border-top: var(--border-weight) solid var(--line);
   columns: 2; column-gap: clamp(28px, 4.4vw, 64px);
 }
 .sc-quotes__rest blockquote {
   break-inside: avoid; margin: 0;
   padding: clamp(18px, 2.2vw, 26px) 2px;
-  border-bottom: 1px solid var(--line);
+  border-bottom: var(--border-weight) solid var(--line);
 }
 .sc-quotes__rest p { margin: 0 0 10px; font-size: 0.98rem; line-height: 1.56; letter-spacing: -0.012em; }
 .sc-quotes__rest footer { font-size: 0.84rem; color: var(--ink-muted); }
@@ -422,7 +434,7 @@ body.tpl-showcase {
 
 /* ---------- trust strip ---------- */
 
-.sc-strip { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.sc-strip { border-top: var(--border-weight) solid var(--line); border-bottom: var(--border-weight) solid var(--line); }
 .sc-strip__in { padding-top: 32px; padding-bottom: 32px; }
 .sc-strip__label {
   font-size: 0.72rem; letter-spacing: 0.14em; text-transform: uppercase;
@@ -439,7 +451,7 @@ body.tpl-showcase {
 .sc-credentials { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
 .sc-credentials > span {
   font-size: 0.82rem; color: var(--on-secondary); padding: 8px 16px;
-  border: 1px solid var(--line); border-radius: 999px; background: var(--secondary);
+  border: var(--border-weight) solid var(--line); border-radius: var(--radius-pill); background: var(--secondary);
 }
 
 /* ---------- cta ----------
@@ -496,7 +508,7 @@ body.tpl-showcase {
   gap: clamp(12px, 2.4vw, 34px);
   margin: clamp(30px, 3.6vw, 46px) auto 0;
   padding-top: clamp(22px, 2.6vw, 32px);
-  border-top: 1px solid rgb(255 255 255 / 0.2);
+  border-top: var(--border-weight) solid rgb(255 255 255 / 0.2);
   max-width: 860px;
 }
 .sc-cta__facts span { font-size: 0.9rem; color: rgb(255 255 255 / 0.78); }
@@ -552,7 +564,7 @@ body.tpl-showcase {
   }
 }
 
-.tpl-showcase a:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; }
+.tpl-showcase a:focus-visible { outline: var(--focus-ring-width) solid var(--ring); outline-offset: 3px; }
 .sc-feature a:focus-visible, .sc-cta a:focus-visible, .sc-foot a:focus-visible { outline-color: currentColor; }
 `;
 }

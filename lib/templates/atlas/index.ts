@@ -3,6 +3,8 @@ import { buildPalette } from "../../content/normalize-brand-colors";
 import { prepare } from "../../content/content-guards";
 import { escapeHtml as esc } from "../escape-html";
 import { atlasStyles } from "./styles";
+import { resolveTemplateTokens, type TemplateTokens } from "../../design/resolve-tokens";
+import type { ResolveTypographyInput } from "../../design/resolve-typography";
 
 // A punctuation split is only worth taking if the two halves are comparable. Propell's
 // tagline breaks on its em-dash into 4 words and 11 — the accent clause ran four lines
@@ -49,8 +51,17 @@ function imgAttrs(img: { subject?: string } | null | undefined): string {
   return img?.subject === "people" ? ' style="object-position:center 30%"' : "";
 }
 
-export function renderAtlas(c: TemplateContent): { body: string; css: string } {
+// Task 2.4. typography/styleBundleId are optional and default internally (resolveTemplateTokens)
+// — same "resolve to a sensible default when the real input doesn't exist yet" shape
+// buildPalette(c.brandColors || []) already established, since neither a real per-client
+// moodSignals[]/positioningTier (Task 5.4, Phase 3) nor a bundle-selection resolver (not built by
+// Task 2.3) exists yet. Every existing caller (registry.ts) keeps working unchanged.
+export function renderAtlas(
+  c: TemplateContent,
+  designInput?: { typography?: ResolveTypographyInput; styleBundleId?: string }
+): { body: string; css: string } {
   const p = buildPalette(c.brandColors || []);
+  const tokens: TemplateTokens = resolveTemplateTokens(designInput);
   const { hero, scenes, team, stats, faqs } = prepare(c);
   const { head, tail } = splitTagline(c.tagline);
 
@@ -287,7 +298,7 @@ export function renderAtlas(c: TemplateContent): { body: string; css: string } {
 </div></footer>`;
 
   return {
-    css: atlasStyles(p),
+    css: atlasStyles(p, tokens),
     body: [nav, heroSection, why, servicesSection, processSection, about, reviews, faqSection, partnerStrip, cta, foot].join("\n"),
   };
 }

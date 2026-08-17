@@ -3,6 +3,8 @@ import { buildPalette } from "../../content/normalize-brand-colors";
 import { byOrientation } from "../../content/content-guards";
 import { escapeHtml as esc } from "../escape-html";
 import { showcaseStyles } from "./styles";
+import { resolveTemplateTokens, type TemplateTokens } from "../../design/resolve-tokens";
+import type { ResolveTypographyInput } from "../../design/resolve-typography";
 
 // Face-forward crop instead of a dead-center one — the difference between a headshot
 // cropped at the eyebrows and one that reads correctly. Only applied to subject:"people"
@@ -120,8 +122,13 @@ function allocateImages(hero: TemplateImage | null, gallery: TemplateImage[]): S
   return slots;
 }
 
-export function renderShowcase(c: TemplateContent): { body: string; css: string } {
+// Task 2.4. See atlas/index.ts's renderAtlas for the full reasoning on designInput's default.
+export function renderShowcase(
+  c: TemplateContent,
+  designInput?: { typography?: ResolveTypographyInput; styleBundleId?: string }
+): { body: string; css: string } {
   const p = buildPalette(c.brandColors || []);
+  const tokens: TemplateTokens = resolveTemplateTokens(designInput);
   const { head, tail } = splitTagline(c.tagline);
   const services = c.services || [];
   const quotes = c.testimonials || [];
@@ -389,7 +396,7 @@ export function renderShowcase(c: TemplateContent): { body: string; css: string 
 </footer>`;
 
   return {
-    css: showcaseStyles(p),
+    css: showcaseStyles(p, tokens),
     body: [top, servicesSection, feature, about, mosaic, strip, quotesSection, cta, foot].join("\n"),
   };
 }

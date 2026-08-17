@@ -1,6 +1,7 @@
 import type { Palette } from "../../content/normalize-brand-colors";
+import { type TemplateTokens, scaledBand } from "../../design/resolve-tokens";
 
-export function ledgerStyles(p: Palette): string {
+export function ledgerStyles(p: Palette, tokens: TemplateTokens): string {
   return `
 :root {
   --accent: ${p.accent};
@@ -18,9 +19,20 @@ export function ledgerStyles(p: Palette): string {
   --ring: ${p.ring};
   --destructive: ${p.destructive};
   --on-destructive: ${p.onDestructive};
+  --font-body: ${tokens.fontBody};
+  --font-heading: ${tokens.fontHeading};
+  --radius-btn: ${tokens.radiusBtn};
+  --radius-card: ${tokens.radiusCard};
+  --radius-image: ${tokens.radiusImage};
+  --radius-pill: ${tokens.radiusPill};
+  --shadow-card: ${tokens.shadowCard};
+  --shadow-elevated: ${tokens.shadowElevated};
+  --border-weight: ${tokens.borderWeight};
+  --surface-blur: ${tokens.surfaceBlur};
+  --focus-ring-width: ${tokens.focusRingWidth};
   --maxw: 1280px;
   --gutter: clamp(18px, 3.4vw, 44px);
-  --band: clamp(60px, 8vw, 112px);
+  --band: ${scaledBand(60, 8, 112, tokens.bandMultiplier)};
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -31,7 +43,7 @@ body.tpl-ledger {
   margin: 0;
   background: var(--paper);
   color: var(--ink);
-  font-family: "Instrument Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: var(--font-body);
   font-size: 17px;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
@@ -72,7 +84,7 @@ body.tpl-ledger {
 /* The Raven move: the tail of the headline set in an italic serif.
    Applied to the prospect's own tagline, so every page reads as written for them. */
 .tl-em {
-  font-family: "Newsreader", Georgia, "Times New Roman", serif;
+  font-family: var(--font-heading);
   font-style: italic;
   font-weight: 400;
   letter-spacing: -0.01em;
@@ -114,12 +126,12 @@ body.tpl-ledger {
   align-items: center;
   gap: 9px;
   padding: 14px 24px;
-  border-radius: 2px;
+  border-radius: var(--radius-btn);
   font-size: 0.95rem;
   font-weight: 600;
   letter-spacing: -0.01em;
   text-decoration: none;
-  border: 1px solid transparent;
+  border: var(--border-weight) solid transparent;
   transition: transform 0.15s ease, background-color 0.15s ease, color 0.15s ease;
 }
 .tl-btn:hover { transform: translateY(-1px); }
@@ -132,7 +144,7 @@ body.tpl-ledger {
 /* ---------- nav ---------- */
 
 .tl-nav {
-  border-bottom: 1px solid var(--line);
+  border-bottom: var(--border-weight) solid var(--line);
   background: var(--paper);
 }
 .tl-nav__in {
@@ -167,7 +179,7 @@ body.tpl-ledger {
   text-decoration: none;
   color: var(--ink);
   padding: 6px 0;
-  border-bottom: 1px solid transparent;
+  border-bottom: var(--border-weight) solid transparent;
   transition: border-color 0.15s ease;
   white-space: nowrap;
 }
@@ -287,7 +299,7 @@ body.tpl-ledger {
    Full colour, roughly double the size, each in its own cell of a hairline
    lattice so a row of four and a row of nine both look composed. */
 
-.tl-strip { border-bottom: 1px solid var(--line); background: var(--paper); }
+.tl-strip { border-bottom: var(--border-weight) solid var(--line); background: var(--paper); }
 .tl-strip__in { padding-top: clamp(44px, 5vw, 68px); padding-bottom: clamp(44px, 5vw, 68px); }
 .tl-strip__label {
   font-size: 0.72rem;
@@ -302,7 +314,7 @@ body.tpl-ledger {
   grid-template-columns: repeat(auto-fit, minmax(min(148px, 100%), 1fr));
   gap: 1px;
   background: var(--line);
-  border: 1px solid var(--line);
+  border: var(--border-weight) solid var(--line);
 }
 .tl-strip__row > span {
   background: var(--paper);
@@ -326,7 +338,7 @@ body.tpl-ledger {
 .tl-credentials { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
 .tl-credentials > span {
   font-size: 0.82rem; color: var(--on-secondary); padding: 8px 16px;
-  border: 1px solid var(--line); border-radius: 999px; background: var(--secondary);
+  border: var(--border-weight) solid var(--line); border-radius: var(--radius-pill); background: var(--secondary);
 }
 
 /* ---------- statement band ---------- */
@@ -362,14 +374,14 @@ body.tpl-ledger {
 .tl-services__in { padding-top: var(--band); padding-bottom: var(--band); }
 .tl-services__head { margin-bottom: clamp(34px, 4vw, 56px); max-width: 40ch; }
 
-.tl-ledger { border-top: 1px solid var(--line); }
+.tl-ledger { border-top: var(--border-weight) solid var(--line); }
 .tl-row {
   display: grid;
   grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.35fr);
   gap: clamp(16px, 4vw, 56px);
   align-items: baseline;
   padding: 22px 4px;
-  border-bottom: 1px solid var(--line);
+  border-bottom: var(--border-weight) solid var(--line);
   transition: background-color 0.18s ease, padding-left 0.18s ease;
 }
 .tl-row:hover { background: var(--accent-soft); padding-left: 14px; }
@@ -401,7 +413,7 @@ body.tpl-ledger {
 .tl-gallery figure {
   break-inside: avoid;
   margin: 0 0 14px;
-  border-radius: 3px;
+  border-radius: var(--radius-image);
   overflow: hidden;
   background: var(--deep-soft);
 }
@@ -412,7 +424,7 @@ body.tpl-ledger {
   grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
   gap: 1px;
   background: rgb(255 255 255 / 0.14);
-  border: 1px solid rgb(255 255 255 / 0.14);
+  border: var(--border-weight) solid rgb(255 255 255 / 0.14);
 }
 .tl-facts div { background: var(--deep); padding: 26px 24px; }
 .tl-facts dt {
@@ -443,16 +455,16 @@ body.tpl-ledger {
 .tl-quote {
   margin: 0;
   padding-block: clamp(26px, 3.2vw, 44px);
-  border-top: 1px solid var(--line);
+  border-top: var(--border-weight) solid var(--line);
   max-width: 46ch;
 }
-.tl-quote:last-child { border-bottom: 1px solid var(--line); }
+.tl-quote:last-child { border-bottom: var(--border-weight) solid var(--line); }
 /* Alternate the offset so a stack of six doesn't read as a single column of
    left-aligned paragraphs. */
 .tl-quote:nth-child(even) { margin-left: auto; }
 .tl-quote p {
   margin: 0 0 18px;
-  font-family: "Newsreader", Georgia, "Times New Roman", serif;
+  font-family: var(--font-heading);
   font-style: italic;
   font-weight: 400;
   font-size: clamp(1.2rem, 2.2vw, 1.72rem);
@@ -590,7 +602,7 @@ body.tpl-ledger {
 }
 
 .tpl-ledger a:focus-visible, .tpl-ledger button:focus-visible {
-  outline: 2px solid var(--ring);
+  outline: var(--focus-ring-width) solid var(--ring);
   outline-offset: 3px;
 }
 .tl-deep a:focus-visible, .tl-cta a:focus-visible, .tl-foot a:focus-visible {
