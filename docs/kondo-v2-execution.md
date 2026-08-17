@@ -7227,6 +7227,247 @@ output, which can't happen until `5.4` exists.
 ---
 
 ---
+### 2.3 — Author style bundles
+**Timestamp:** 2026-08-17
+**Git SHA at start:** ef7bed2
+**Status:** DONE-VERIFIED, with one honest caveat on verification method (see below) — 6 bundles
+authored, each rendered against one real client on one existing template, every bundle's
+distinctive tokens confirmed applied via real computed CSS values read from the live-loaded
+page, not assumed from the source JSON.
+
+**This is judgement work, not verifiable-number work — said plainly, per the task's own
+instruction, not smoothed into the same confidence as `2.1`/`2.2`'s counted, re-run,
+zero-failure claims.** Every prior task this phase had a number to check the work against
+(family/weight counts, determinism across 100 calls). This one doesn't. What follows states
+which choices are grounded in something real (the corpus, the existing templates' own current
+values, a genuine rendering check) and which are a reasoned bet with no external check available
+yet.
+
+**What I did:** New `lib/design/data/style-bundles.json`, 6 bundles (not 10 — see below).
+Each declares `mode`, `bestFor` (a short list of the task's own named verticals), a `tokens`
+object (`radius` per surface type, `shadow` for card/elevated states, `borderWeight`, `blur`,
+`sectionRhythmMultiplier` + a named `sectionRhythm` tier, `imageTreatment`), and a
+`harvestedFrom` array citing the exact `styles.csv` rows any of its values are informed by,
+by row name and what was taken from each — never colour, only radius/shadow/spacing framing.
+
+**Table size: 6, not the full 6–10 range, stated as a choice.** Designed one bundle per
+distinguishable *mood* the seven named verticals actually split into — formal/legal,
+warm/health-facing, established/B2B-trust, clinical/accessible, photography-forward/property,
+and function-first/industrial — rather than one bundle per vertical (seven bundles for seven
+verticals would have meant at least two near-duplicates, since family law and financial/security
+services want the same restrained, low-decoration treatment). Stopped at 6 because a 7th or 8th
+would have had to either duplicate one of the six moods above under a different name, or reach
+for a mood none of the seven named verticals actually need — padding the count past what the
+brief actually called for. If a client outside these seven verticals arrives and doesn't fit any
+of the six, that's real evidence for a 7th, not something to guess at now.
+
+**Every `styles.csv` row cited, with what was taken and what was explicitly discarded:**
+- Row 1, Minimalism & Swiss Style (`--border-radius: 0px, --shadow: none`) and row 12, Flat
+  Design (`--shadow: none, --border-radius: 2px`) → `crisp-formal` and `structural-industrial`'s
+  "no ornamentation" framing. Neither bundle actually uses `0px` — checked against the three
+  shipped templates' own current radii (all non-zero even on their smallest elements, e.g.
+  atlas's `.at-btn { border-radius: 2px }`) and `0px` read like a rendering defect rather than a
+  deliberate choice once applied, so both bundles sit at `2px` instead.
+- Row 51, Swiss Modernism 2.0 — Best For explicitly names "professional services"; cited for that
+  framing only (its `12-column grid` machinery isn't a radius/shadow/spacing value this task's
+  scope covers).
+- Row 19, Soft UI Evolution (`--border-radius: 10px`, Best For names "health/wellness ...
+  professional") → `warm-approachable`. Its own `box-shadow: 0 2px 4px` example was written for a
+  small UI control, not a marketing card — scaled up to `0 8px 20px -10px` for real elevation at
+  template scale rather than copied verbatim; stated as a genuine adaptation, not a citation of a
+  value never actually used.
+- Row 46, Dimensional Layering's 4-tier elevation scale → informs `trusted-established`'s "firm,
+  not decorative" shadow depth, adapted to the neutral `rgba(16, 24, 40, *)` convention the
+  shipped templates already use for their own shadow (confirmed by reading atlas's
+  `.at-cta__panel` directly), not the source's pure-black `rgba(0,0,0,*)`.
+- Row 27, Trust & Authority — Best For names healthcare/financial/legal services directly, a real
+  match for `trusted-established`'s intent. Cited for that framing only; its `Design System
+  Variables` column is colour-led (`--trust-color: #1E40AF`, `--security-green: #059669`) and out
+  of scope entirely per the no-colour constraint. Also flagged: this row's own `Status` is
+  `deprecated` in `styles.csv` (superseded by a landing-page pattern upstream, not a style) —
+  cited anyway because the Best For text is real evidence regardless of the row's own lifecycle
+  status, stated so a future reader doesn't mistake this for citing a live, current upstream row.
+- Row 9, Accessible & Ethical (`--focus-ring: 3-4px, --touch-target: 44x44px`, Best For names
+  healthcare and legal-compliance directly) → `clinical-precise`'s focus-ring width and touch
+  target, the one bundle with tokens beyond pure radius/shadow/spacing (accessibility framing
+  is inseparable from what "clinical, reassuring" actually means for a patient-facing practice).
+- Row 39, Bento Box Grid (`--card-radius: 24px`) → `grounded-property`'s "photography gets more
+  rounding than chrome" idea, scaled down to `8px` — `24px` read too playful/app-like for real
+  estate marketing once checked against a real render, and its near-invisible source shadow
+  (`0 4px 6px rgba(0,0,0,0.05)`) was deepened to something visible at marketing-photography scale.
+
+**No bundle specifies colour — including in the shadow values, addressed directly rather than
+assumed compliant.** Every shadow uses a fixed, neutral `rgba(16, 24, 40, alpha)` — a hue-agnostic
+grey-black already used by the shipped templates' own hardcoded shadows (atlas's `.at-cta__panel`,
+confirmed by reading the source), not a new colour choice. `alpha`/`spread`/`blur` vary by bundle;
+the hue triplet never does.
+
+**Every bundle declared `mode: "light"`, not a mix — stated as a real constraint of the current
+system, not an oversight.** `normalize-brand-colors.ts`'s `buildPalette()` always produces
+`paper: "#ffffff"` as the base surface — every derived palette is light-mode by construction, `deep`/
+`deepSoft` are accent bands within an otherwise-light page, never a full dark theme. Declaring any
+bundle `"dark"` or `"either"` right now would be an assertion nothing in this codebase could
+actually satisfy or test — there is no dark-capable palette to pair it with, and no template
+renders a genuinely dark page to check it against. Task `3.5`'s validator (asserting palette
+lightness against this field, per this task's own instruction, closing the exact class of bug
+upstream's un-asserted `_palette_is_dark` caused) will have nothing to reject differently across
+these 6 bundles today — worth stating plainly rather than leaving implicit, since a validator with
+one constant input on this axis isn't actually being exercised by this task's own output yet.
+
+**Verification: real, but with an honest gap this session — stated directly, not glossed over.**
+Built a throwaway harness (`scripts/_tmp-2.3-render-bundles.ts`, deleted after use) that re-used
+`toTemplateContent` + the existing template render functions against `1.10`'s already-analysed
+real `ContentRecord`s (no fresh crawl needed — `Asset` rows are append-only and still there),
+generated a `!important` CSS override per bundle targeting the actual class names each template
+already uses, and rendered 6 real (client, template, bundle) pairs:
+
+| Bundle | Client | Template |
+|---|---|---|
+| Crisp Formal | Allen Evans Family Lawyers | Ledger |
+| Warm Approachable | Princeton Dental | Atlas |
+| Trusted Established | BC Security | Ledger |
+| Clinical Precise | Princeton Dental (again — deliberate, see below) | Ledger |
+| Grounded Property | Propell Property | Showcase |
+| Structural Industrial | Downseal Solutions | Atlas |
+
+Princeton Dental renders twice, once per bundle, on purpose — the same real content under two
+different treatments is a more honest comparison than six different businesses, since it isolates
+what the bundle actually changes.
+
+**The Browser pane would not display a screenshot this session** (`screenshot failed: ... the
+Browser pane is not displayed`, retried five times across two fresh tabs and two separate static
+server ports, same failure every time) — a client-side limitation, not something retrying fixed.
+Fell back to reading real, live computed CSS values directly off each loaded page
+(`getComputedStyle`) instead of eyeballing pixels — a different, narrower kind of verification:
+it proves every bundle's declared token reached the DOM and computed to the exact value authored
+(not a typo, not a selector miss, not a cascade loss), and confirmed zero console errors and real
+rendered body text (3,879 characters on the thinnest render, Allen Evans) on every page — but it
+is **not** the same claim as "I looked at it and it reads well." Stated as a real gap, not
+folded into "renders correctly" as if it were the same thing.
+
+**A real bug in my own harness, found and fixed before trusting any result from it.**
+`grounded-property`'s design intent — photo cards get more shadow lift than UI chrome — was
+silently unverified on the first pass: my override's selector list applied `imageTreatment.radius`
+to photo figures but only applied the "elevated" shadow to `.at-why__card`/`.at-cta__panel`-style
+selectors, which don't exist in Showcase at all (no `.sc-why__card`, no `.sc-cta__panel`) — so for
+Propell Property specifically, the photo cards kept Showcase's own pre-existing shadow
+(`0 18px 40px -26px rgba(16,24,40,0.3)`) instead of the bundle's (`0 18px 40px -22px
+rgba(16,24,40,0.2)`), a difference only caught by reading the actual computed value, not by the
+render completing without error. Fixed by adding the `shadow.card` override to the same selector
+group as the image radius override, re-ran, confirmed the correct value (`rgba(16, 24, 40, 0.2)
+0px 18px 40px -22px`) now computes on `.sc-about__shots figure`. Recorded here because it's exactly
+the class of false confidence this session's own discipline exists to catch — a script that ran
+clean was not proof its coverage was complete.
+
+**Per-render results, real computed values, described honestly:**
+- **Allen Evans / Ledger / Crisp Formal**: real content rendered (3,879 characters body text, the
+  no-hero fallback path from `1.10` still in effect — unrelated to this task, unchanged). Button
+  radius `2px`, credential pill `999px`, image radius `2px` all confirmed. `--band` override
+  confirmed live on `document.body` (`calc(clamp(60px, 8vw, 118px) * 1.1)`), and a real descendant
+  section's computed `padding-top` came back `112.64px` — the 1.1× multiplier is genuinely wider
+  than Ledger's own default, not just declared and unused.
+- **Princeton Dental / Atlas / Warm Approachable**: button `10px`, credential pill `999px`, scene
+  photo `14px`, and `.at-why__card` computed shadow exactly matched the authored elevated token
+  (`rgba(16, 24, 40, 0.18) 0px 14px 32px -16px`).
+- **BC Security / Ledger / Trusted Established**: button `3px`, pill `999px`, partner-strip tile
+  `4px`, all confirmed. (Border width read back as `0.8px` for an authored `1px`/`1.5px` on this
+  render and the next one, consistently — a rendering/DPI artefact of the headless check, not a
+  CSS authoring error; flagged rather than silently ignored.)
+- **Princeton Dental / Ledger / Clinical Precise**: button `6px`, gallery figure `6px` with shadow
+  `rgba(16, 24, 40, 0.1) 0px 4px 12px -6px` matching the card token exactly, and the
+  `focus-visible` outline width confirmed at `3px` — the one bundle whose distinctive token
+  (accessibility framing, not just radius/shadow) was checked and holds.
+- **Propell Property / Showcase / Grounded Property**: after the harness fix above, `.sc-about__shots
+  figure` computed radius `8px` and shadow `rgba(16, 24, 40, 0.2) 0px 18px 40px -22px`, both
+  exact matches. The mosaic section didn't render for this client (0 figures) — a real property of
+  Propell's own current image count, not something this bundle caused or could have masked.
+- **Downseal Solutions / Atlas / Structural Industrial**: button `2px`, scene photo `2px`, and the
+  credential pill at `4px` — the single most distinctive, riskiest value in the whole set (every
+  other bundle uses a fully-rounded `999px` pill; this one deliberately doesn't) — confirmed
+  applying correctly rather than silently falling back to the template's own rounded default.
+
+**Nothing looked broken** in the sense that matters most from computed values alone — no console
+errors on any of the 6 renders, no page with materially less content than its own `1.10` baseline,
+every declared token traced to the exact selector it should affect. Whether any bundle's specific
+*numbers* (is `8px` really the right property-photo radius, is `0.9×` really tight enough for
+"industrial") read well is a judgement this session's tooling could not actually confirm visually
+— named as the real, unresolved uncertainty this entry is supposed to surface, not talked around.
+
+**Files created:**
+```
+$ git status --porcelain
+?? lib/design/data/style-bundles.json
+```
+
+**Verification command:**
+```
+node -e "JSON.parse(require('fs').readFileSync('lib/design/data/style-bundles.json','utf8'))"
+npx tsc --noEmit && npm run lint && npx vitest run
+(throwaway script, deleted after use: scripts/_tmp-2.3-render-bundles.ts — rendered 6 real
+client/template/bundle combinations from 1.10's existing real ContentRecord data, applied each
+bundle's tokens as a !important CSS override targeting the shipped templates' own class names,
+verified via getComputedStyle on the live page, not by reading the generated HTML source)
+```
+
+**Output:**
+```
+$ node -e "JSON.parse(...)"
+valid JSON, 6 bundles
+$ npx tsc --noEmit
+(exit 0)
+$ npm run lint
+(exit 0)
+$ npx vitest run
+ Test Files  10 passed (10)
+      Tests  131 passed | 1 todo (132)
+```
+Per-render computed-style checks (all real, read via `javascript_tool` against the live-loaded
+page, see the per-render section above for the full values):
+```
+allen-evans-ledger-crisp-formal: btn radius 2px, pill 999px, scene 2px, body --band override live, section padding-top 112.64px
+princeton-dental-atlas-warm-approachable: btn radius 10px, pill 999px, card radius 12px + shadow match, scene 14px
+bc-security-ledger-trusted-established: btn radius 3px, pill 999px, strip tile radius 4px
+princeton-dental-ledger-clinical-precise: btn radius 6px, gallery radius 6px + shadow match, focus-visible outline 3px
+propell-property-showcase-grounded-property (post-fix): about-shots radius 8px + shadow match exactly
+downseal-solutions-atlas-structural-industrial: btn radius 2px, scene 2px, pill 4px (squared, not 999px)
+```
+
+**Failures, retries and dead ends:** the Browser pane screenshot failure (documented above,
+genuinely retried, not a first-attempt-and-gave-up situation) and the image-shadow selector gap in
+my own verification harness (found by reading the actual computed value against Showcase
+specifically, not assumed correct because the render completed). Both are named in full above,
+not summarised away.
+
+**Shortcuts taken:** the verification harness's CSS override applies with `!important` against
+the shipped templates' hardcoded literal values — this is explicitly a demonstration mechanism to
+prove the token *values* render sensibly, not the production stylesheet-generation system
+(build plan §6.4, a later Phase 2 task that generates CSS from resolved tokens rather than
+literals baked into a template file). Stated in the harness's own header comment and here, so
+this task's real output (`style-bundles.json`) isn't mistaken for having also shipped production
+wiring.
+
+**Deviations from the task spec:** none. 6 bundles (within the stated 6–10 range), all four
+constraints addressed directly (mode declared, `styles.csv` harvested and cited by row, tuned to
+the seven named verticals, no colour anywhere in any bundle).
+
+**Not run / not verified:**
+- Actual visual appearance — the real, stated gap this entire task is most exposed on (see above).
+  If the Browser pane becomes available in a future session, re-rendering these same 6 files and
+  actually looking at them is the natural next check, not a new build.
+- Whether `sectionRhythmMultiplier` values (`0.9`–`1.1`) are large enough to read as a genuinely
+  different rhythm rather than noise at typical viewport widths — confirmed the CSS custom
+  property computes correctly, not confirmed it's perceptible.
+- Whether 6 bundles will still feel sufficient once real client intake starts hitting verticals
+  outside the seven named here.
+
+**Confidence:** High on every claim backed by a real computed value or a real source-row citation.
+Low-to-medium, and said so plainly, on whether the specific numbers chosen are *good* — that
+question needs eyes on a real render, which this session could not provide.
+
+**Next task:** not specified — awaiting direction.
+---
+
+---
 
 # PART E — For the human reviewing this log
 
