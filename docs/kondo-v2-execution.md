@@ -8900,6 +8900,120 @@ fully answered until `3.4` tries to use it.
 **Next task:** not specified — awaiting direction.
 ---
 
+### 3.2a — Fix `classify-vertical.ts`'s real-data gaps
+**Timestamp:** 2026-08-18
+**Git SHA at start:** d8e0a79
+**Status:** DONE-VERIFIED — `tsc --noEmit` clean, `lint` clean, full suite 15 files / 214 tests
+passing (205 → 214, exactly the 9 new tests). Both demonstrated failures fixed and pinned with
+tests against the real text that exposed them. All five real clients re-run; one additional,
+real, unfixed issue found and reported, per instruction, rather than silently patched.
+
+**What I did — two surgical changes to `lib/design/classify-vertical.ts`, nothing else touched:**
+
+1. **Separator/whitespace normalization**, fixing BC Security's failure. `normalizeText()`
+lowercases and collapses every run of non-alphanumeric characters (slashes, hyphens, parens,
+extra whitespace) to a single space, applied to both the input text and each keyword before
+matching. BC Security's real `detectedIndustry` is `"commercial security / systems
+integration"` — the slash-and-space between "security" and "systems" meant the literal
+substring `"security systems"` never appeared, even though the business obviously is one.
+Normalized, it becomes `"commercial security systems integration"`, and the existing
+`"security systems"` keyword (already in `trades-construction`, unchanged) matches.
+
+2. **Word-boundary matching, replacing raw substring containment** — not a table reorder.
+Diagnosing Allen Evans' failure found the real cause wasn't priority order at all: `legal` was
+already checked before `financial-professional-services` in `VERTICAL_TABLE` (unchanged since
+`3.2`), so once *any* legal keyword matched, legal would already win. The actual gap was that no
+legal keyword matched Allen Evans' real text at all — `"professional services (family law)"`
+contains none of `legal`/`law firm`/`lawyer`/`attorney`/`solicitor`. The direct fix is adding a
+bare `"law"` keyword — but `3.2`'s own original matching was raw substring containment, under
+which `"law"` would also match inside `"lawn"` (`"lawn".includes("law")` is `true`), which is
+exactly why `3.2`'s only law-related keyword was the safer two-word `"law firm"` in the first
+place. Switching to word-boundary regex matching (`\bword\b`) lets `"law"` match `"family law"`
+correctly while still rejecting `"lawn"` — the mechanism change is what makes the keyword fix
+safe, not a scope expansion for its own sake. Verified directly: `classifyVertical("residential
+lawn care and landscaping")` returns `"trades-construction"` (via the real `"landscaping"`
+keyword), never `"legal"`.
+
+**Correcting my own framing against what was actually found, not the task's own working
+description of it:** the task named this "the legal-versus-financial priority" — real diagnosis
+is that priority order was never the bug; a missing keyword was. Restating this because acting on
+the described symptom (reordering the table) would not have fixed anything — `financial-
+professional-services`' `"professional services"` keyword would still have matched first whenever
+no legal keyword matched at all, regardless of table order, since order only matters between
+entries that both already match.
+
+**New test file `lib/design/classify-vertical.test.ts`** (`3.2`'s own module never had one until
+now — its two real gaps were found by `3.3`'s live run, not by any test) — 9 tests: both real
+failing strings pinned exactly as found, a hyphenated/irregular-whitespace variant of the
+separator fix, the `"lawn"` false-positive guard proven directly, and three regression checks
+(the existing `3.2` priority tie-break test, case-insensitivity, null/no-match) confirmed
+unchanged.
+
+**All five real clients, re-run fresh via a throwaway script
+(`scripts/_tmp-3.2a-verify.ts`, deleted after use) — vertical resolved, and whether it's right:**
+
+| Client | detectedIndustry | vertical resolved | right? |
+|---|---|---|---|
+| Princeton Dental | "medical/clinic" | `medical-dental` | Yes — unambiguous. |
+| BC Security | "commercial security / systems integration" | `trades-construction` | Yes, given the fix — the best available fit; there's no dedicated "security" vertical in this 10-entry list, and adding one is exactly the "expand the table to chase coverage" this task was told not to do. |
+| Propell Property | "property investment advisory" | `financial-professional-services` | **Debatable — see below.** |
+| Allen Evans Family Lawyers | "professional services (family law)" | `legal` | Yes — fixed. |
+| Downseal Solutions | "commercial construction / trade services" | `trades-construction` | Yes — unambiguous. |
+
+**What else is still wrong, reported rather than fixed, per instruction:** Propell Property's real
+text, `"property investment advisory"`, contains both `financial-professional-services`'
+`"advisory"` keyword and `real-estate-property`'s `"property"` keyword. `financial-professional-
+services` is checked first in `VERTICAL_TABLE` (unchanged, pre-existing table order from `3.2`,
+not touched by either fix above), so it wins — even though "property investment advisory" arguably
+describes a real-estate-property business at least as well, if not better. This is the same class
+of ambiguity as the two fixed failures (two entries' keywords both matching real text, resolved
+purely by array position, not specificity) but wasn't one of the two demonstrated failures named
+for this task, so it's named here and left unfixed — an honest third data point, not chased into
+a broader reordering exercise the task explicitly said not to do.
+
+**Files created/modified:**
+```
+$ git status --porcelain
+ M lib/design/classify-vertical.ts
+?? lib/design/classify-vertical.test.ts
+```
+
+**Verification commands and output:**
+```
+$ npx tsc --noEmit && npm run lint && npx vitest run
+ Test Files  15 passed (15)
+      Tests  214 passed | 1 todo (215)
+
+(throwaway script, deleted after use: scripts/_tmp-3.2a-verify.ts — real 5-client run per the
+table above)
+```
+
+**Failures, retries and dead ends:** none this task — both fixes worked as designed on the first
+implementation, verified against the exact real strings that had failed.
+
+**Shortcuts taken:** none.
+
+**Deviations from the task spec:** none in substance. The task's own description of the Allen
+Evans cause ("priority") doesn't match what was actually found (a missing keyword, not an
+ordering problem) — restated directly above rather than silently building a table-reorder that
+wouldn't have fixed anything, or silently agreeing with a diagnosis that didn't hold up.
+
+**Not run / not verified:** whether `"law"` or the normalization change introduces any new
+mismatch across a broader, unsampled range of real-world `detectedIndustry` text beyond this
+session's five known clients and this task's own hand-picked regression strings — consistent with
+`classify-vertical.ts` remaining an explicitly small, starter list (`3.2`'s own disclosed scope),
+not newly claimed as validated more broadly by this task.
+
+**Confidence:** High on both fixes — each is pinned by a test using the exact real string that
+demonstrated the failure, plus a direct test proving the specific false-positive risk (`"lawn"`)
+the mechanism change was chosen to avoid. High on the diagnosis correction (priority vs. missing
+keyword) — verified by reading `VERTICAL_TABLE`'s actual order, not asserted. Medium on Propell
+Property's "still wrong" finding being the *only* remaining issue — no systematic sweep was run
+beyond these five clients and the existing test phrases.
+
+**Next task:** not specified — awaiting direction on `3.3a`.
+---
+
 ---
 
 # PART E — For the human reviewing this log
