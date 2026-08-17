@@ -4399,6 +4399,114 @@ as genuinely open, not resolved either way.
 ---
 
 ---
+### 1.3 — Contrast utilities
+**Timestamp:** 2026-08-17
+**Git SHA at start:** 62e09ff
+**Status:** DONE-VERIFIED
+
+**What I did:** new standalone module, `lib/design/contrast.ts` — `relativeLuminance(rgb)` (WCAG 2.1's
+sRGB linearisation, `L = 0.2126R + 0.7152G + 0.0722B`), `contrastRatio(colorA, colorB)`
+(`(lighter+0.05)/(darker+0.05)`, symmetric in its arguments), and `pickOnColor(background)` (best of
+`#FFFFFF`/`#000000`/`#0F172A` by contrast ratio, explicit tie-break by candidate order). Plus
+`lib/design/contrast.test.ts`. **Not wired into anything** — confirmed by grep, no other file imports
+from `lib/design/contrast`, per the constraint that `1.5`/`1.6` are the intended consumers, not this
+task.
+
+**Formula sourced and cross-checked against two independent primary/secondary sources before writing
+any code**, not from memory alone:
+- W3C WAI's own "Relative Luminance" wiki page confirms the linearisation formula and its own errata
+  note that the correct threshold is `0.04045`, not the `0.03928` in the originally published text —
+  used `0.04045` in the implementation, with a comment explaining why (the two thresholds don't
+  actually disagree on any real 8-bit channel value, so this doesn't change any result, only matches
+  the corrected formula).
+- W3C's "Understanding Success Criterion 1.4.3" confirms the contrast ratio formula and that ratios
+  "range from 1 to 21."
+
+**Test data: real published reference pairs, not values this implementation computed and then
+asserted against, per the task's own instruction.** Sourced via `WebFetch`/`WebSearch` against WebAIM's
+"Contrast and Color Accessibility" article and the W3C sources above, not invented:
+- Black-on-white / white-on-black = 21:1 (WCAG's own stated maximum, and symmetric by construction).
+- Identical colours = 1:1 (WCAG's own stated minimum).
+- `#777777` on white ≈ WebAIM's directly-quoted "4.47:1 contrast ratio."
+- Pure red (`#FF0000`) on white ≈ WebAIM's stated "4:1."
+- Pure blue (`#0000FF`) on white ≈ WebAIM's stated "8.6:1."
+
+**One real discrepancy found and resolved by further research, not by loosening a tolerance until it
+passed.** The `#777777`-on-white test initially failed: this implementation computes **4.478**, not
+WebAIM's stated **4.47**. Per the task's own instruction ("if a reference pair disagrees with your
+implementation, the implementation is wrong"), treated this as a real question, not a nuisance —
+searched for independent corroboration rather than just narrowing the test. Found it: a W3C GitHub
+issue (`w3c/wcag#200`, "Rounding and Color contrast") documents this *exact* colour as a known,
+publicly-discussed case where correct implementations disagree at the second decimal by rounding mode
+— explicitly stating `#777777` "is evaluated as 4.5:1 (pass) on some analyzer tools and 4.48:1 (fail)
+on others." **4.48 is a value other correct implementations independently produce for this exact pair**
+— this implementation's 4.478 is consistent with that, not an outlier or a bug. Adjusted the test's
+precision from 2 decimals to 1 (still requires agreement to within 0.05, comfortably tighter than the
+0.01 spread of the documented dispute) and added a separate, strict, boundary-fact test asserting what
+every source actually agrees on — that `#777777` fails the 4.5:1 AA minimum — rather than hiding the
+discrepancy inside a loosened tolerance without explanation. Documented the whole finding in the test
+file's own comment, with the GitHub issue cited, not just "adjusted for rounding."
+
+**`pickOnColor` tested two ways:** two direct cases matching the WCAG-maximal 21:1 pairing (white bg →
+black text, black bg → white text), plus a property test across 12 varied backgrounds asserting
+`pickOnColor`'s own choice always has a contrast ratio greater than or equal to every candidate's —
+re-deriving the expected winner from `contrastRatio` itself for each background rather than hard-coding
+which of the three candidates should win for each one, so the test doesn't silently encode the same
+assumption the implementation makes.
+
+**Files created/modified:**
+```
+$ git status --porcelain
+?? lib/design/contrast.ts
+?? lib/design/contrast.test.ts
+```
+New standalone module, nothing else touched.
+
+**Verification command (the task's stated done-when):**
+```
+npx vitest run lib/design/contrast.test.ts
+```
+
+**Output:**
+```
+ RUN  v4.1.10 C:/Users/acer/Documents/project room/JRNY-Digital/kondo
+
+ Test Files  1 passed (1)
+      Tests  10 passed (10)
+   Start at  14:13:04
+   Duration  333ms (transform 71ms, setup 0ms, import 92ms, tests 7ms, environment 0ms)
+```
+Also ran `npx tsc --noEmit` (exit 0), `npm run lint` (exit 0), and the full `npx vitest run` (8 files,
+71 passed, 1 todo — the 1 pre-existing todo, no regressions) to confirm this addition doesn't disturb
+anything else, and `grep` across the repo confirming no file imports from `lib/design/contrast` yet.
+
+**Failures, retries and dead ends:** the `#777777` precision mismatch above — investigated and resolved
+via real independent research (a W3C GitHub issue documenting the exact same dispute), not by guessing
+or by loosening the tolerance without explanation.
+
+**Shortcuts taken:** none — every numeric test asserts against an externally sourced value, not a
+self-computed one, exactly as instructed.
+
+**Deviations from the task spec:** none — new standalone module, not wired into anything; tested
+against published reference pairs; done-when command run and output pasted above.
+
+**Not run / not verified:**
+- `pickOnColor`'s choice of `#0F172A` as the third candidate (rather than some other dark-slate value)
+  is a design decision disclosed in the code's own comment, not independently validated against a
+  design-system source — Tasks 1.5/1.6, the actual consumers, are where that choice would get exercised
+  for real.
+- No visual/rendered verification — this is a pure-function module with no UI surface yet; nothing to
+  preview.
+
+**Confidence:** High — every reference value came from a real, cited external source (W3C's own formula
+pages, WebAIM's article, and a W3C GitHub issue for the one discrepancy found), and the one
+disagreement encountered was chased down to a real, documented explanation rather than smoothed over.
+
+**Next task:** `1.5`/`1.6` are the intended consumers of this module — not started this session. Awaiting
+the human's direction.
+---
+
+---
 
 # PART E — For the human reviewing this log
 
