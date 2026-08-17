@@ -83,6 +83,11 @@ function minDim(metrics: ImageMetrics | null): number | null {
 // to invent on its own when 1.8 hasn't run for an asset yet. Uses 1.7b's two strongest
 // metrics-only discriminators (min(width,height), hasAlpha) exactly as that task ranked
 // them — entropy is deliberately NOT used here, per the carry-forward.
+//
+// Task 1.9a's softened gates (hasStrongClassificationSupport, the dimension margin band) do
+// NOT apply here, and can't — both need heroSuitable/shotQuality/confidence to weigh against
+// hasAlpha/a dimension shortfall, and there is no classification at all in this path. A hard
+// veto is the only option left when there's nothing to weigh it against.
 function assignWithoutClassification(metrics: ImageMetrics | null): { role: ImageRole; reason: string } {
   if (!metrics || metrics.width === null || metrics.height === null) {
     return { role: "unusable", reason: "no classification and no usable metrics (dimensions unavailable) — nothing to assign a role from" };
@@ -112,36 +117,84 @@ type PhotoCandidate = {
   minDim: number | null;
 };
 
+// Task 1.9a. 1.9's hasAlpha/dimension checks were hard vetoes — either one alone forced
+// unusable regardless of how strong the rest of the classification was. Real cases found
+// wrong in 1.9's own review: Downseal's 1185×1777 professional heroSuitable "interior" photo,
+// vetoed by hasAlpha alone; BC Security's heroSuitable "handshake" photo at 409px, vetoed by
+// missing REAL_PHOTO_MIN_DIM_PX by 18%. Both share a shape — a single metric overriding an
+// otherwise strong, multi-field classification. This is the bar an image must clear for
+// either metric to be *forgiven* rather than disqualifying: not just "heroSuitable", the full
+// combination this task's own instruction named (heroSuitable + professional + high
+// confidence). A weaker classification (medium/low confidence, competent/amateur quality, or
+// heroSuitable=false) still loses to hasAlpha or a dimension shortfall, same as 1.9.
+function hasStrongClassificationSupport(c: ImageClassification): boolean {
+  return c.heroSuitable.suitable === true && c.shotQuality === "professional" && c.confidence === "high";
+}
+
+// A policy choice, not a data-derived number — 1.7b validated REAL_PHOTO_MIN_DIM_PX itself
+// (the boundary), not a tolerance band around it, so there is no ground truth to fit a margin
+// to the way 500 was fit to the 41-asset sample. 20% comfortably admits the real case that
+// motivated this change (BC Security's 409px, 18% short of 500) without being wide enough to
+// admit a substantially smaller image on classification support alone. REAL_PHOTO_MIN_DIM_PX
+// itself is unchanged — this only widens how close to it counts as "close enough," and only
+// for an image with strong classification support to back it up.
+const DIMENSION_MARGIN_FRACTION = 0.2;
+
 function assignPhotoRole(candidate: PhotoCandidate): { role: ImageRole; reason: string } {
   const { classification, minDim: dim } = candidate;
+  const metrics = candidate.input.metrics;
 
-  // Quality/defect overrides — checked before any role-specific logic, since a disqualifying
-  // defect matters regardless of what role the image would otherwise get.
+  // Watermark is left as a hard veto — Task 1.9a only asked to soften hasAlpha and the
+  // dimension floor. Unlike those two, a watermark is something 1.8 directly observed on the
+  // image, not a correlated proxy — there's no "outweigh it with other evidence" case for it.
   if (classification.hasWatermark) {
     return { role: "unusable", reason: "classification: hasWatermark=true — a visible stock-photo watermark or copyright mark, not usable as shown" };
   }
+
+  const strongSupport = hasStrongClassificationSupport(classification);
+  const marginFloorPx = REAL_PHOTO_MIN_DIM_PX * (1 - DIMENSION_MARGIN_FRACTION);
+  // True only for a dimension that's fully clear of 1.7b's floor, or short of it but within
+  // the margin band *and* backed by strong classification support — never for a null
+  // dimension (nothing to admit on) and never for a shortfall strong support can't cover.
+  const dimensionAdmitted = dim !== null && (dim >= REAL_PHOTO_MIN_DIM_PX || (dim >= marginFloorPx && strongSupport));
+  const alphaFlag = metrics?.hasAlpha === true;
+
   // Cross-validation against 1.7's metrics — 1.8 says this is a real photo (subject already
-  // checked by the caller), but 1.7's own strongest discriminators disagree strongly enough
-  // to distrust that specific call, not overrule it lightly. Both thresholds are 1.7b's own
-  // real numbers, not invented for this check.
-  if (candidate.input.metrics?.hasAlpha === true) {
+  // checked by the caller); 1.7b's own strongest discriminators can still distrust that call,
+  // but as of 1.9a they weigh against it rather than overriding it outright when the rest of
+  // the classification is this strong. Both thresholds are 1.7b's own real numbers.
+  if (dim !== null && dim < REAL_PHOTO_MIN_DIM_PX && !dimensionAdmitted) {
+    const withinMargin = dim >= marginFloorPx;
     return {
       role: "unusable",
-      reason: `classification says subject="${classification.subject}" (a real photo) but metrics.hasAlpha=true — 1.7b found this combination strongly atypical for a real photo (17/20 real graphics carry alpha vs 1/21 real photos); trusting the metric over a possibly-wrong subject call`,
+      reason:
+        `classification says subject="${classification.subject}" (a real photo) but min(width,height)=${dim}px is below 1.7b's observed real-photo floor of ${REAL_PHOTO_MIN_DIM_PX}px, and ` +
+        (withinMargin
+          ? `classification support isn't strong enough (needs heroSuitable=true + shotQuality="professional" + confidence="high") to admit an image this close to the floor`
+          : `outside the ${(DIMENSION_MARGIN_FRACTION * 100).toFixed(0)}% margin band (floor ${marginFloorPx}px) regardless of classification support`) +
+        `; trusting the metric over a possibly-wrong subject call`,
     };
   }
-  if (dim !== null && dim < REAL_PHOTO_MIN_DIM_PX) {
+  if (alphaFlag && !strongSupport) {
     return {
       role: "unusable",
-      reason: `classification says subject="${classification.subject}" (a real photo) but min(width,height)=${dim}px is below 1.7b's observed real-photo floor of ${REAL_PHOTO_MIN_DIM_PX}px; trusting the metric over a possibly-wrong subject call`,
+      reason: `classification says subject="${classification.subject}" (a real photo) but metrics.hasAlpha=true and classification support isn't strong enough (needs heroSuitable=true + shotQuality="professional" + confidence="high") to outweigh it — 1.7b found alpha strongly atypical for a real photo (17/20 real graphics carry alpha vs 1/21 real photos); trusting the metric over a possibly-wrong subject call`,
     };
   }
 
+  // Both metric flags are now either absent, or present-but-outweighed by strong
+  // classification support — noted in the reason for whichever role this image lands in, not
+  // silently dropped, so "why did this survive" stays answerable from the reason string alone.
+  const caveats: string[] = [];
+  if (alphaFlag) caveats.push('admitted despite hasAlpha=true (1.9a: alpha weighs against but doesn\'t override strong classification support)');
+  if (dim !== null && dim < REAL_PHOTO_MIN_DIM_PX) caveats.push(`admitted at ${dim}px, within the ${(DIMENSION_MARGIN_FRACTION * 100).toFixed(0)}% margin band below the ${REAL_PHOTO_MIN_DIM_PX}px floor (1.9a: strong classification support outweighs a modest shortfall)`);
+  const caveatText = caveats.length > 0 ? ` (${caveats.join("; ")})` : "";
+
   if (classification.isHeadshot) {
-    return { role: "team", reason: "classification: isHeadshot=true" };
+    return { role: "team", reason: `classification: isHeadshot=true${caveatText}` };
   }
   if (classification.subject === "product" || classification.subject === "equipment") {
-    return { role: "feature-inline", reason: `classification: subject="${classification.subject}" — a discrete item shot, suited to illustrating a specific offering` };
+    return { role: "feature-inline", reason: `classification: subject="${classification.subject}" — a discrete item shot, suited to illustrating a specific offering${caveatText}` };
   }
 
   // Remaining real-photo subjects (person-not-headshot, people, interior, exterior) are the
@@ -149,19 +202,20 @@ function assignPhotoRole(candidate: PhotoCandidate): { role: ImageRole; reason: 
   // client's asset set in assignImageRoles below (hero is a relative "best of" pick, not a
   // per-image threshold), so this function only reports whether this specific image is
   // hero-*eligible*, leaving the cross-image "which one wins" decision to the caller.
+  // Dimension is already fully resolved by dimensionAdmitted above (covers both the ordinary
+  // and margin-band cases, and is false for a null dimension) — no separate check needed here.
   const heroEligible =
     classification.heroSuitable.suitable === true &&
     classification.confidence !== "low" &&
-    dim !== null &&
-    dim >= REAL_PHOTO_MIN_DIM_PX;
+    dimensionAdmitted;
 
   if (heroEligible) {
-    return { role: "hero", reason: `classification: heroSuitable.suitable=true, confidence="${classification.confidence}" — "${classification.heroSuitable.reason}"` };
+    return { role: "hero", reason: `classification: heroSuitable.suitable=true, confidence="${classification.confidence}" — "${classification.heroSuitable.reason}"${caveatText}` };
   }
   if (classification.clearSpace !== "none") {
-    return { role: "section-background", reason: `classification: clearSpace="${classification.clearSpace}" — enough clear space for overlaid text, though not flagged heroSuitable` };
+    return { role: "section-background", reason: `classification: clearSpace="${classification.clearSpace}" — enough clear space for overlaid text, though not flagged heroSuitable${caveatText}` };
   }
-  return { role: "gallery", reason: `classification: subject="${classification.subject}", a real photo not otherwise routed to a more specific role` };
+  return { role: "gallery", reason: `classification: subject="${classification.subject}", a real photo not otherwise routed to a more specific role${caveatText}` };
 }
 
 // Assigns roles for one client's full asset set at once, not one asset independently — hero
