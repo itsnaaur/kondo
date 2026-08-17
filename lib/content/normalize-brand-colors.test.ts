@@ -2,6 +2,30 @@ import { describe, test, expect } from "vitest";
 import { buildPalette } from "./normalize-brand-colors";
 import { pickOnColor } from "@/lib/design/contrast";
 
+// Independent of normalize-brand-colors.ts's own hslStringToHex — deliberately not imported
+// and reused, so a bug in that helper wouldn't be hidden by the test using the same buggy
+// conversion. Parses buildPalette's own hsl() output format exactly ("hsl(H S% L%)", integers
+// already rounded).
+function hslParts(value: string): { h: number; s: number; l: number } {
+  const match = /^hsl\((\d+) (\d+)% (\d+)%\)$/.exec(value);
+  if (!match) throw new Error(`not an hsl() string: ${value}`);
+  return { h: Number(match[1]), s: Number(match[2]), l: Number(match[3]) };
+}
+
+function hslStringToHex(value: string): string {
+  const { h, s, l } = hslParts(value);
+  const S = s / 100, L = l / 100;
+  const c = (1 - Math.abs(2 * L - 1)) * S;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = L - c / 2;
+  const [r1, g1, b1] =
+    h < 60 ? [c, x, 0] : h < 120 ? [x, c, 0] : h < 180 ? [0, c, x]
+    : h < 240 ? [0, x, c] : h < 300 ? [x, 0, c] : [c, 0, x];
+  const toByte = (v: number) => Math.round((v + m) * 255);
+  const toHex2 = (n: number) => n.toString(16).padStart(2, "0");
+  return `#${toHex2(toByte(r1))}${toHex2(toByte(g1))}${toHex2(toByte(b1))}`;
+}
+
 // Golden values captured from buildPalette as it existed immediately before Task 1.5 (git
 // HEAD at the time this test was written — see docs/kondo-v2-execution.md's 1.5 entry for how
 // they were captured: git show HEAD:lib/content/normalize-brand-colors.ts against a copy of
@@ -123,11 +147,12 @@ describe("buildPalette — golden: original 10 roles + derivedFrom are byte-iden
   }
 });
 
-describe("buildPalette — Task 1.5's four new roles are present", () => {
+describe("buildPalette — Task 1.5/1.6a's five new roles are present", () => {
   for (const [name, { input }] of Object.entries(GOLDEN)) {
-    test(`${name}: secondary/ring/destructive/onDestructive are all set`, () => {
+    test(`${name}: secondary/onSecondary/ring/destructive/onDestructive are all set`, () => {
       const result = buildPalette(input);
       expect(typeof result.secondary).toBe("string");
+      expect(typeof result.onSecondary).toBe("string");
       expect(typeof result.ring).toBe("string");
       expect(typeof result.destructive).toBe("string");
       expect(typeof result.onDestructive).toBe("string");
@@ -142,11 +167,6 @@ describe("buildPalette — Task 1.5's four new roles are present", () => {
   });
 
   test("secondary is a tint of accent — same hue and saturation, strictly lighter", () => {
-    const hslParts = (value: string) => {
-      const match = /^hsl\((\d+) (\d+)% (\d+)%\)$/.exec(value);
-      if (!match) throw new Error(`not an hsl() string: ${value}`);
-      return { h: Number(match[1]), s: Number(match[2]), l: Number(match[3]) };
-    };
     for (const { input } of Object.values(GOLDEN)) {
       const result = buildPalette(input);
       const accent = hslParts(result.accent);
@@ -166,6 +186,19 @@ describe("buildPalette — Task 1.5's four new roles are present", () => {
   test("onDestructive is exactly pickOnColor(destructive) — Task 1.3's contrast.ts wired in", () => {
     const result = buildPalette(GOLDEN.blueTech.input);
     expect(result.onDestructive).toBe(pickOnColor(result.destructive));
+  });
+
+  test("onSecondary is exactly pickOnColor(secondary), not accentInk — Task 1.6a", () => {
+    // 1.6's validation gate found accentInk-on-secondary failing AA on 62/191 real corpus
+    // primaries, since accentInk is chosen for accent's lightness and secondary is
+    // deliberately lighter. onSecondary must be its own pickOnColor call, not a copy of
+    // accentInk — this test would pass even with a copy-paste bug (accentInk happens to equal
+    // pickOnColor(accent), a different call) unless it specifically compares against
+    // secondary, which it does below.
+    for (const { input } of Object.values(GOLDEN)) {
+      const result = buildPalette(input);
+      expect(result.onSecondary).toBe(pickOnColor(hslStringToHex(result.secondary)));
+    }
   });
 });
 

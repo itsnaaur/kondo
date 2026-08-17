@@ -27,10 +27,12 @@ const AA_NORMAL_TEXT_MINIMUM = 4.5;
 // shipped templates' CSS (lib/templates/{atlas,ledger,showcase}/styles.ts) — grepped for
 // `background: var(--X)` and what colour renders as text inside that context — except
 // `secondary`, which isn't consumed by any template yet (Task 1.5 added the role; nothing
-// downstream uses it). `secondary` is checked against `accentInk`, the same text convention
-// `accent` uses, since the uupm audit frames Secondary as a tint of Primary serving an
-// analogous role, not an independently-specified one — flagged as an inferred pair, not a
-// directly observed one, in case a real consumer later pairs it with something else.
+// downstream uses it). `secondary` is checked against its own `onSecondary` (Task 1.6a — 1.5
+// originally omitted this role and this file's first run caught it: `accentInk` on `secondary`
+// failed AA on 62 of 191 corpus primaries, since accentInk is chosen for accent's lightness,
+// not secondary's deliberately-lighter one. The audit's `On *` roles are a per-surface
+// lookup, and secondary is a surface — accentInk on secondary is a pairing the system should
+// never make, so it isn't checked here at all, not even as a "should fail" case).
 //
 // `ring` and `line` are deliberately excluded: `ring` is a focus-outline colour (WCAG SC
 // 1.4.11 non-text UI-component contrast, not SC 1.4.3 text contrast — no text renders "on" a
@@ -45,7 +47,7 @@ const PAIRS: { fg: keyof Palette; bg: keyof Palette; label: string }[] = [
   { fg: "ink", bg: "accentSoft", label: "ink on accentSoft" },
   { fg: "inkMuted", bg: "accentSoft", label: "inkMuted on accentSoft" },
   { fg: "accentInk", bg: "accent", label: "accentInk on accent" },
-  { fg: "accentInk", bg: "secondary", label: "accentInk on secondary (inferred pairing — see comment above)" },
+  { fg: "onSecondary", bg: "secondary", label: "onSecondary on secondary" },
   { fg: "paper", bg: "deep", label: "paper on deep" },
   { fg: "paper", bg: "deepSoft", label: "paper on deepSoft" },
   { fg: "onDestructive", bg: "destructive", label: "onDestructive on destructive" },

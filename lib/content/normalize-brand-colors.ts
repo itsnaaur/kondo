@@ -32,6 +32,11 @@ export type Palette = {
   secondary: string; // a tint of accent — the audit found Secondary is the same hue as
   // Primary in the source data (median 4° hue delta — noise around "same hue" in
   // hand-picked palettes, not a deliberate offset), differing mainly in lightness.
+  onSecondary: string; // text/icon colour on secondary — via pickOnColor (Task 1.3). Added in
+  // 1.6a: 1.5 omitted this. The audit's `On *` roles are a per-surface lookup, and `secondary`
+  // is a surface — `accentInk` (chosen for accent's lightness, not secondary's, which is
+  // always lighter by construction) is a pairing the system should never make. `1.6` found
+  // this the hard way: 62 of 191 corpus primaries failed AA on accentInk-on-secondary.
   ring: string; // focus ring — the audit found Ring equals Primary in 161/192 (84%) of
   // source palettes, the clear majority pattern, so ring is exactly accent, not derived
   // separately.
@@ -81,6 +86,31 @@ function hexToHsl(hex: string): { h: number; s: number; l: number } | null {
 
 function hsl(h: number, s: number, l: number): string {
   return `hsl(${Math.round(h)} ${Math.round(s)}% ${Math.round(l)}%)`;
+}
+
+// Task 1.6a. pickOnColor (lib/design/contrast.ts, Task 1.3) only accepts #RRGGBB — its own
+// contract, not something to widen just because this file mostly deals in hsl() strings.
+// destructive is a hex literal, so onDestructive's pickOnColor(DESTRUCTIVE) call never hit
+// this; secondary is an hsl() string like every hue-derived role, so onSecondary needs a
+// conversion first. Takes the already-rounded hsl() *string* (not raw h/s/l floats) so
+// onSecondary is picked against the exact colour secondary actually renders as, not a
+// hypothetical higher-precision variant that never ships. Same h-branch structure as
+// luminance() above, producing RGB bytes instead of a luminance value.
+function hslStringToHex(value: string): string {
+  const match = /^hsl\((\d+) (\d+)% (\d+)%\)$/.exec(value);
+  if (!match) throw new Error(`Not an hsl() string: ${value}`);
+  const h = Number(match[1]);
+  const S = Number(match[2]) / 100;
+  const L = Number(match[3]) / 100;
+  const c = (1 - Math.abs(2 * L - 1)) * S;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = L - c / 2;
+  const [r1, g1, b1] =
+    h < 60 ? [c, x, 0] : h < 120 ? [x, c, 0] : h < 180 ? [0, c, x]
+    : h < 240 ? [0, x, c] : h < 300 ? [x, 0, c] : [c, 0, x];
+  const toByte = (v: number) => Math.round((v + m) * 255);
+  const toHex2 = (n: number) => n.toString(16).padStart(2, "0");
+  return `#${toHex2(toByte(r1))}${toHex2(toByte(g1))}${toHex2(toByte(b1))}`;
 }
 
 /** WCAG relative luminance, from HSL. */
@@ -154,6 +184,8 @@ export function buildPalette(brandColors: { hex: string }[]): Palette {
   // yellowish branch starts at 32, everything else at 41, though the AA-contrast loop above
   // can push accentL as low as 24) can't push secondary past white.
   const secondary = hsl(hue, accentS, Math.min(accentL + SECONDARY_LIGHTNESS_DELTA, 92));
+  // Task 1.6a — secondary's own ink, not accentInk. See the Palette type's onSecondary comment.
+  const onSecondary = pickOnColor(hslStringToHex(secondary));
   // Task 1.5 — ring equals accent, the audit's majority (161/192) Ring-equals-Primary pattern.
   const ring = hsl(hue, accentS, accentL);
   const onDestructive = pickOnColor(DESTRUCTIVE);
@@ -171,6 +203,7 @@ export function buildPalette(brandColors: { hex: string }[]): Palette {
     paper: "#ffffff",
     derivedFrom: source,
     secondary,
+    onSecondary,
     ring,
     destructive: DESTRUCTIVE,
     onDestructive,
