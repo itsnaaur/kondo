@@ -3530,6 +3530,191 @@ back further. Awaiting the human's go-ahead — not started this session.
 ---
 
 ---
+### 1.2 — Rework brand colour source ranking
+**Timestamp:** 2026-08-17
+**Git SHA at start:** 9292117
+**Status:** DONE-VERIFIED
+
+**What I did:**
+New module, `lib/content/rank-brand-color-sources.ts` — `rankBrandColorSources()` ranks a client's
+candidate brand colour by source, in the approved order:
+
+1. **Computed styles.** Merges `ColorCandidate[]` across every crawled page (summing counts for the
+   same colour, `inMain` true if any occurrence was), preferring `primaryButtonBg`, then
+   `buttonBorderColor`, then `linkColor` — the first field with any surviving candidate wins; the
+   other two aren't consulted. **`computedStyles === null` is checked as its own branch before
+   anything else touches the object** — a page whose capture failed contributes nothing to the
+   aggregate, it is never treated as "found a neutral colour." This is the specific thing `1.1c`
+   flagged as worth getting right now rather than in `1.2`.
+2. **Logo.** Own pixel-bucketing (same resize/quantize approach as `extract-colors.ts`, deliberately
+   reimplemented rather than importing its unexported internals), filtered through the **corrected
+   HSL neutrality check from `1.1b`** — not the original `isNearNeutral` — then ranked by **saturation**,
+   not frequency, per instruction: a logo's brand colour is often a small share of its pixels.
+3. **Imagery.** Calls the existing `extractDominantColors()` unmodified, then applies a saturation
+   floor (15%) on top of its output and re-ranks by saturation. Its own `DEFAULT_NEUTRAL_PALETTE`
+   fallback is detected by its `confidence:"low", flagged:true` signature and treated as "found
+   nothing," not as three real candidates — using it as a candidate would be exactly the
+   "neutrals winning" failure this task exists to close off.
+
+Nothing survives → `{ hex: null, source: "none", confidence: "low", ... }`. An honest low result, not
+a forced pick, is a real return path, not just documentation of intent.
+
+**Constraints held:**
+- **`normalize-brand-colors.ts` untouched.** Confirmed via `git status --porcelain` below — this task
+  changes what could feed `pickHue`, not `pickHue` itself. Not wired into `run-analysis.ts` either;
+  this entry builds and verifies the ranking function standalone, deliberately not swapping it into the
+  production pipeline, which felt like a separate, bigger decision than "rework the ranking" alone.
+- **`extract-colors.ts` untouched, confirmed, not just claimed** — `git status --porcelain` shows no
+  change to that file. Its `isNearNeutral` (the `min < 20` rule `1.1b` found and replaced in
+  `crawler.ts`) is untouched and still governs `extractDominantColors`' own accent-role selection for
+  its existing callers.
+- **`crawler.ts` *was* touched — disclosed here, not silently.** Its own copy of the `1.1b`-corrected
+  HSL check needed a further refinement this task (below); see the "second real bug" section.
+
+**A second real bug, found the same way the first one was — by testing, not by review.** First
+verification pass returned `hex=#f6f3ee` (a pale cream) for Downseal Solutions' `linkColor`, sourced at
+count 1650, **`confidence: "high"`** — a confident, wrong answer, exactly the failure mode this task's
+Downseal constraint exists to prevent. Traced it: `rgb(246, 243, 238)` — Downseal's own near-white page
+background bleeding through as an inherited link colour — has `l≈95%, s≈31%`. `1.1b`'s
+`l >= 97 || l <= 3 || s < 15` check doesn't catch it: 95 is under 97, and 31% is comfortably over 15%.
+HSL saturation is a noisy signal this close to the lightness extremes — a faint warm cast on an
+almost-white pixel reads as "30% saturated" without being a real, legible colour, and text that pale
+against a light background would have near-zero contrast anyway. Raised the near-white bound to
+**`l >= 90`** in both places this check now exists — the new module, and (since the computed-styles
+candidates are pre-filtered and stored by `crawler.ts` before this module ever sees them) `crawler.ts`
+itself, which required re-crawling to actually take effect on stored data. Documented the fix, and the
+live example that found it, in both files' comments, not just here.
+
+**A methodology bug in my own verification, also found by testing, also fixed rather than
+worked around.** After the threshold fix, Downseal's `linkColor` *still* returned the identical
+`#f6f3ee` at count 1650 — because this session's earlier throwaway crawls (`1.1-VERIFIED`, `1.1c`, and
+this task's own first attempts) had all called `crawlClientSite` directly, which — unlike
+`run-analysis.ts`'s real production path — does **not** delete existing `CrawledPage` rows first. Every
+client had multiple stale generations of `computedStyles` stacked up, and my aggregation was silently
+merging all of them, including data computed under the pre-fix threshold. Fixed by deleting every
+stale row and re-crawling all five clients fresh, in one clean generation each — matching what
+`run-analysis.ts` always does in real use. This was a test-harness artifact from this session's own
+repeated ad hoc crawling, not a defect in `crawler.ts` or the new module; disclosed because it changed
+the numbers, not because it reflects on the production code path.
+
+**Final result — five clients, one clean crawl generation each, run against the actual
+`rankBrandColorSources()` function, not a reimplementation:**
+
+| Client | Chosen hex | Source | Margin | Confidence | Matches human judgement? |
+|---|---|---|---|---|---|
+| Princeton Dental | `#2563eb` (blue) | computed-styles (primaryButtonBg) | 91 vs 51 | medium | **No** — see below |
+| BC Security | `#024470` (navy) | computed-styles (primaryButtonBg) | 34, sole survivor | high | **Yes** — matches `1.1a`/`1.1b`'s finding exactly |
+| Downseal Solutions | `#c0c0a0` (muted tan) | imagery | saturation 20%, sole survivor | **low** | **Honest abstention** — see below |
+| Propell Property | `#0e1e39` (navy) | computed-styles (primaryButtonBg) | 344, sole survivor | high | **Yes** — matches `1.1a`/`1.1b` |
+| Allen Evans Family Lawyers | `#54c9ea` (cyan) | computed-styles (primaryButtonBg) | 216 vs 2 | high | **Yes** — matches `1.1a`/`1.1b` |
+
+**Downseal — the required test case, and it does what it was supposed to.** Computed styles and logo
+both correctly returned nothing (confirmed: `primaryButtonBg`/`buttonBorderColor`/`linkColor` all
+empty after the fix; the logo's own bucketed colours all fell below the neutrality floor too). Imagery,
+the last resort, found a 20%-saturated tan from a content photo — barely above the 15% floor — and
+returned it at **`confidence: "low"`**, honestly labelled, not dressed up as a real finding. Directly
+corroborated by browser inspection during this task: Downseal's only real backgrounds anywhere on the
+page are `rgb(49,50,51)` (dark grey), `rgba(49,50,51,0.5)`, and `rgb(0,0,0)` — a deliberately
+monochrome black/white/cream identity for a B2B commercial sealing contractor, which is a legitimate
+design choice, not a missing signal. Counting this as a correct outcome: the constraint was "an honest
+low-confidence result, not a forced pick," and that's exactly what came out.
+
+**Princeton Dental — a real, unresolved failure, reported plainly, not tuned away.** `#2563eb` is not
+the site's brand colour — cross-referencing `1.1a`'s own raw dump identifies it exactly:
+`[24] <button class="cookie-btn cookie-btn--primary"> text="Accept" bg=rgb(37,99,235)`, the **cookie-
+consent banner's "Accept" button**, not the real teal `.btn` CTAs (`rgb(78,142,154)`, `#4e8e9a`). The
+mechanism: the cookie banner is site-wide chrome, appearing on effectively every page (91 of 92), while
+the real brand `.btn` buttons only appear on pages that actually have a CTA in their content (51 of 92)
+— cross-page frequency ranking has no way to distinguish "recurs because it's the intentional brand
+accent" from "recurs because it's an omnipresent third-party widget," and confidence scoring measures
+the *margin*, not *what the winner actually is*. `medium` confidence here is the score behaving
+correctly by its own arithmetic (91:51 ≈ 1.78, squarely in the medium band) while still producing the
+wrong answer — a precise, structural limitation, not a bug to patch inline. Did not attempt an ad hoc
+"exclude known cookie-banner class names" fix — that is exactly the kind of narrow, one-case patch the
+instruction warned against tuning toward, and it wouldn't generalise (a different site's persistent
+chrome — a cart icon, a language switcher, a sticky promo bar — would need the same fix repeated
+indefinitely). Reporting it as a real, open finding for whoever scopes the next refinement.
+
+**Hit rate, stated plainly, both ways it can honestly be counted:** by strict hex-match-to-human-
+judgement, **3 of 5** (BC Security, Propell Property, Allen Evans). Counting Downseal's correct,
+honestly-low-confidence abstention as the pass this task explicitly asked it to be, **4 of 5** — at the
+bar, not above it, and only because Princeton Dental has a real, named, unresolved failure mode sitting
+right next to the successes, not hidden behind an aggregate number. Not tuning Princeton to make this
+read as 5 of 5.
+
+**Files created/modified:**
+```
+$ git status --porcelain
+ M lib/crawl/crawler.ts
+?? lib/content/rank-brand-color-sources.ts
+```
+No schema change, no migration — this task added no new persisted field.
+
+**Verification command:**
+```
+npx tsc --noEmit && npm run lint && npx vitest run
+(throwaway scripts, all deleted after use: fetch logo/imagery Asset buffers per client from
+Supabase Storage; delete stale CrawledPage rows and re-crawl all five clients fresh via the real
+crawlClientSite; run the real rankBrandColorSources against each client's aggregated computedStyles
+plus logo/imagery buffers)
+```
+
+**Output:**
+```
+$ npx tsc --noEmit
+(no output — exit 0)
+$ npm run lint
+(no output — exit 0)
+$ npx vitest run
+ Test Files  7 passed (7)
+      Tests  61 passed | 1 todo (62)
+```
+Per-client results are quoted in the table above; the raw command output behind them (per-client
+hex/source/confidence/winnerScore/runnerUpScore) was reproduced faithfully into that table, not
+paraphrased.
+
+**Failures, retries and dead ends:**
+1. First implementation copied `1.1b`'s `l >= 97` near-white bound verbatim — wrong for Downseal's
+   near-white-but-31%-"saturated" background colour. Fixed to `l >= 90` in both places the check now
+   exists.
+2. Even after the threshold fix, Downseal's result didn't change — traced to stale, multi-generation
+   `CrawledPage` data left over from this session's own earlier ad hoc crawling (which never deletes
+   before re-crawling, unlike production). Fixed by deleting and re-crawling all five clients clean.
+3. Princeton Dental's cookie-consent banner outranking its real brand colour — identified precisely,
+   not fixed, reported as a genuine open problem.
+
+**Shortcuts taken:** the logo-bucketing routine in the new module duplicates
+`extract-colors.ts`'s resize/quantize approach rather than sharing it — deliberate, to avoid exporting
+more surface area from a file with existing callers, disclosed rather than silently done.
+
+**Deviations from the task spec:** none — every constraint (don't touch `normalize-brand-colors.ts`,
+use the corrected HSL check, disclose if `extract-colors.ts` is touched, honest low-confidence for
+Downseal) was followed as stated. The hit rate came in at the bar (4 of 5, one framing) rather than
+above it, reported exactly as measured per instruction.
+
+**Not run / not verified:**
+- Not wired into `run-analysis.ts` — this entry verifies the function standalone; swapping it into the
+  live pipeline is a separate decision.
+- Princeton Dental's cookie-banner contamination — identified, not fixed; no attempt made to determine
+  how common this failure mode would be across a larger client book than five.
+- Whether the imagery saturation floor (15%) and the logo/imagery confidence caps (`medium` max for
+  logo, always `low` for imagery) are well-calibrated beyond this one 5-client, one-anomaly sample —
+  Downseal is the only client that reached the imagery tier, so the imagery path has exactly one data
+  point behind it.
+
+**Confidence:** High on the implementation and the measurement — every number in the results table
+came from a real run of the real function against real, freshly and cleanly crawled data, cross-checked
+against `1.1a`'s independent raw dumps and, for Princeton and Downseal specifically, further
+cross-checked against direct browser inspection during this task. Medium on whether 4/5 (or 3/5) is
+representative beyond this specific five-client sample — it's what the evidence says today, not a
+claim about the general case.
+
+**Next task:** awaiting the human's direction — whether to pursue the Princeton-style contamination
+problem now or defer it, and whether/how to wire `rankBrandColorSources` into the live pipeline. Not
+started this session.
+---
+
+---
 
 # PART E — For the human reviewing this log
 
