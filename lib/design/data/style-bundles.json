@@ -1,0 +1,120 @@
+[
+  {
+    "id": "crisp-formal",
+    "name": "Crisp Formal",
+    "mode": "light",
+    "bestFor": ["family-law", "legal", "financial-professional-services"],
+    "description": "Hairline borders, near-flat surfaces, unhurried spacing. Reads as deliberate and unshowy rather than severe.",
+    "harvestedFrom": [
+      "uupm styles.csv row 1, Minimalism & Swiss Style (--border-radius: 0px, --shadow: none) — tuned up from 0px to 2px; 0px read too severe on a still-human-facing law firm when checked against a real render (see this task's log entry)",
+      "uupm styles.csv row 51, Swiss Modernism 2.0 (--base-unit: 8px, Best For explicitly names 'professional services')"
+    ],
+    "tokens": {
+      "radius": { "button": "2px", "card": "2px", "image": "2px", "pill": "999px" },
+      "shadow": { "card": "none", "elevated": "0 20px 40px -28px rgba(16, 24, 40, 0.16)" },
+      "borderWeight": "1px",
+      "blur": "0px",
+      "sectionRhythmMultiplier": 1.1,
+      "sectionRhythm": "loose",
+      "imageTreatment": { "radius": "2px", "aspectPreference": "wide" }
+    }
+  },
+  {
+    "id": "warm-approachable",
+    "name": "Warm Approachable",
+    "mode": "light",
+    "bestFor": ["physio", "allied-health", "ndis", "family-facing-services"],
+    "description": "Soft corners, gentle card lift, cozier section spacing. Reads as inviting without tipping into playful.",
+    "harvestedFrom": [
+      "uupm styles.csv row 19, Soft UI Evolution (--border-radius: 10px, softer multi-layer shadow, Best For explicitly names 'health/wellness ... professional') — its literal shadow example (0 2px 4px) was written for a small UI component, not a marketing card, so scaled up for real elevation at template scale rather than copied verbatim"
+    ],
+    "tokens": {
+      "radius": { "button": "10px", "card": "12px", "image": "14px", "pill": "999px" },
+      "shadow": { "card": "0 8px 20px -10px rgba(16, 24, 40, 0.14)", "elevated": "0 14px 32px -16px rgba(16, 24, 40, 0.18)" },
+      "borderWeight": "1px",
+      "blur": "0px",
+      "sectionRhythmMultiplier": 0.95,
+      "sectionRhythm": "cozy",
+      "imageTreatment": { "radius": "14px", "aspectPreference": "any" }
+    }
+  },
+  {
+    "id": "trusted-established",
+    "name": "Trusted Established",
+    "mode": "light",
+    "bestFor": ["security", "machinery-b2b", "established-trade-services"],
+    "description": "Sturdier borders and a firmer, more confident card shadow. Reads as substantial, not decorative.",
+    "harvestedFrom": [
+      "uupm styles.csv row 46, Dimensional Layering (--elevation-2: 0 4px 6px rgba(0,0,0,0.1), --elevation-3: 0 10px 20px rgba(0,0,0,0.1)) — informs a firm mid-tier depth, adapted to the neutral rgba(16,24,40,*) convention the shipped templates already use for their own shadows (e.g. atlas's .at-cta__panel), not the source's pure-black rgba",
+      "uupm styles.csv row 27, Trust & Authority (Best For: 'Healthcare/medical ... financial services ... legal services') — status: deprecated upstream (superseded by a landing-page pattern, not a style), cited for its Best For framing only, not its Design System Variables, which are colour-led and out of scope here"
+    ],
+    "tokens": {
+      "radius": { "button": "3px", "card": "4px", "image": "4px", "pill": "999px" },
+      "shadow": { "card": "0 12px 28px -14px rgba(16, 24, 40, 0.24)", "elevated": "0 22px 46px -20px rgba(16, 24, 40, 0.28)" },
+      "borderWeight": "1.5px",
+      "blur": "0px",
+      "sectionRhythmMultiplier": 1.0,
+      "sectionRhythm": "cozy",
+      "imageTreatment": { "radius": "4px", "aspectPreference": "wide" }
+    }
+  },
+  {
+    "id": "clinical-precise",
+    "name": "Clinical Precise",
+    "mode": "light",
+    "bestFor": ["optometry", "dental", "medical-allied-health"],
+    "description": "Restrained, legible, unhurried. Larger touch targets and a visible focus ring — accessibility-first framing, not a decorative choice.",
+    "harvestedFrom": [
+      "uupm styles.csv row 9, Accessible & Ethical (--focus-ring: 3-4px, --touch-target: 44x44px, font-size 16px+; Best For names healthcare/legal-compliance directly) — informs the focus-ring width and touch-target sizing below; its own colour/contrast values are out of scope here (palette's job, not a bundle's)"
+    ],
+    "tokens": {
+      "radius": { "button": "6px", "card": "6px", "image": "6px", "pill": "999px" },
+      "shadow": { "card": "0 4px 12px -6px rgba(16, 24, 40, 0.10)", "elevated": "0 10px 24px -12px rgba(16, 24, 40, 0.14)" },
+      "borderWeight": "1px",
+      "blur": "0px",
+      "focusRingWidth": "3px",
+      "minTouchTarget": "44px",
+      "sectionRhythmMultiplier": 1.05,
+      "sectionRhythm": "loose",
+      "imageTreatment": { "radius": "6px", "aspectPreference": "any" }
+    }
+  },
+  {
+    "id": "grounded-property",
+    "name": "Grounded Property",
+    "mode": "light",
+    "bestFor": ["real-estate", "property-advisory"],
+    "description": "Photography-forward: image cards get more rounding and more lift than UI chrome, with airier gaps so photos have room to breathe.",
+    "harvestedFrom": [
+      "uupm styles.csv row 39, Bento Box Grid (--card-radius: 24px, box-shadow 0 4px 6px rgba(0,0,0,0.05)) — scaled down from 24px to 8px (24px read too playful/app-like for real estate marketing when checked) and its shadow deepened from barely-there to something visible at marketing-photography scale"
+    ],
+    "tokens": {
+      "radius": { "button": "3px", "card": "8px", "image": "8px", "pill": "999px" },
+      "shadow": { "card": "0 18px 40px -22px rgba(16, 24, 40, 0.20)", "elevated": "0 26px 52px -24px rgba(16, 24, 40, 0.24)" },
+      "borderWeight": "1px",
+      "blur": "0px",
+      "sectionRhythmMultiplier": 1.0,
+      "sectionRhythm": "airy",
+      "imageTreatment": { "radius": "8px", "aspectPreference": "landscape" }
+    }
+  },
+  {
+    "id": "structural-industrial",
+    "name": "Structural Industrial",
+    "mode": "light",
+    "bestFor": ["machinery", "trades", "waterproofing-sealant", "industrial-installers"],
+    "description": "No shadow anywhere, squared-off surfaces including the credential pills, tighter section spacing. Function over decoration.",
+    "harvestedFrom": [
+      "uupm styles.csv row 1, Minimalism & Swiss Style (--shadow: none, --border-radius: 0px) and row 12, Flat Design (--shadow: none, --border-radius: 2px, 'corporate' listed in Best For) — both inform 'no ornamentation, sharp edges'; kept at 2px rather than upstream's literal 0px, since every one of the three shipped templates' own current radii is already non-zero at small sizes and 0px read like a rendering bug rather than a deliberate treatment when checked"
+    ],
+    "tokens": {
+      "radius": { "button": "2px", "card": "2px", "image": "2px", "pill": "4px" },
+      "shadow": { "card": "none", "elevated": "none" },
+      "borderWeight": "1.5px",
+      "blur": "0px",
+      "sectionRhythmMultiplier": 0.9,
+      "sectionRhythm": "tight",
+      "imageTreatment": { "radius": "2px", "aspectPreference": "wide" }
+    }
+  }
+]
