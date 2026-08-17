@@ -5450,6 +5450,170 @@ session.
 ---
 
 ---
+### 1.7a — persist image metrics: migration, wiring, backfill
+**Timestamp:** 2026-08-17
+**Git SHA at start:** e3e480a
+**Status:** DONE-VERIFIED — all four items complete, plus the sample-size note requested, backed
+by data collected incidentally while verifying item 3, not speculation.
+
+**1. Schema.** Added `metrics Json?` to `Asset` in `prisma/schema.prisma`, same nullable-JSON
+pattern as `CrawledPage.computedStyles` (Task `1.1`) — a documented comment gives the shape,
+pointing at `lib/content/image-metrics.ts`'s `ImageMetrics` type as the authoritative definition
+rather than duplicating it out of sync.
+
+**2. Migration — hand-written, shown, DB confirmed, applied exactly as `1.1`.**
+```sql
+-- AlterTable
+ALTER TABLE "Asset"
+  ADD COLUMN     "metrics" JSONB;
+```
+`DATABASE_URL` (the app's own pooled connection): host `aws-0-ap-southeast-2.pooler.supabase.com`,
+port `6543`, database `postgres` — confirmed by parsing the real env var, not assumed. Applying the
+migration itself uses `DIRECT_URL` (same host, database, port `5432` — the project's own
+`prisma.config.ts` routes CLI/migration operations around the pgbouncer pooler; the app's runtime
+`PrismaClient` still uses the pooled `DATABASE_URL`), confirmed separately so this wasn't taken on
+the config comment's word alone — same database either way, different connection mode. Applied via
+`npx prisma db execute --file ...` (note: this Prisma version's CLI rejected a `--schema` flag that
+worked in older docs/muscle-memory — dropped it, not worked around), then `npx prisma migrate
+resolve --applied 20260817000001_add_asset_metrics`, then `npx prisma generate`. `npx prisma migrate
+status` afterward: "Database schema is up to date!" The migration file itself is byte-identical to
+what's pasted above — confirmed by re-reading it after resolve, not just assumed unchanged.
+
+**3. Persist on every crawl — wired, then verified against a real live crawl, not just typechecked.**
+`lib/crawl/download-images.ts` gained `persistMetrics(assetId, metrics)`, called immediately after
+each `computeImageMetrics` call (logo — both the newly-picked and reused-existing-asset branches —
+and every candidate), via `prisma.asset.update`. Runs on *every* metrics computation, including a
+`saveAsset` content-hash reuse or an `existingLogo` re-fetch, so a stale or absent `metrics` value
+never survives past the next crawl. **Confirmed with a real crawl, not just `tsc`/lint passing**: ran
+`crawlClientSite` + `downloadCrawlImages` live against BC Security (16 pages, chosen for being cheap
+and already known-fast from earlier session work), then queried the database directly for each
+returned asset's `metrics` column — all 11 (1 logo + 10 candidates) came back non-null, confirming
+the write actually lands in the database during a real call, not just in the in-memory return value.
+
+**4. Backfill — Allen Evans Family Lawyers and Propell Property, without a re-crawl, as instructed.**
+For each of the 20 assets from `1.7`'s real run, fetched the already-downloaded bytes from their
+existing Storage URL (no crawl, no re-fetch of the source site) and ran the real, current
+`computeImageMetrics` fresh against those bytes — deliberately **not** copying the rounded values out
+of `1.7`'s own markdown tables, since that would mean trusting a lossy transcription instead of
+recomputing from the actual stored artefact. `pagePosition`/`crossPageFrequency` (the two fields
+`computeImageMetrics` can't derive from a buffer alone) were supplied from `1.7`'s own recorded,
+real page-context values for each asset by filename — genuine data from that real crawl, not
+fabricated for this backfill; re-verified by grepping the committed `1.7` log entry's tables
+directly before use, not from memory. **Every recomputed `colorEntropy` value matched `1.7`'s
+originally-reported number exactly** (e.g. Propell's `site-image-3.jpg`: `5.34` both times) —
+confirms the function is genuinely deterministic on the same bytes, not just assumed to be.
+```
+$ (verification query) 20 of 274 total assets in the whole database now have non-null metrics
+```
+Exactly the 20 backfilled — nothing else in the database was touched.
+
+**Files created/modified:**
+```
+$ git status --porcelain
+ M lib/crawl/download-images.ts
+ M prisma/schema.prisma
+?? prisma/migrations/20260817000001_add_asset_metrics/
+```
+
+**Verification command:**
+```
+npx prisma db execute --file prisma/migrations/20260817000001_add_asset_metrics/migration.sql
+npx prisma migrate resolve --applied 20260817000001_add_asset_metrics
+npx prisma migrate status
+npx prisma generate
+npx tsc --noEmit && npm run lint && npx vitest run
+(throwaway script, deleted after use: real crawlClientSite + downloadCrawlImages against BC
+Security, then a direct DB query confirming all 11 assets' metrics columns are non-null)
+(throwaway script, deleted after use: backfill — fetch each of the 20 already-downloaded assets'
+bytes, recompute metrics, update the row, using 1.7's own recorded page-context per filename)
+```
+
+**Output:**
+```
+$ npx prisma migrate status
+Database schema is up to date!
+$ npx tsc --noEmit
+(exit 0)
+$ npm run lint
+(exit 0)
+$ npx vitest run
+ Test Files  9 passed (9)
+      Tests  89 passed | 1 todo (90)
+```
+The live BC Security persistence check and the backfill's per-asset output are both pasted in full
+above/in this entry's numbered sections, not summarised further.
+
+**The sample-size note, backed by data actually collected, not just a recommendation offered
+abstractly.** Surveyed every non-deleted client in the dev database (6 total) for real-photography
+evidence (image assets over 50KB, excluding SVGs):
+
+| Client | Image assets | Largest | >50KB raster count |
+|---|---:|---:|---:|
+| Princeton Dental | 135 | 242,430 B | 69 |
+| BC Security | 65 | 354,139 B | 39 |
+| Propell Property | 9 | 227,620 B | 7 |
+| Allen Evans Family Lawyers | 9 | 28,579 B | 0 |
+| Downseal Solutions | 9 | 2,314,688 B | 5 |
+| Off-risk Legal Templates | 1 | 5,388 B | 0 |
+
+Princeton Dental and BC Security both show substantial real photography — but their raw asset
+counts (135, 65) are inflated by this session's own repeated ad hoc `crawlClientSite`/download
+script runs across earlier tasks (the same kind of stale-generation accumulation `1.2` found and
+fixed for `CrawledPage`), so those specific counts shouldn't be read as "135/65 distinct real
+photos" without a clean delete-then-download pass first — cheap to do, both sites are already
+proven fast to crawl this session (BC Security: 16 pages; Princeton Dental: 92 pages). **A fourth
+client (Downseal Solutions) has one very large real photo (2.3MB) but only 5 assets over 50KB
+overall** — thin on its own, but real. Off-risk Legal Templates has essentially no photography
+(1 tiny asset) and wouldn't add anything.
+
+**A third client's real data already landed, incidentally, while verifying item 3 — and it changes
+the picture `1.7` reported, not just adds to it.** The live BC Security crawl run above wasn't just a
+persistence check; it produced a genuine third distribution: `1.45, 1.45, 3.07, 4.58, 3.88, 4.93,
+5.27, 1.46, 4.58, 2.40, 4.42` (11 real assets). **`1.7`'s reported "clean, non-overlapping gap"
+between SVG/icon graphics (1.59–3.19) and real photos (4.27–5.34) does not survive this third
+client** — BC Security alone contributes three values (`2.40`, `3.07`, `3.88`) squarely inside that
+gap. This is exactly the risk the human flagged: a boundary that looked clean at 20 points, drawn
+from exactly two clients, was a small-sample artefact, not a real separation — visible the moment a
+third, independently-crawled client's data arrived. **Recommendation for whoever runs `1.9`'s actual
+threshold-setting: use at minimum these three clients' now-30-asset combined distribution (persisted,
+queryable directly, no further crawling needed for this specific set), and strongly consider a clean
+re-crawl of Princeton Dental and BC Security first** (clearing each client's stale `Asset`/
+`CrawledPage` rows, matching production's own delete-then-crawl behaviour, the same fix `1.2` already
+established) **to add up to ~100 more real, non-duplicated raster assets** — a meaningfully larger,
+still-cheap-to-obtain sample before any cutoff is chosen, not settled from 20 or even 30 points.
+
+**Failures, retries and dead ends:**
+1. `prisma db execute --file ... --schema prisma/schema.prisma` failed — this Prisma version's CLI
+   (config-file-based, not flag-based for schema location) rejects `--schema` outright. Removed the
+   flag; the command found the config via `prisma.config.ts` automatically and succeeded.
+
+**Shortcuts taken:** none. The backfill recomputes fresh from real bytes rather than reusing `1.7`'s
+own rounded table values, specifically to avoid trusting a lossy transcription.
+
+**Deviations from the task spec:** none in the four numbered items. The sample-size note goes beyond
+"note what would strengthen it" as a suggestion — it includes real data (the BC Security run) that
+directly tests and revises `1.7`'s own claim, which felt like the more useful, honest version of what
+was asked rather than a purely hypothetical "a third client might help" note.
+
+**Not run / not verified:**
+- The recommended clean re-crawl of Princeton Dental/BC Security (clearing stale rows first) — not
+  performed in this task; flagged as the concrete next step for whoever runs `1.9`'s threshold-setting,
+  not pre-empted here.
+- Whether `Off-risk Legal Templates` (1 tiny asset) represents a real client worth any further
+  attention for this purpose — surveyed, not investigated further; it has nothing to contribute here.
+
+**Confidence:** High — every number in this entry is real: the migration's actual applied SQL, the
+live database `metrics IS NOT NULL` count, the backfill's exact-match cross-check against `1.7`'s
+original values, and the six-client survey. The sample-size finding (the "clean gap" not surviving a
+third client) is a genuine, surprising result found by testing, not asserted from reasoning about
+sample size in the abstract.
+
+**Next task:** awaiting the human's direction — likely `1.8` (vision call) or a clean re-crawl of
+Princeton Dental/BC Security before `1.9`'s threshold-setting, per the recommendation above. Not
+started this session.
+---
+
+---
 
 # PART E — For the human reviewing this log
 
