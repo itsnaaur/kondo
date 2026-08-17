@@ -13,6 +13,11 @@ export function ledgerStyles(p: Palette): string {
   --ink-muted: ${p.inkMuted};
   --line: ${p.line};
   --paper: ${p.paper};
+  --secondary: ${p.secondary};
+  --on-secondary: ${p.onSecondary};
+  --ring: ${p.ring};
+  --destructive: ${p.destructive};
+  --on-destructive: ${p.onDestructive};
   --maxw: 1280px;
   --gutter: clamp(18px, 3.4vw, 44px);
   --band: clamp(60px, 8vw, 112px);
@@ -320,8 +325,8 @@ body.tpl-ledger {
    give the pill its own visual weight. */
 .tl-credentials { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
 .tl-credentials > span {
-  font-size: 0.82rem; color: var(--ink-muted); padding: 8px 16px;
-  border: 1px solid var(--line); border-radius: 999px; background: var(--paper);
+  font-size: 0.82rem; color: var(--on-secondary); padding: 8px 16px;
+  border: 1px solid var(--line); border-radius: 999px; background: var(--secondary);
 }
 
 /* ---------- statement band ---------- */
@@ -585,7 +590,7 @@ body.tpl-ledger {
 }
 
 .tpl-ledger a:focus-visible, .tpl-ledger button:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--ring);
   outline-offset: 3px;
 }
 .tl-deep a:focus-visible, .tl-cta a:focus-visible, .tl-foot a:focus-visible {

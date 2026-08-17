@@ -13,6 +13,11 @@ export function showcaseStyles(p: Palette): string {
   --ink-muted: ${p.inkMuted};
   --line: ${p.line};
   --paper: ${p.paper};
+  --secondary: ${p.secondary};
+  --on-secondary: ${p.onSecondary};
+  --ring: ${p.ring};
+  --destructive: ${p.destructive};
+  --on-destructive: ${p.onDestructive};
   --maxw: 1320px;
   --gutter: clamp(18px, 3.4vw, 44px);
   --band: clamp(60px, 8vw, 116px);
@@ -433,8 +438,8 @@ body.tpl-showcase {
    give the pill its own visual weight. */
 .sc-credentials { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
 .sc-credentials > span {
-  font-size: 0.82rem; color: var(--ink-muted); padding: 8px 16px;
-  border: 1px solid var(--line); border-radius: 999px;
+  font-size: 0.82rem; color: var(--on-secondary); padding: 8px 16px;
+  border: 1px solid var(--line); border-radius: 999px; background: var(--secondary);
 }
 
 /* ---------- cta ----------
@@ -547,7 +552,7 @@ body.tpl-showcase {
   }
 }
 
-.tpl-showcase a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.tpl-showcase a:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; }
 .sc-feature a:focus-visible, .sc-cta a:focus-visible, .sc-foot a:focus-visible { outline-color: currentColor; }
 `;
 }

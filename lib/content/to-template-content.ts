@@ -164,7 +164,11 @@ export function toTemplateContent(contentRecord: ContentRecord, assets: Asset[])
     contactPhone: contentRecord.contactPhone,
     contactAddress: contentRecord.contactAddress,
     logoUrl,
-    brandColors: brandColors.map((c) => ({ hex: c.hex, role: c.role })),
+    // Task 1.10: consumes rankBrandColorSources' confidence score (see run-analysis.ts's own
+    // matching comment on the write side) — a "low" confidence brandColors entry is still
+    // persisted (so the review screen can show what was detected and why it wasn't trusted)
+    // but never reaches pickHue, which has no confidence-awareness of its own.
+    brandColors: brandColors.filter((c) => c.confidence !== "low").map((c) => ({ hex: c.hex, role: c.role })),
     heroImageUrl,
     heroImageSource,
     galleryImages,

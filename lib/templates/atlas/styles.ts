@@ -13,6 +13,11 @@ export function atlasStyles(p: Palette): string {
   --ink-muted: ${p.inkMuted};
   --line: ${p.line};
   --paper: ${p.paper};
+  --secondary: ${p.secondary};
+  --on-secondary: ${p.onSecondary};
+  --ring: ${p.ring};
+  --destructive: ${p.destructive};
+  --on-destructive: ${p.onDestructive};
   --maxw: 1240px;
   --gutter: clamp(18px, 3.4vw, 46px);
   --band: clamp(62px, 8vw, 118px);
@@ -171,8 +176,8 @@ body.tpl-atlas {
    give the pill its own visual weight. */
 .at-credentials { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
 .at-credentials > span {
-  font-size: 0.82rem; color: var(--ink-muted); padding: 8px 16px;
-  border: 1px solid var(--line); border-radius: 999px; background: var(--paper);
+  font-size: 0.82rem; color: var(--on-secondary); padding: 8px 16px;
+  border: 1px solid var(--line); border-radius: 999px; background: var(--secondary);
 }
 
 /* ---------- differentiators: the strongest reliable content ---------- */
@@ -454,7 +459,7 @@ body.tpl-atlas {
   html { scroll-behavior: auto; }
   .tpl-atlas *, .tpl-atlas *::before { transition-duration: 0.01ms !important; }
 }
-.tpl-atlas a:focus-visible, .tpl-atlas summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.tpl-atlas a:focus-visible, .tpl-atlas summary:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; }
 .at-why a:focus-visible, .at-cta a:focus-visible, .at-foot a:focus-visible { outline-color: currentColor; }
 `;
 }

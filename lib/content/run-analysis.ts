@@ -2,16 +2,19 @@ import { randomUUID } from "crypto";
 import { prisma } from "@/lib/prisma";
 import { crawlClientSite } from "@/lib/crawl/crawler";
 import { downloadCrawlImages } from "@/lib/crawl/download-images";
-import { extractDominantColors, DEFAULT_NEUTRAL_PALETTE } from "./extract-colors";
+import { DEFAULT_NEUTRAL_PALETTE } from "./extract-colors";
+import { rankBrandColorSources } from "./rank-brand-color-sources";
 import { flagLowQualityImages } from "./assess-image-quality";
 import { classifyPartnerLogos } from "./classify-partner-logos";
 import { selectHeroAssetId } from "./select-hero-image";
 import { extractContactDetails } from "./contact-extraction";
 import { structureAndRewriteContent } from "./structure-and-rewrite";
+import { classifyImages, type ClassifyImageInput } from "./classify-images";
+import { assignImageRoles, summarizeCapabilities, describeCapabilities, type RoleAssignmentInput } from "./assign-image-roles";
 import { selectRelevantPages } from "./select-relevant-pages";
 import { isJunkBySize, isImplausibleAsPhoto } from "./filter-junk-images";
 import { resizeForVisionClassification } from "./resize-for-vision";
-import type { ConfidenceLevel, ContentImage, FieldFlag, FieldFlags } from "./types";
+import type { ConfidenceLevel, ContentColor, ContentImage, FieldFlag, FieldFlags } from "./types";
 import type { Prisma } from "@/app/generated/prisma/client";
 import { logAuditEvent } from "@/lib/audit-log";
 
@@ -41,6 +44,14 @@ export async function runAnalysisInBackground(clientId: string, siteUrl: string)
     await prisma.crawledPage.deleteMany({ where: { clientId } });
 
     const { pages, truncated } = await crawlClientSite(clientId, siteUrl);
+
+    // Task 1.10: crawlClientSite has already persisted one CrawledPage row per crawled
+    // page (including its computedStyles capture) by the time it returns — read them back
+    // here rather than threading a second return value through crawler.ts, since
+    // rankBrandColorSources (Task 1.2) is the first caller that needs this column's value
+    // rather than just its existence.
+    const crawledPageRows = await prisma.crawledPage.findMany({ where: { clientId }, select: { computedStyles: true } });
+    const computedStylesValues = crawledPageRows.map((r) => r.computedStyles);
 
     // Which pages actually inform the AI call — homepage always, then whichever crawled
     // pages look like About/Services/Contact/Testimonials, up to a character budget. This
@@ -95,10 +106,26 @@ export async function runAnalysisInBackground(clientId: string, siteUrl: string)
       return img;
     });
 
-    const colorSourceBuffer =
-      logo?.buffer ?? candidates.find((c) => c.asset.id === heroAssetId)?.buffer ?? candidates[0]?.buffer ?? null;
-    const brandColors = colorSourceBuffer
-      ? await extractDominantColors(colorSourceBuffer)
+    // Task 1.10: replaces the old single-buffer extractDominantColors call with 1.2's
+    // ranked, source-aware pick (computed styles, then logo by saturation, then imagery as
+    // a last resort) — the carry-forward this task exists to close. imageryBuffer keeps the
+    // old call's own preference order (hero candidate, else first candidate) for exactly
+    // the tier extractDominantColors itself still runs inside, as rankImagerySource's
+    // last-resort source.
+    const imageryBuffer = candidates.find((c) => c.asset.id === heroAssetId)?.buffer ?? candidates[0]?.buffer ?? null;
+    const ranked = await rankBrandColorSources({
+      computedStylesValues,
+      logoBuffer: logo?.buffer ?? null,
+      imageryBuffer,
+    });
+    // Consumes rankBrandColorSources' confidence score (the 1.5/1.2c/1.7c carry-forward):
+    // pickHue itself still has no notion of confidence (not touched here, see this task's
+    // log entry for why), so the gate is applied at the one call site that assembles its
+    // input instead — a "low" confidence result never reaches the persisted brandColors
+    // array's hex value at all, only its own confidence/flagged fields (for the review
+    // screen's benefit; see to-template-content.ts's matching filter on the read side).
+    const brandColors: ContentColor[] = ranked.hex
+      ? [{ hex: ranked.hex, role: "primary", confidence: ranked.confidence, flagged: ranked.confidence === "low" }]
       : DEFAULT_NEUTRAL_PALETTE;
 
     // Contact extraction is cheap regex/link-scanning, not AI-token-bound, so it scans
@@ -132,25 +159,105 @@ export async function runAnalysisInBackground(clientId: string, siteUrl: string)
         })
     ).then((results) => results.filter((r): r is NonNullable<typeof r> => r !== null));
 
+    // Task 1.10: 1.8's classify-images.ts call runs ALONGSIDE structureAndRewriteContent's
+    // own embedded classification below, not as a replacement for it — a full replace was
+    // considered and rejected as larger and riskier than this task's "plumbing, not a
+    // rework" scope. structureAndRewriteContent still owns caption/subject/suitableAsHero
+    // as it always has (1.8 has no caption generation to substitute, and the Review
+    // Extraction screen already depends on those fields existing). What 1.8/1.9/1.9a's
+    // output DOES take over, below: which single image is authoritative as the hero, and
+    // which images never reach the images array at all as 1.9a's "unusable" verdict. This
+    // means every gallery/hero candidate is now vision-classified twice, by two separate
+    // real Claude calls with two separate schemas — a genuine, known inefficiency, not
+    // something this task's scope covers fixing (that's a real Phase 2/3 candidate: teach
+    // structureAndRewriteContent to consume 1.8's cached classification instead of running
+    // its own). Same eligible set as imageCandidatesForAi (gallery/hero, pre-pass survivors)
+    // — the logo never goes through this (1.8's own design), and partner-logos have already
+    // been pulled out above by classifyPartnerLogos.
+    const eligibleAssetIds = new Set(imageCandidatesForAi.map((c) => c.assetId));
+    const classifyInputs: ClassifyImageInput[] = candidates
+      .filter((c) => eligibleAssetIds.has(c.asset.id))
+      .map((c) => ({ assetId: c.asset.id, contentHash: c.asset.contentHash, buffer: c.buffer, nearbyText: c.nearbyText }));
+    const classificationByAssetId = await classifyImages(classifyInputs);
+
+    // Task 1.9/1.9a's rules-based role assignment, run over this client's full asset set.
+    // contentImagesPrepassed (not contentImages) is the source of role here so the pre-pass
+    // geometry check's "abstract" override and classifyPartnerLogos' "partner-logo" pull
+    // are both already reflected in what's excluded — only images still tagged "gallery" at
+    // this point (not logo, not partner-logo) are candidates for 1.9's own verdict, plus the
+    // logo itself (assignImageRoles resolves it trivially to role:"logo" without needing
+    // real classification).
+    const roleByPrepassedAssetId = new Map(contentImagesPrepassed.map((img) => [img.assetId, img]));
+    const roleInputs: RoleAssignmentInput[] = [
+      ...(logo ? [{ assetId: logo.asset.id, assetType: "LOGO" as const, metrics: logo.metrics, classification: null }] : []),
+      ...candidates
+        .filter((c) => roleByPrepassedAssetId.get(c.asset.id)?.role === "gallery")
+        .map((c) => ({
+          assetId: c.asset.id,
+          assetType: "IMAGE" as const,
+          metrics: c.metrics,
+          classification: classificationByAssetId.get(c.asset.id) ?? null,
+        })),
+    ];
+    const roleAssignments = assignImageRoles(roleInputs);
+    const capabilitySummary = summarizeCapabilities(roleAssignments);
+    // Not persisted to any column — this task's own conclusion (stated in its log entry) is
+    // that no migration is needed for 1.10's scope, so this is visibility only, not a stored
+    // field a future caller could read back.
+    console.log(`[run-analysis] ${clientId} image capability summary: ${describeCapabilities(capabilitySummary)}`);
+
+    // 1.9/1.9a's hero pick becomes the sole authority for which image is treated as THE
+    // hero — overriding, not merging with, the crawler's geometry-only selectHeroAssetId
+    // pick above, since 1.9a's rules are informed by real per-image vision-classification
+    // confidence selectHeroAssetId has no access to. Falls back to the old heroAssetId
+    // (unchanged) only when 1.9 finds no hero-eligible photo at all — the same "a prospect
+    // with no hero-worthy photo is the normal case" fallback selectHeroAssetId's own header
+    // comment already documents, now one layer further out.
+    const roleHeroAssetId = roleAssignments.find((r) => r.role === "hero")?.assetId ?? heroAssetId;
+    // 1.9a's real, disclosed verdict — never merely flagged, excluded from the images array
+    // entirely, so a role:"gallery" image nothing downstream distinguishes from any other
+    // gallery photo can never render regardless (to-template-content.ts's galleryImages has
+    // no flagged filter of its own; exclusion at the source is the only way 1.9a's verdict
+    // actually holds once this reaches a template).
+    const unusableAssetIds = new Set(roleAssignments.filter((r) => r.role === "unusable").map((r) => r.assetId));
+
     const structured = await structureAndRewriteContent(
       selectedPages.map((p) => ({ url: p.url, title: p.title, text: p.text })),
       imageCandidatesForAi
     );
 
     const imageClassificationByAssetId = new Map(structured.images.map((i) => [i.assetId, i]));
-    const contentImagesWithCaptions: ContentImage[] = contentImagesPrepassed.map((img) => {
-      const classification = imageClassificationByAssetId.get(img.assetId);
-      // Pre-pass rejects have no classification entry (never sent to the model) — they
-      // keep the subject: "abstract" the pre-pass already forced onto them above.
-      if (!classification) return img;
-      return {
-        ...img,
-        caption: classification.caption ?? undefined,
-        subject: classification.subject,
-        suitableAsHero: classification.suitableAsHero,
-        subjectConfidence: classification.confidence,
-      };
-    });
+    const contentImagesWithCaptions: ContentImage[] = contentImagesPrepassed
+      .map((img) => {
+        const classification = imageClassificationByAssetId.get(img.assetId);
+        // Pre-pass rejects have no classification entry (never sent to the model) — they
+        // keep the subject: "abstract" the pre-pass already forced onto them above.
+        const base: ContentImage = !classification
+          ? img
+          : {
+              ...img,
+              caption: classification.caption ?? undefined,
+              subject: classification.subject,
+              suitableAsHero: classification.suitableAsHero,
+              subjectConfidence: classification.confidence,
+            };
+        // Logo/partner-logo roles are untouched by 1.9's role assignment below — only
+        // gallery/hero-role images (real content photos) are ever in its scope.
+        if (base.role !== "gallery" && base.role !== "hero") return base;
+        const isRoleHeroWinner = base.assetId === roleHeroAssetId;
+        return {
+          ...base,
+          // Demotes the old selectHeroAssetId pick back to "gallery" when 1.9 chose a
+          // different winner, so exactly one image (or none) ever carries role: "hero".
+          role: (isRoleHeroWinner ? "hero" : base.role === "hero" ? "gallery" : base.role) as ContentImage["role"],
+          // Overrides, not merges with, structureAndRewriteContent's own suitableAsHero
+          // opinion — see this task's log entry for why the override goes this direction.
+          suitableAsHero: isRoleHeroWinner,
+        };
+      })
+      // 1.9a's unusable verdict — excluded here, not just flagged, so it holds all the way
+      // through to every template (see the unusableAssetIds comment above).
+      .filter((img) => !unusableAssetIds.has(img.assetId));
 
     const fieldFlags: FieldFlags = {};
     const businessNameFlag = flagFor(structured.businessNameConfidence, "AI-extracted from crawled site text");
