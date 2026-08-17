@@ -7029,6 +7029,204 @@ pairing against a corpus that doesn't contain it. Not started this session.
 ---
 
 ---
+### 2.2 — Typography resolver
+**Timestamp:** 2026-08-17
+**Git SHA at start:** 85a1423
+**Status:** DONE-VERIFIED — 100-repeat determinism test passes for three different inputs
+(including one that forces the tie-break to actually run every time), 28 real mood×tier
+coverage tests pass (7 moods × 4 tiers, every combination `TABLE` supports), full output pasted
+below, not summarised.
+
+**What I did:** New `lib/design/resolve-typography.ts`. An explicit, hand-authored 13-entry
+`TABLE` (not BM25, not a fuzzy score over the full 61-row corpus) mapping `moodSignals[]` +
+`positioningTier` to one `typography.json` pairing. Resolution: walk a fixed, documented
+`MOOD_SIGNAL_PRIORITY` order (`professional`, `traditional`, `elegant`, `bold`, `friendly`,
+`modern`, `minimal`); for the first signal present in the caller's `moodSignals[]`, collect every
+`TABLE` entry declaring that signal; prefer the subset that also declares the requested
+`positioningTier`, falling back to the full mood-matching set if none do (mood match outranks
+tier match — tier narrows, it doesn't gate); **tie-break the surviving candidates by `slug`,
+sorted explicitly every call, never by `TABLE`'s own declared order or `Array.find`'s first-match
+behaviour** (build plan §6.1's own words, and exactly what `1.2`'s sort-stability fixes earlier in
+this session were about). No signal in the priority list present at all → the no-match default.
+
+**The producer of this function's inputs does not exist yet — stated plainly, not glossed over.**
+`moodSignals[]`/`positioningTier` are named in build plan §5.4 as fields of an extraction-call
+`classification` object that Phase 3's Task 5.4 has not been built. `MoodSignal` is typed as a
+loose `string` (matched case-insensitively, trimmed) — deliberately not a closed union, since
+there is no evidence yet of what vocabulary 5.4 will actually emit and a closed union would
+assert a false certainty about that. `PositioningTier` **is** a closed union
+(`"accessible" | "mainstream" | "premium" | "luxury"`) — a different call, because "tier" reads as
+an inherently small ordered set (the same shape as this codebase's existing `ConfidenceLevel`),
+not an open descriptive vocabulary; still my own invented stand-in, not 5.4's real contract. When
+5.4 lands, either it needs to emit these exact tokens, or a translation layer sits between it and
+this function — an open question, left open, not papered over with an invented substitute data
+source (the task's own explicit instruction).
+
+**Table size: 13 of 61, decided after looking at the real data, not the pre-suggested 10-15
+adopted blind.** Ran a word-frequency pass over `typography.json`'s own `moodKeywords` column
+across all 61 kept rows (211 distinct raw keywords; top by frequency: clean 14, modern 12,
+readable 12, professional 10, bold 10, elegant 9). 211 raw keywords is far too granular for a
+small explicit table — clustered them down to 7 canonical signals
+(`professional`/`traditional`/`elegant`/`bold`/`friendly`/`modern`/`minimal`), the same
+"cluster free text into a small canonical set" move build plan §3.3 already uses for the
+anti-pattern enum. Checked `positioningTier` vocabulary the same way before inventing it: the
+corpus has a real `luxury`/`premium`/`high-end` cluster (6/5/3 rows) and a separate `enterprise`/
+`accessible` cluster (3/6 rows), but **zero** rows use `budget`/`affordable`/`mainstream`/`value`
+language at all — the corpus can genuinely discriminate "premium-and-up" from "everything else,"
+which is why `PositioningTier`'s four values lean on real signal at the top (`premium`/`luxury`)
+and a softer, evidence-thinner distinction at the bottom (`accessible`/`mainstream`) rather than a
+full budget-to-luxury spectrum the data doesn't actually support.
+
+Landed on 13, not fewer or more, because that's what a mood × tier grid relevant to Kondo's
+actual client base (Australian SME service businesses — the five real clients this session has
+worked with all session: a dental clinic, a security systems company, a family law firm, a
+property advisory, a waterproofing contractor) needed to cover without padding: legal, medical,
+financial/corporate-trust, real estate, wellness, general-professional, and an accessibility-first
+and a bare-minimal fallback tier, each checked by hand against its own `notes`/`bestFor` text, not
+picked mechanically. The other 48 imported rows were deliberately left out, not silently dropped:
+the CJK/Arabic/Hebrew/Thai multilingual rows (No. 21-28), the crypto/web3/gaming/cyberpunk/pixel-
+retro rows (No. 36-38, 51-53, 56-57), the developer/dashboard/terminal rows (No. 9, 42, 47, 62),
+the academic-archival row (No. 54), and the wedding-invitation row (No. 46) have no realistic path
+to this project's actual or reasonably-anticipated client base right now. If that changes, the
+table grows — nothing about `TABLE`'s shape assumes 13 is final.
+
+**No-mood-match default: a forced neutral pick, not an abstention — different from `1.2`'s brand
+colour on purpose, stated why.** `1.2`'s abstention exists because a *wrong* brand colour actively
+damages a page (Princeton's near-black logo artefact). Blank typography isn't a real option — a
+page has to render in *some* font, so refusing to pick is refusing to do the job, not a safer
+default. Chose pairing #5, "Minimal Swiss" (Inter/Inter) — not for being first, smallest, or most
+boring, but because its own `moodKeywords` column literally contains the word **"neutral"**, the
+only pairing in the entire 61-row imported set that does. Single-family (Inter twice) is a
+feature, not a shortcut, for the same no-match case: one font family is the least that can go
+visibly wrong when nothing else is known about the business.
+
+**Real consequences of the design, found by running it, not just asserted:**
+- `professional` alone matches 5 of 13 `TABLE` entries (`modern-professional`, `legal-
+  professional`, `medical-clean`, `corporate-trust`, `financial-trust` all declare it). At
+  `mainstream`/`accessible`/`luxury` tier, none of those five additionally narrow by tier in a way
+  that changes the outcome — `corporate-trust` wins the slug tie-break across the full five-entry
+  pool every time. At `premium`, exactly two (`legal-professional`, `financial-trust`) declare
+  that tier; `financial-trust` wins alphabetically. This is a real, visible property of the
+  design worth stating plainly: a `professional`-tagged business gets **`corporate-trust` in three
+  of four tiers**, regardless of whether `legal-professional` or `medical-clean` might read as a
+  qualitatively better fit for a specific business — the slug tie-break is doing exactly what it
+  was asked to do (deterministic, not "best guess"), and the cost of that is real.
+- `elegant` at `accessible`/`mainstream` tiers resolves to `classic-elegant` even though neither
+  of the two `elegant` entries declares those tiers (`classic-elegant`: luxury/premium;
+  `real-estate-luxury`: luxury only) — confirms "mood match beats tier match" is a real, tested
+  behaviour, not just documented intent (see `resolve-typography.test.ts`'s "falls through to the
+  full mood pool" test).
+
+**Files created:**
+```
+$ git status --porcelain
+?? lib/design/resolve-typography.test.ts
+?? lib/design/resolve-typography.ts
+```
+
+**Verification command:**
+```
+npx vitest run lib/design/resolve-typography.test.ts --reporter=verbose
+npx tsc --noEmit && npm run lint && npx vitest run
+```
+
+**Output:**
+```
+$ npx vitest run lib/design/resolve-typography.test.ts --reporter=verbose
+ ✓ resolveTypography — determinism (this task's own done-when) > returns identical output across 100 repeated calls with identical input
+ ✓ resolveTypography — determinism (this task's own done-when) > is deterministic across 100 calls for a tier that forces the tie-break to actually run
+ ✓ resolveTypography — determinism (this task's own done-when) > is deterministic for the no-match default across 100 calls
+ ✓ resolveTypography — mood/tier coverage > professional + accessible -> corporate-trust
+ ✓ resolveTypography — mood/tier coverage > professional + mainstream -> corporate-trust
+ ✓ resolveTypography — mood/tier coverage > professional + premium -> financial-trust
+ ✓ resolveTypography — mood/tier coverage > professional + luxury -> corporate-trust
+ ✓ resolveTypography — mood/tier coverage > traditional + accessible -> legal-professional
+ ✓ resolveTypography — mood/tier coverage > traditional + mainstream -> legal-professional
+ ✓ resolveTypography — mood/tier coverage > traditional + premium -> legal-professional
+ ✓ resolveTypography — mood/tier coverage > traditional + luxury -> real-estate-luxury
+ ✓ resolveTypography — mood/tier coverage > elegant + accessible -> classic-elegant
+ ✓ resolveTypography — mood/tier coverage > elegant + mainstream -> classic-elegant
+ ✓ resolveTypography — mood/tier coverage > elegant + premium -> classic-elegant
+ ✓ resolveTypography — mood/tier coverage > elegant + luxury -> classic-elegant
+ ✓ resolveTypography — mood/tier coverage > bold + accessible -> bold-statement
+ ✓ resolveTypography — mood/tier coverage > bold + mainstream -> bold-statement
+ ✓ resolveTypography — mood/tier coverage > bold + premium -> bold-statement
+ ✓ resolveTypography — mood/tier coverage > bold + luxury -> bold-statement
+ ✓ resolveTypography — mood/tier coverage > friendly + accessible -> accessibility-first
+ ✓ resolveTypography — mood/tier coverage > friendly + mainstream -> medical-clean
+ ✓ resolveTypography — mood/tier coverage > friendly + premium -> accessibility-first
+ ✓ resolveTypography — mood/tier coverage > friendly + luxury -> accessibility-first
+ ✓ resolveTypography — mood/tier coverage > modern + accessible -> modern-professional
+ ✓ resolveTypography — mood/tier coverage > modern + mainstream -> geometric-modern
+ ✓ resolveTypography — mood/tier coverage > modern + premium -> geometric-modern
+ ✓ resolveTypography — mood/tier coverage > modern + luxury -> geometric-modern
+ ✓ resolveTypography — mood/tier coverage > minimal + accessible -> accessibility-first
+ ✓ resolveTypography — mood/tier coverage > minimal + mainstream -> minimal-swiss
+ ✓ resolveTypography — mood/tier coverage > minimal + premium -> accessibility-first
+ ✓ resolveTypography — mood/tier coverage > minimal + luxury -> accessibility-first
+ ✓ resolveTypography — mood/tier coverage > prefers a tier-matching entry over a mood-only match when both exist in the pool
+ ✓ resolveTypography — mood/tier coverage > falls through to the full mood pool when no entry for that mood covers the requested tier
+ ✓ resolveTypography — mood signal priority order > resolves via the higher-priority signal when the input contains more than one recognised token
+ ✓ resolveTypography — mood signal priority order > is insensitive to the order moodSignals[] happens to list its entries in
+ ✓ resolveTypography — mood signal priority order > matches case-insensitively and trims whitespace, since 5.4's real output shape is unknown
+ ✓ resolveTypography — no-match default > returns the neutral default when moodSignals is empty
+ ✓ resolveTypography — no-match default > returns the neutral default when every signal is unrecognised
+ ✓ resolveTypography — no-match default > the default pairing is single-family (Inter/Inter) — the least that can go visually wrong
+ ✓ TABLE integrity > every table entry references a pairing id that actually exists in typography.json
+ ✓ TABLE integrity > every table entry has a unique slug
+ ✓ TABLE integrity > covers exactly 13 pairings, as decided and stated in this task's log entry
+
+ Test Files  1 passed (1)
+      Tests  42 passed (42)
+
+$ npx tsc --noEmit
+(exit 0)
+$ npm run lint
+(exit 0)
+$ npx vitest run
+ Test Files  10 passed (10)
+      Tests  131 passed | 1 todo (132)
+```
+
+**Failures, retries and dead ends:** none in the implementation. Verified the real resolved output
+for all 28 mood×tier combinations with a throwaway probe script (`scripts/_tmp-2.2-probe.ts`,
+deleted after use) before writing test expectations, rather than hand-predicting the tie-break
+outcomes and trusting the prediction unchecked. The run confirmed the by-hand predictions worked
+through while designing `TABLE` (including `professional + premium`'s two-entry tie and both
+`elegant` accessible/mainstream fall-through cases) — worth stating that it was actually run
+regardless of the prediction having held, since "I was confident" is not the same claim as "I
+checked," and every test's expected value is pinned to the executed output, not the prediction.
+
+**Shortcuts taken:** `MOOD_SIGNAL_PRIORITY`'s specific order (`professional` > `traditional` >
+`elegant` > `bold` > `friendly` > `modern` > `minimal`) is a judgement call — "what a business
+literally sells itself as should outrank a softer atmospheric adjective" — not derived from the
+corpus or from any stated build-plan rule. Stated as a judgement call in the code's own comment,
+not presented as more principled than it is.
+
+**Deviations from the task spec:** none. `moodSignals`/`positioningTier` are taken as typed
+parameters per instruction, no substitute producer invented.
+
+**Not run / not verified:**
+- Whether 7 canonical mood signals and 13 pairings will still feel like enough once real
+  `moodSignals[]` output exists (Phase 3, Task 5.4) — this table was sized against corpus
+  frequency data and this project's current real clients, not against actual model output, which
+  doesn't exist yet.
+- Whether `MOOD_SIGNAL_PRIORITY`'s order produces good results across ambiguous multi-signal
+  inputs beyond the one case tested (`["modern", "professional"]`) — only one priority collision
+  is exercised by the test suite.
+- Whether 13 is still the right count once Task 5.4 reveals what `moodSignals[]` actually looks
+  like in practice — flagged in the code's own header comment as open, not assumed settled.
+
+**Confidence:** High on everything stated as directly observed (all 28 combinations run for real
+before being written into tests, the 100-repeat determinism check, the corpus frequency numbers).
+Medium on the table's actual real-world fit — 13 entries checked by hand against a corpus and this
+project's known clients is a reasoned bet, not something validated against real `moodSignals[]`
+output, which can't happen until `5.4` exists.
+
+**Next task:** not specified — awaiting direction.
+---
+
+---
 
 # PART E — For the human reviewing this log
 
