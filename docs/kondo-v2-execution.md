@@ -7518,6 +7518,215 @@ a direct, checked consequence of `buildPalette()`'s current behaviour, not a gue
 ---
 
 ---
+### 2.4 — Token plumbing
+**Timestamp:** 2026-08-17
+**Git SHA at start:** 923ef58
+**Status:** DONE-VERIFIED — the task's own done-when grep returns only token definitions plus two
+named, explained exceptions; real rendering confirms both the default path (no design input
+passed, matching every existing caller) and an explicit override (a different mood/tier/bundle)
+produce genuinely different resolved CSS, not just different defaults asserted and never checked.
+
+**What was already there from `1.10`, extended rather than redone.** Every palette role
+(`--accent`, `--accent-ink`, `--accent-soft`, `--deep`, `--deep-soft`, `--mist`, `--ink`,
+`--ink-muted`, `--line`, `--paper`, `--secondary`, `--on-secondary`, `--ring`, `--destructive`,
+`--on-destructive`) was already emitted as a CSS custom property in all three templates' `:root`
+blocks, sourced from `buildPalette()` — `1.10`'s own scope. This task didn't touch that block's
+existing lines, only added to it: `--font-body`, `--font-heading`, `--radius-btn`, `--radius-card`,
+`--radius-image`, `--radius-pill`, `--shadow-card`, `--shadow-elevated`, `--border-weight`,
+`--surface-blur`, `--focus-ring-width`, and replaced each template's literal `--band` clamp with
+`scaledBand()`'s bundle-multiplied version. Font-family and every `border-radius`/`box-shadow`/
+border-width declaration throughout all three `styles.ts` files were untouched by `1.10` — this
+task's own, new scope.
+
+**New `lib/design/resolve-tokens.ts`** — combines `2.2`'s `resolveTypography` and `2.3`'s
+`style-bundles.json` into one `resolveTemplateTokens()` call returning concrete, ready-to-
+interpolate CSS values, the same "resolve everything to a final string in JS, hand the template a
+plain value" shape `buildPalette` already established (not a second architecture). Both real
+inputs (`moodSignals[]`/`positioningTier`, a style bundle id) are optional and default internally,
+mirroring `buildPalette(c.brandColors || [])`'s own existing pattern for a missing input — because
+neither has a real producer yet (Task 5.4 for the first, no bundle-selection resolver for the
+second, `2.3`'s own carry-forward already named this). Every existing caller
+(`registry.ts` → `TEMPLATES[key].render(content)`, unchanged) keeps working exactly as before,
+now resolving to the two placeholder defaults stated below; a caller that DOES have real inputs —
+or wants to exercise a specific combination — can pass them as an optional second argument.
+
+**The default typography is Task 2.2's own no-match neutral ("Minimal Swiss," Inter for both
+roles) — confirmed live, and it is exactly `2.1`'s finding landing here as predicted, not a
+surprise.** `2.1`'s entry said plainly: "adopting the resolver changes what every existing
+template actually renders in, even before any new template is built." Rendered Princeton Dental
+through `renderAtlas` with no design input (the exact call `registry.ts` makes today) and read the
+generated CSS directly: `--font-body: "Inter", ...; --font-heading: "Inter", ...` — Instrument Sans
+and Newsreader are gone from every template's default render, replaced by a resolver output,
+per this task's own instruction not to preserve them.
+
+**The default style bundle is `crisp-formal`** — chosen, per `resolve-tokens.ts`'s own comment, as
+the closest match to what the three templates already rendered pre-`2.4` (small non-zero radii, a
+restrained shadow only on the one already-elevated panel each template has), to minimise how much
+changes for a caller that passes nothing. Confirmed live: default `--radius-btn: 2px`
+(unchanged from every template's pre-`2.4` literal), default `--band` on Atlas resolved to
+`clamp(68px, 8.8vw, 130px)` — `crisp-formal`'s own `1.1×` multiplier genuinely applied to Atlas's
+own `clamp(62px, 8vw, 118px)` baseline (`62×1.1=68.2→68`, `8×1.1=8.8`, `118×1.1=129.8→130`, all
+three components scaled, matching `scaledBand`'s own stated design so the clamp's internal
+proportions don't drift).
+
+**Real, live proof the plumbing actually responds to different input, not just different
+defaults asserted and never exercised.** Rendered the same Princeton Dental content through
+`renderLedger` with an explicit `{ moodSignals: ["professional"], positioningTier: "premium" }` +
+`styleBundleId: "structural-industrial"`: resolved typography came back `"IBM Plex Sans"` for both
+roles (matching `2.2`'s own recorded `professional + premium → financial-trust` result exactly —
+consistent output between two separately-run tasks, not a fluke), `--radius-btn: 2px`,
+`--radius-pill: 4px` (`structural-industrial`'s deliberately-squared pill — the single most
+distinctive, riskiest value in the whole bundle set, per `2.3`'s own entry — confirmed applying
+correctly rather than silently defaulting to `crisp-formal`'s own `999px`), `--shadow-card: none`.
+Every value traced to the exact bundle/pairing requested, none of it left over from the default
+path.
+
+**A real, disclosed consequence of wiring `--surface-blur` for real: Showcase's sticky nav loses
+its frosted-glass effect under every one of the 6 current bundles.** Showcase's nav has exactly one
+`backdrop-filter` use (`blur(16px) saturate(160%)`, giving the sticky nav its translucent look on
+scroll) — now `blur(var(--surface-blur))`. All 6 `2.3` bundles declare `blur: "0px"` (none of the
+seven named verticals wanted a glassmorphism effect), so `blur(0px)` is a real no-op: the nav falls
+back to a fully solid bar under every bundle that exists today. Confirmed live by reading the
+generated CSS directly (`backdrop-filter: blur(var(--surface-blur)) saturate(160%);`), not assumed
+correct because the token was declared. Not treated as a bug to route around — this is the token
+pipeline doing exactly what `2.3`'s bundles specify; if the frosted nav should survive, that's a
+`2.3` bundle-authoring decision (a 7th bundle, or revising an existing one's `blur`), not something
+this plumbing task should quietly special-case.
+
+**Border weight applied uniformly across every hairline border, not just buttons — a real,
+disclosed design decision, not an oversight.** `2.3`'s `borderWeight` token varies only `1px`–
+`1.5px` across the 6 bundles, but every hairline divider (nav borders, service-row rules, FAQ
+borders, strip borders, etc.), not only buttons and pills, now reads `var(--border-weight)`. Reasoned
+explicitly, not left implicit: a "sturdier" bundle (`trusted-established`, `1.5px`) should read
+slightly more substantial across all its borders, not only the ones the token's name most obviously
+suggests.
+
+**Two categories of legitimate exception, named directly per the task's own instruction, not
+worked around to make the grep look cleaner than the real state:**
+1. `lib/templates/render.test.ts:21` and `lib/templates/section-editor.test.ts:27` —
+   `brandColors: [{ hex: "#1c3d5a", ... }]`, a test **fixture's input data** (a fake client's brand
+   colour, the same kind of value `ContentRecord.brandColors` would hold for a real client), not a
+   hardcoded template presentation value. Converting this to a token would be nonsensical — it's
+   the *raw material* `buildPalette()` derives tokens *from*, not a place tokens get consumed.
+2. `lib/templates/shell.ts:23-24` — the disclosure footer's `color: #9ca3af; background:
+   #111827;`. `shell.ts`'s own header comment already states why: "Always-inlined regardless of
+   which template is rendering... no template author needs to remember to reset margins or style
+   the footer themselves." The footer's whole point is looking identical no matter which client or
+   brand is rendering — deliberately brand-independent chrome, not one of the three templates this
+   task tokenises, and not scheduled for deletion in Phase 3 the way `atlas`/`ledger`/`showcase`
+   are (build plan §7's Delete list names the three template directories specifically, not
+   `shell.ts`).
+
+A handful of small decorative elements were deliberately left hardcoded and are named here rather
+than silently converted or silently left unexplained: the FAQ chevron icon (`.at-faq
+summary::after`'s `1.5px` corner borders — glyph geometry, not a surface border) and two decorative
+text-underline treatments (Ledger's `.tl-cta__tel`'s `3px` phone-number underline and
+`.tl-cta__note a`'s `1px` link underline) — none of these are "a surface a bundle's border-weight
+token is about," and forcing them onto `--border-weight` (a `1px`–`1.5px` range) would have made no
+visible difference while adding indirection for its own sake.
+
+**Files created/modified:**
+```
+$ git status --porcelain
+?? lib/design/resolve-tokens.ts
+ M lib/templates/atlas/index.ts
+ M lib/templates/atlas/styles.ts
+ M lib/templates/ledger/index.ts
+ M lib/templates/ledger/styles.ts
+ M lib/templates/showcase/index.ts
+ M lib/templates/showcase/styles.ts
+```
+
+**Verification command:**
+```
+grep -rn "font-family\|#[0-9a-fA-F]\{6\}" lib/templates/
+npx tsc --noEmit && npm run lint && npx vitest run
+(throwaway script, deleted after use: scripts/_tmp-2.4-verify.ts — rendered Princeton Dental's
+real 1.10 ContentRecord through renderAtlas with no design input and through renderLedger with an
+explicit, different mood/tier/bundle combination, read the generated CSS custom property values
+directly rather than assuming the JS-level resolution was reflected correctly in template output)
+```
+
+**Output:**
+```
+$ grep -rn "font-family\|#[0-9a-fA-F]\{6\}" lib/templates/
+lib/templates/atlas/styles.ts:45:  font-family: var(--font-body);
+lib/templates/atlas/styles.ts:67:  font-family: var(--font-heading);
+lib/templates/ledger/styles.ts:46:  font-family: var(--font-body);
+lib/templates/ledger/styles.ts:87:  font-family: var(--font-heading);
+lib/templates/ledger/styles.ts:467:  font-family: var(--font-heading);
+lib/templates/render.test.ts:21:  brandColors: [{ hex: "#1c3d5a", role: "primary" }],
+lib/templates/section-editor.test.ts:27:  brandColors: [{ hex: "#1c3d5a", role: "primary" }],
+lib/templates/shell.ts:23:    color: #9ca3af;
+lib/templates/shell.ts:24:    background: #111827;
+lib/templates/showcase/styles.ts:45:  font-family: var(--font-body);
+lib/templates/showcase/styles.ts:80:  font-family: var(--font-heading);
+
+$ npx tsc --noEmit
+(exit 0)
+$ npm run lint
+(exit 0)
+$ npx vitest run
+ Test Files  10 passed (10)
+      Tests  131 passed | 1 todo (132)
+```
+Real resolution check (Princeton Dental, real `1.10` `ContentRecord`):
+```
+DEFAULT (renderAtlas(content), no design input — the exact call registry.ts makes today):
+  --font-body: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-heading: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --radius-btn: 2px
+  --band: clamp(68px, 8.8vw, 130px)
+
+EXPLICIT (renderLedger(content, { typography: { moodSignals: ["professional"], positioningTier: "premium" }, styleBundleId: "structural-industrial" })):
+  --font-body / --font-heading: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --radius-btn: 2px
+  --radius-pill: 4px
+  --shadow-card: none
+
+Showcase, default bundle, real generated CSS:
+  backdrop-filter: blur(var(--surface-blur)) saturate(160%);  →  blur(0px) under every current bundle
+```
+
+**Failures, retries and dead ends:** none in the implementation. The verification script's first
+regex for reading back the showcase blur value truncated at the nested nested `var(--surface-
+blur)`'s own closing paren (`blur\(([^)]+)\)` stops at the first `)`, not the outer one) and
+reported "var(--surface-blur" — caught by grepping the actual generated CSS directly instead of
+trusting the regex, confirming the real output (`blur(var(--surface-blur)) saturate(160%)`) is
+well-formed, valid CSS; the bug was in the verification script's own regex, not the generated
+stylesheet.
+
+**Shortcuts taken:** the generic font fallback (`ui-sans-serif, system-ui, -apple-system,
+sans-serif`) is used for BOTH `--font-body` and `--font-heading`, deliberately not a serif fallback
+for the heading role even though the pre-`2.4` templates always used one (Newsreader was always
+serif). Stated as a real, reasoned simplification in `resolve-tokens.ts`'s own comment: a resolved
+heading font can be sans (the default, Inter, is) just as easily as serif, and threading
+`typography.json`'s `Category` column through only to pick a matching generic fallback wasn't
+worth the added surface for what only matters if a Google Font fails to load.
+
+**Deviations from the task spec:** none. The done-when grep passes with only the two named,
+explained exception categories; nothing was worked around to make the grep look cleaner than the
+real state.
+
+**Not run / not verified:**
+- Visual confirmation that `structural-industrial`'s squared `4px` pill, or any other bundle's
+  radius/shadow combination, actually looks right once rendered — same outstanding gap `2.3`'s own
+  carry-forward already named (Browser pane screenshot unavailable that session); not re-attempted
+  here since this task's own scope is plumbing correctness, not bundle aesthetics, and the human
+  has already said they'll look at the six bundle renders themselves.
+- Whether removing the frosted-glass nav effect from Showcase (a consequence of wiring
+  `--surface-blur` for real, see above) reads as a real regression once actually seen, or is a
+  non-issue given none of the six current bundles' target verticals wanted that effect in the
+  first place — flagged, not judged, for the same reason.
+
+**Confidence:** High — every claim here is backed by a real generated CSS value read directly from
+a real render (Princeton Dental's actual `1.10` data), not asserted from the JS-level resolver
+logic and assumed to reach the template correctly.
+
+**Next task:** not specified — awaiting direction.
+---
+
+---
 
 # PART E — For the human reviewing this log
 
