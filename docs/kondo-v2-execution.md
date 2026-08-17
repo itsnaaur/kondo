@@ -3715,6 +3715,333 @@ started this session.
 ---
 
 ---
+### 1.2-CONTAMINATION-SCOPE — which prior results were exposed to the stale-row bug
+**Timestamp:** 2026-08-17
+**Git SHA at start:** daa69f5
+**Status:** DONE-VERIFIED
+
+**Follow-up to `1.2` — not an edit to it.** `1.2` found that repeated direct `crawlClientSite` calls
+across this session's Phase 1 work (not going through `run-analysis.ts`'s delete-then-crawl) had left
+multiple stale generations of `CrawledPage` rows stacked per client. This entry answers the follow-up
+question directly: **which earlier logged results were actually built on that contaminated,
+multi-generation data, and do their conclusions hold?** Answered by re-reading each entry's own
+verification-command description, not by assuming guilt-by-proximity.
+
+**Method:** the question that matters is not "did this entry run after other crawls happened" but "did
+this entry's own measurement aggregate blindly across whatever `CrawledPage` rows existed for a
+client at the time, or did it scope itself to a single, identifiable generation." Re-read `1.1`,
+`1.1-VERIFIED`, `1.1a`, `1.1b`, `1.1c` with exactly that question.
+
+| Entry | Wrote new `CrawledPage` rows? | How it measured | Exposed to multi-generation contamination? |
+|---|---|---|---|
+| `1.1` | No — `DONE-UNVERIFIED`, migration not yet applied, no crawl run | N/A | No — nothing measured |
+| `1.1-VERIFIED` | Yes — `crawlClientSite` against Princeton Dental (92 pages) | Its own verification command says explicitly: query "the **newly-created rows**" — scoped to the rows this run itself created, not `SELECT * FROM CrawledPage WHERE clientId = ...` | **No.** This was also the *first* generation to carry `computedStyles` at all (the column didn't exist before this entry applied the migration), so even an unscoped query would have found only this generation at the time it ran. |
+| `1.1a` | No — standalone Playwright script, `page.goto()` + `page.evaluate()` directly against live homepages, no database read or write at all | Live, in-memory, one page visit per client | **No** — never touched the `CrawledPage` table. |
+| `1.1b` | No — verification script "imports the real `captureComputedStyles`, runs it against each of the same five clients' real homepages" — calls the function directly against a live `page`, not through `crawlClientSite`/the database | Live, in-memory, one homepage visit per client (the per-client counts in `1.1b`'s table — e.g. Princeton's "13 vs. next candidate's 1" — are single-homepage element counts, matching `1.1a`'s independent homepage dump exactly) | **No** — never touched the `CrawledPage` table. |
+| `1.1c` | Yes — real `crawlClientSite` against BC Security (16 pages) and Allen Evans Family Lawyers (33 pages) | Its own verification command says explicitly: query "the **newly-created `CrawledPage` rows**" — same scoping discipline as `1.1-VERIFIED` | **No** — scoped to its own run's rows, confirmed by the row counts matching the crawl's own page counts exactly (16/16, 33/33) with zero nulls, which a blind full-table count would not have produced if older, pre-`computedStyles` rows were mixed in. |
+
+**Conclusion: none of `1.1`, `1.1-VERIFIED`, `1.1a`, `1.1b`, or `1.1c`'s own stated conclusions were
+built on contaminated multi-generation aggregation.** Every one of them either touched no stored data at
+all, or explicitly scoped its query to the rows its own crawl had just created. **The contamination bug
+was specific to `1.2`'s own new aggregation logic** (`rankBrandColorSources` deliberately aggregates
+*across a client's entire stored page set*, by design — that's the point of ranking a sitewide signal —
+and had no way to know that set contained redundant stacked generations rather than one generation of
+genuinely distinct pages). **No re-run is needed to know this for `1.1`/`1.1-VERIFIED`/`1.1a`/`1.1b`/
+`1.1c`** — it's established by reading what each entry's own measurement actually scoped itself to, which
+is a real, checkable fact already on record, not something that requires new data to settle.
+
+**One adjacent thing this check surfaced, corrected separately, not smoothed into this entry:** while
+re-reading `1.1-VERIFIED`'s and `1.1a`'s exact numbers to confirm scoping, a **separate, unrelated
+error** turned up in `1.2`'s own final report — not a contamination issue, a plain misidentification of
+which colour was Princeton Dental's runner-up. See `1.2-CORRECTION`, immediately following this entry.
+
+**On Phase 0:** not in scope for this question (the human asked about `1.1a`/`1.1b` "at minimum," and
+this entry covers the full `1.1`-series) but worth stating for completeness: Phase 0's own diagnostic
+runs (`0.1`/`0.1a`/`0.1b`, using `check-extraction.ts`) all ran and were signed off **before** any of
+this session's repeat-`crawlClientSite` calls existed — chronologically, there was only one generation
+of `CrawledPage` rows in the database at the time those tasks measured anything. Not re-verified by a
+fresh query in this entry (out of the asked scope), but not exposed to this specific bug by construction
+— the contamination is a Phase 1 artifact of this session's own repeated ad hoc crawling, and Phase 1
+postdates Phase 0's sign-off entirely.
+
+**Files created/modified:** none — read-only re-verification of prior entries' own text plus their
+already-logged evidence. No new script, no new query beyond what `1.2-CORRECTION` below required.
+
+**Verification command:** re-read `1.1`, `1.1-VERIFIED`, `1.1a`, `1.1b`, `1.1c` in full; cross-checked
+each entry's stated verification-command description against what kind of query/measurement it
+implies.
+
+**Confidence:** High — this is a re-derivation from text already on record in this log, not new
+speculation; the scoping language ("newly-created rows") is quoted directly from each entry's own
+verification-command section, not inferred.
+
+**Next task:** `1.2a`, immediately following the correction below.
+---
+
+---
+### 1.2-CORRECTION — Princeton Dental's actual runner-up was misidentified in `1.2`
+**Timestamp:** 2026-08-17
+**Git SHA at start:** daa69f5
+**Status:** DONE-VERIFIED
+
+**Correction, not an edit, to `1.2`.** That entry's numbers (`91 vs 51`, medium confidence, `#2563eb`
+winning) are unchanged and correct — the winner, margin, and confidence score all still hold. What was
+**wrong** is `1.2`'s prose identifying the 51-count runner-up as "the real teal `.btn` CTA
+(`rgb(78,142,154)`)." **It is not.** Found while re-verifying `1.2`'s scoping for the contamination-scope
+check above, by actually querying which colour the 51 pages were.
+
+**What the 51-count runner-up actually is:** `rgb(50, 80, 86)` — a distinct, third colour, not
+`rgb(78, 142, 154)`. Traced to a real element on a real page: an unstyled `<input type="submit">` with
+`id="submit"`, inside `.form-submit` inside `#commentform` — **WordPress's default blog-comment
+submit button**, present on the 51 of 92 pages that are dated blog posts, absent from service pages and
+the homepage. Confirmed live: `rgb(50,80,86)` never appears in the same DOM dump as the real teal
+`.btn` buttons; it's the *only* button-matching element on a typical blog-post page besides the cookie
+banner and header/footer utility links.
+
+**Where the real teal actually stands:** `rgb(78, 142, 154)` — the colour `1.1a` correctly identified as
+Princeton's real `.btn` brand colour — is real, but by the full-site aggregate `1.2` actually computed,
+it appears on **1 of 92 pages** (the homepage only, 13 occurrences there, matching `1.1a`'s homepage
+dump exactly) — **fourth place**, not second. A second real brand-ish colour also exists and wasn't
+mentioned in `1.2` at all: `rgb(24, 148, 47)`, a green `.btn`, on 3 of 92 pages (service pages: fillings,
+crowns-and-bridges, veneers) — **third place**.
+
+**Corrected picture of Princeton Dental's full-site data, four real candidates, not two:**
+
+| Colour | Pages | What it is |
+|---|---|---|
+| `rgb(37, 99, 235)` | 91/92 | Cookie-consent banner "Accept" button — same finding as `1.2`, unchanged |
+| `rgb(50, 80, 86)` | 51/92 | WordPress default comment-submit button on blog-post pages — **not previously identified**, not the teal |
+| `rgb(24, 148, 47)` | 3/92 | A green `.btn`, used on a handful of service-page banners — **not previously identified** |
+| `rgb(78, 142, 154)` | 1/92 | The teal `.btn`, homepage only — this is `1.1a`'s finding, but it's far less dominant sitewide than `1.2` implied |
+
+**Why the winner and margin in `1.2` are still correct despite this:** the ranking function operates on
+merged counts, and `91 vs. next-highest` is `91 vs. 51` regardless of what the 51 actually is — the
+*arithmetic* `1.2` reported was real, pulled from a real run of the real function. Only the *prose*
+describing what lost was wrong — I filled in "the real teal" from memory of `1.1a`'s homepage-only
+finding instead of checking what `1.2`'s own full-site aggregate had actually ranked second, and those
+turned out to be two different colours.
+
+**This makes Princeton's failure a real, more informative case than `1.2` described, not a less
+serious one.** It isn't "cookie banner beats the one true brand colour." It's "cookie banner beats a
+WordPress form default that has nothing to do with brand, while the two colours a human would actually
+call brand-relevant (teal, green) are so page-template-specific they don't even reach second place." A
+fix aimed narrowly at "exclude cookie banners" would still leave this site returning a WordPress
+form-default colour as the runner-up, or a website with no majority accent at all — which is why `1.2a`
+(below) needed real page-presence and page-template data, not just a homepage dump, to investigate
+properly.
+
+**Files created/modified:** none — correction to prose only; no code or already-logged numbers changed.
+
+**Verification command:**
+```
+(throwaway script, deleted after use: query every fresh CrawledPage row's computedStyles for each of
+the 5 clients, merge primaryButtonBg/buttonBorderColor/linkColor candidates by colour, report
+distinct-page-count and total-count per colour, top 5 per field)
+(throwaway Playwright script, deleted after use: live DOM dump of Princeton Dental's
+/dont-miss-out-use-your-health-fund-benefits-before-years-end/, /fillings/, and / — every
+button-selector match, class, text, background, border, position, ancestry)
+```
+
+**Output:** the corrected table above is the real, unedited result of both scripts; the `rgb(50,80,86)`
+→ WordPress comment-submit identification is a direct DOM-ancestry match (`#submit < .form-submit <
+#commentform`), not an inference.
+
+**Confidence:** High — every colour and page-count in the corrected table came from a real query
+against the same clean, single-generation data `1.2` used; the WordPress comment-form identification is
+a direct, live DOM match, not a guess.
+
+**Next task:** `1.2a`, below.
+---
+
+---
+### 1.2a — third-party widget vs. site design: DOM discriminators, investigated
+**Timestamp:** 2026-08-17
+**Git SHA at start:** daa69f5
+**Status:** DONE-VERIFIED — investigation only, no implementation, per instruction
+
+**What I did:** read-only. No application code changed (`git status --porcelain` empty for this entry).
+Two kinds of real evidence gathered against the same five clients' already-clean, single-generation
+crawl data plus fresh live DOM inspection: (1) a database query merging every fresh `CrawledPage` row's
+`computedStyles` candidates per client per field, reporting **distinct-page-count**, not just summed
+occurrence count, per colour — the page-presence data `1.2` didn't compute; (2) live Playwright DOM
+dumps of specific pages, walking each matched element's ancestry for position, z-index, iframe/shadow-DOM
+boundary, and script/stylesheet origin.
+
+---
+
+**1. Every high-frequency candidate sourced from something other than the site's own deliberate design,
+across all five clients:**
+
+| Client | Colour | Pages | What it actually is |
+|---|---|---|---|
+| Princeton Dental | `rgb(37, 99, 235)` | 91/92 | Cookie-consent "Accept" button — `#cookie-banner`/`.cookie-btn.cookie-btn--primary`, `id="cc-accept-all"` |
+| Princeton Dental | `rgb(50, 80, 86)` | 51/92 | WordPress default comment-submit `<input>` — `#submit` inside `.form-submit`/`#commentform` (see `1.2-CORRECTION`) |
+| Allen Evans Family Lawyers | `rgb(85, 194, 225)` | 1/33 | Gravity Forms plugin's default `Submit` button (`.gform_button.button`, `#gform_wrapper_1`) on the contact page — near-identical to the real brand cyan by coincidence, negligible count (1), didn't affect the outcome |
+| BC Security | — | — | **None found.** The winning navy is the sole survivor of the neutral filter on every field; no competing candidate exists in the data at all. |
+| Downseal Solutions | — | — | **None found.** No computed-styles candidate survives the neutral filter on any field (confirmed already in `1.2`); nothing to characterise. |
+| Propell Property | — | — | **None found.** The winning navy is the sole (or overwhelmingly dominant — 150/150 vs. a same-hue lighter tint at 146/150, clearly a design-system shade pair, not a foreign colour) survivor. |
+
+Only Princeton Dental has widget/plugin-default contamination that actually reaches a high, competitive
+rank. Allen Evans has a trace instance (Gravity Forms) that happens to be harmless here only because its
+colour is nearly identical to the real brand hue — a coincidence, not something the ranking logic
+protected against.
+
+**DOM/structural characteristics of the two real contamination cases found, checked against all six
+signals the task asked about:**
+
+| Signal | Cookie banner (Princeton) | WP comment-submit (Princeton) | Gravity Forms button (Allen Evans) |
+|---|---|---|---|
+| Container id/class pattern | `#cookie-banner`, `.cookie-btn`, `.cookie-btn--primary/--secondary/--ghost`, ids `cc-accept-all`/`cc-reject-all`/`cc-accept-essentials` | `#commentform`, `.form-submit`, `#submit` (WordPress core naming, not a plugin's own) | `#gform_wrapper_1`, `.gform_button`, `.gravity-theme` |
+| `position: fixed`/`sticky` on itself or an ancestor | **Yes** — but so is the site's own legitimate sticky header nav (`.nav.nav-utility...sticky-top`), which also shows `fixedAncestor: true`. Not a discriminator on its own. | No — sits in normal document flow inside the page content | No — sits in normal document flow |
+| Shadow DOM | **No** — confirmed directly: `el.getRootNode() === document`, `HTMLDocument`, not a shadow root | No | Not checked directly (no shadow-DOM indicator in class names; WordPress plugins essentially never use it) |
+| iframe boundary | **No** — confirmed directly: `window.top === window.self`; the button is a plain child of `<body>`, not inside either of the page's 2 unrelated iframes | No | No — Gravity Forms renders inline, not in an iframe |
+| Script/stylesheet origin | Markup and behaviour are **not** loaded from a separately-brandable cookie-vendor script (no OneTrust/Cookiebot/Complianz/Termly/Iubenda/Osano script found) — served from `doc.vortala.com`, the **same CMS platform vendor** (Vortala) that serves the rest of this site's JS/CSS. Same-origin-family as the site's own assets, not a distinguishably "foreign" domain. | Same origin as the rest of the WordPress site — it's core WordPress markup, not a separate script at all | Same origin as the rest of the WordPress site — Gravity Forms is a first-party-installed plugin, not an externally-loaded script |
+| z-index | `999` on the (separate) sticky "Gap Free" promo banner element sampled nearby; the cookie banner itself didn't show an explicit `z-index` value distinct from `auto` on the button itself (its stacking context is set higher up the tree, not checked to an exact number) | `auto` | not checked (not fixed-positioned, so not relevant) |
+
+**2. Is there a discriminator that generalises, or does it need a maintained blocklist?**
+
+**No single structural signal generalises reliably; a maintained-vocabulary approach fits this evidence
+better than a structural one.** Specifically:
+- **`position: fixed`/`sticky` doesn't discriminate** — it flags the cookie banner correctly but also
+  flags Princeton's own legitimate sticky header utility nav. Using it as an exclusion rule would need a
+  second signal anyway to avoid throwing away real site chrome.
+- **Shadow DOM and iframe boundaries — the two signals most naturally associated with "this is a
+  foreign embed" — caught nothing in this sample.** Neither of Princeton's two contamination sources is
+  isolated that way. This matters beyond this one site: browser extensions and ad-blockers' own cookie-
+  banner detectors (e.g. Consent-O-Matic, EasyList Cookie List) work specifically because they maintain
+  large, regularly-updated **class/id/text pattern lists**, not structural DOM heuristics — this
+  investigation's finding lines up with why that industry already converged on the maintained-list
+  approach rather than a generic structural detector.
+- **Script/stylesheet origin doesn't discriminate either, at least not here** — Princeton's cookie
+  banner is templated by the site's own CMS platform vendor (Vortala), served from the same
+  domain family as the rest of the site's assets. A rule like "flag anything whose script/stylesheet
+  comes from a different domain than the crawled site" would miss this case entirely, and would also
+  need to positively identify Google Analytics/GTM/UserWay (all present on this same page, all
+  legitimately different-origin, none of them contributing a button colour) as *not* relevant — a
+  domain-based rule needs its own maintained allow/deny list regardless.
+- **What does generalise, on this evidence: lexical/semantic matching against class names, ids, and
+  visible text** — `cookie`, `consent`, `accept`, `reject`, `gdpr`, `privacy` for consent banners; by
+  extension (not tested directly this entry, but the same category of near-universal vocabulary) `chat`,
+  `widget`, `intercom`, `drift`, `crisp`, `tawk`, `livechat` for chat launchers; `calendly`, `cal.com`,
+  `booking` for scheduling embeds. This is exactly "a maintained blocklist of known widget signatures,"
+  not a structural discriminator — the investigation didn't find a shortcut around that.
+- **One structural signal did prove useful, just not sufficient alone:** the WordPress comment-submit
+  button and the Gravity Forms button are both inside a recognisable **form landmark** (`<form>`,
+  `#commentform`, `#gform_wrapper_*`) rather than being a standalone CTA. "Is this button's nearest
+  form-like ancestor a comment/lead-capture form, not a page's primary content" is a plausible secondary
+  filter, worth prototyping alongside the lexical list rather than instead of it — not implemented or
+  tested here, flagged as a direction, not a finding.
+
+**3. Does ubiquity itself invert — is a colour on 91/92 pages (including boilerplate) actually *less*
+likely to be the brand colour than one on 51/92 concentrated in content?**
+
+**No — tested directly against all five clients' real page-presence data, and the naive inversion is
+wrong, not just unproven.** The critical counter-evidence: for **three of the five clients — BC
+Security, Propell Property, and Allen Evans Family Lawyers — the correct brand colour is also the
+*most* ubiquitous one**, present on 100% of crawled pages (16/16, 150/150, 33/33), because each of those
+sites has a persistent header/nav CTA rendered on every page, boilerplate or not. **Inverting the
+ranking to prefer lower page-presence would break all three of the currently-correct results** to try
+to fix Princeton's one wrong one — precisely the "tuning to hit the number on one case" the task
+instructed against. Ubiquity alone doesn't distinguish "the site's own persistent CTA, present
+everywhere by design" from "platform-injected chrome, present everywhere because it's global" — both
+produce the same page-presence signature. **Princeton's data doesn't support a general inversion; it
+supports that Princeton specifically lacks a single sitewide-consistent brand button at all** (see
+`1.2-CORRECTION`: three *different* brand-ish colours split across different page templates, none of
+them dominant), which is a different, narrower problem than "ubiquity is backwards." Did not find
+evidence this is coincidental to one site in the sense of being unrepeatable — rather, it's clear the
+*mechanism* (page-presence alone) cannot distinguish the two cases in principle, on any site, since both
+patterns produce identical page-count signatures; only the identity of the winner (via the lexical/
+form-landmark signals above) can.
+
+**On the 404/legal-page framing specifically:** not directly tested — this crawl's 92 Princeton pages
+are predominantly blog posts and service pages; no crawled URL was confirmed to be a 404 or a bare
+legal/privacy page in this sample (the crawler skips 404s rather than storing them, per existing
+behaviour noted in `1.1c`). The general point still holds without that specific evidence: the cookie
+banner's 91/92 and the real header CTA pattern on the three clean clients' 100%-of-pages both include
+every page *type* the crawler actually stored, boilerplate or not, and produce the same shape of
+signature.
+
+**Proposal, for confirmation, not implemented:**
+1. **Add a lexical exclusion pass** before ranking: match each candidate element's id/class/visible text
+   against a maintained, broad-but-bounded vocabulary list (`cookie`, `consent`, `gdpr`, `privacy`,
+   `chat`, `widget`, `intercom`/`drift`/`crisp`/`tawk`/other named chat vendors, `calendly`/`cal.com`/
+   `booking`) — drop any candidate whose element or ancestor id/class matches, before frequency-ranking.
+   This directly closes Princeton's cookie-banner case and would generalise to the same widget family on
+   other clients, at the cost of needing periodic maintenance as new vendors appear — an explicit,
+   disclosed tradeoff, not a hidden one.
+2. **Add a form-landmark exclusion**, separately: drop any button/input candidate whose nearest form-like
+   ancestor (`<form>`, or an id/class matching `comment`, `gform`, `wpforms`, `contact-form`,
+   `newsletter`) isn't the page's primary content action. This would close both Princeton's WordPress
+   comment-submit case and (harmlessly, since it already doesn't affect the outcome) Allen Evans' Gravity
+   Forms case. Lower confidence this generalises as broadly as the lexical list — worth testing against
+   more real sites before relying on it, not just reasoning about it.
+3. **Do not pursue a structural (position/z-index/shadow-DOM/iframe/domain) discriminator as the primary
+   defence** — this investigation's real evidence is that it would have missed both of Princeton's actual
+   contamination sources while also flagging Princeton's own legitimate sticky nav as a false positive.
+   It could still be a *soft* secondary signal (e.g., a fixed-position, high-z-index element with no
+   lexical match is slightly more suspicious) but not a primary filter on this evidence.
+4. **Explicitly reject a ubiquity-based inversion** — proven wrong against 3 of 5 real clients above, not
+   merely unproven.
+5. Even with (1) and (2) implemented, Princeton would likely still not resolve to a single confident
+   brand colour — its real problem, per `1.2-CORRECTION`, is a genuinely fragmented per-template accent
+   system (teal on the homepage, green on some service pages, nothing consistent elsewhere), which a
+   contamination filter alone doesn't fix. Flagging this now so implementing (1)/(2) isn't mistaken for
+   "this will make Princeton pass" — it removes the two wrong-answer contaminants; it doesn't manufacture
+   a brand colour this specific site's own design doesn't consistently have.
+
+**Files created/modified:** none. All investigation scripts (a DB page-presence query, three live DOM
+dumps, one shadow-DOM/iframe check) were throwaway, deleted after use — confirmed via `git status
+--porcelain` returning no output.
+
+**Verification command:**
+```
+git status --porcelain
+(throwaway script: DB query merging computedStyles candidates per client/field with distinct-page-count)
+(throwaway Playwright scripts: live DOM ancestry dumps of Princeton Dental x3 pages, Allen Evans
+contact page, Princeton's script/stylesheet origins, Princeton's cookie-banner shadow-DOM/iframe check)
+```
+
+**Output:**
+```
+$ git status --porcelain
+(no output)
+```
+All tables above are the real, unedited output of the queries and DOM dumps described.
+
+**Failures, retries and dead ends:** the first script attempt used `waitUntil: "networkidle"` to check
+Princeton's script/stylesheet origins and timed out (20s) — this real site keeps a persistent connection
+open (likely the UserWay accessibility widget's polling), so `networkidle` never fires. Switched to
+`domcontentloaded` + a fixed 3s wait, which succeeded.
+
+**Shortcuts taken:** the 404/legal-page framing in question 3 was reasoned about from the existing page
+set and the crawler's known 404-skip behaviour rather than tested against a confirmed legal/privacy page
+in this specific sample — disclosed above, not treated as directly tested.
+
+**Deviations from the task spec:** none — no implementation, all three numbered questions investigated
+with real evidence, proposal offered for confirmation as asked.
+
+**Not run / not verified:**
+- Whether the proposed lexical list or form-landmark filter, if implemented, would actually produce the
+  intended results — this entry establishes what's in the data and why a structural approach falls
+  short; implementing and re-testing is what `1.2a`'s own scope excluded.
+- Chat-widget and booking-embed signatures specifically — the lexical vocabulary proposed for them is by
+  analogy from the cookie-banner and form-plugin cases actually found, not independently confirmed
+  against a real client site that has one of those widget types (none of the five clients in this
+  sample happened to have a live chat or booking embed contributing a button colour).
+- Whether Gravity Forms' near-miss (coincidentally matching the real brand cyan) is representative or
+  luck — only one instance observed.
+
+**Confidence:** High on what was directly found and measured (real DOM dumps, real page-presence
+counts, real script/stylesheet origins, real shadow-DOM/iframe checks — nothing here is inferred from
+documentation or memory). Medium on the proposal's generalisation beyond this five-client sample — it's
+built from real patterns found in this data plus reasoning from a known, comparable industry practice
+(consent-blocker vocabulary lists), not validated against a larger set of sites.
+
+**Next task:** awaiting the human's confirmation before implementing either proposed filter, or any
+other direction. Not started this session, per instruction.
+---
+
+---
 
 # PART E — For the human reviewing this log
 
