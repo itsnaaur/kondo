@@ -1,7 +1,7 @@
 import { createHash } from "crypto";
 import { prisma } from "@/lib/prisma";
 import { uploadAssetToStorage } from "@/lib/storage/upload-asset";
-import { AssetType, type Asset } from "@/app/generated/prisma/client";
+import { AssetType, Prisma, type Asset } from "@/app/generated/prisma/client";
 import type { PageExtraction } from "./types";
 import { checkUrlIsSafe } from "@/lib/security/ssrf";
 import { isJunkByUrlOrText } from "@/lib/content/filter-junk-images";
@@ -112,6 +112,17 @@ function countPagesWithLogoUrl(url: string, pages: PageExtraction[]): number {
   return pages.filter((p) => p.logoCandidate === url).length;
 }
 
+// Task 1.7a. Writes computeImageMetrics' result back onto the Asset row it was computed for
+// — every time this runs, not just on first creation, so a saveAsset content-hash reuse or an
+// existingLogo re-fetch still ends up with metrics reflecting the *current* image-metrics.ts
+// code, not stale data (or no data) from whenever the row first existed. Returns the updated
+// row's metrics value so callers can keep the in-memory Asset consistent with what's now
+// actually in the database, rather than the pre-update object saveAsset/fetchExistingAssetBytes
+// returned.
+async function persistMetrics(assetId: string, metrics: ImageMetrics): Promise<void> {
+  await prisma.asset.update({ where: { id: assetId }, data: { metrics: metrics as unknown as Prisma.InputJsonValue } });
+}
+
 async function saveAsset(
   clientId: string,
   type: AssetTypeValue,
@@ -207,6 +218,7 @@ export async function downloadCrawlImages(
       // property of a reused asset: pagePosition is null for the same "not sourced from a
       // single page position" reason every logo gets.
       const metrics = await computeImageMetrics(fetched.buffer, { pagePosition: null, crossPageFrequency: 0 });
+      await persistMetrics(fetched.asset.id, metrics);
       logo = { ...fetched, metrics };
     }
   } else {
@@ -218,6 +230,7 @@ export async function downloadCrawlImages(
           pagePosition: null,
           crossPageFrequency: countPagesWithLogoUrl(logoUrl, allPages),
         });
+        await persistMetrics(saved.asset.id, metrics);
         logo = { ...saved, metrics };
       }
     }
@@ -266,6 +279,7 @@ export async function downloadCrawlImages(
       pagePosition,
       crossPageFrequency: countPagesWithImageUrl(url, allPages),
     });
+    await persistMetrics(saved.asset.id, metrics);
     candidates.push({ ...saved, fromHomepage, nearbyText, metrics });
   }
 

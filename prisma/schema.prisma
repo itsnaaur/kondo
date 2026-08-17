@@ -92,6 +92,24 @@ model Asset {
   // match — dedup only ever applies going forward, no backfill needed.
   contentHash String?
 
+  // Deterministic per-image metrics computed by lib/content/image-metrics.ts (Task 1.7),
+  // written by lib/crawl/download-images.ts on every crawl. Null only for assets that
+  // predate this column (no backfill needed there — the same "nullable, no retroactive
+  // migration" convention as contentHash above) or for Task 1.8's classification cache
+  // once that exists, which is a different field, not layered into this one. Shape (as of
+  // 1.7 — see lib/content/image-metrics.ts's ImageMetrics type for the authoritative
+  // definition):
+  // {
+  //   width: number | null, height: number | null, aspectRatio: number | null,
+  //   orientation: "landscape" | "portrait" | "square" | null,
+  //   fileSizeBytes: number, bytesPerPixel: number | null, hasAlpha: boolean | null,
+  //   colorEntropy: number | null,               // Shannon bits, quantized-bucket histogram
+  //   dominantColors: { hex: string; share: number }[],  // saturation-filtered, ranked, top 5
+  //   pagePosition: number | null,                // index within source page's <img> order
+  //   crossPageFrequency: number,                 // distinct pages this source URL was seen on
+  // }
+  metrics Json?
+
   contentRecordLogoFor ContentRecord? @relation("ContentRecordLogo")
 
   @@index([clientId, contentHash])
