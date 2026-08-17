@@ -46,7 +46,12 @@ const VERTICAL_TABLE: VerticalKeywordEntry[] = [
   },
   {
     vertical: "legal",
-    keywords: ["legal", "law firm", "lawyer", "attorney", "solicitor"],
+    // "law" added by Task 3.2a — the original list only had "law firm" (a two-word phrase),
+    // which never matches a real business describing itself as e.g. "family law" or "law
+    // office". Safe as a single word only because matching below is word-boundary, not raw
+    // substring — a plain substring check would also match "law" inside "lawn care", which
+    // "law firm"'s specificity had been quietly guarding against. See matchesKeyword below.
+    keywords: ["legal", "law", "law firm", "lawyer", "attorney", "solicitor"],
   },
   {
     vertical: "financial-professional-services",
@@ -82,11 +87,31 @@ const VERTICAL_TABLE: VerticalKeywordEntry[] = [
   },
 ];
 
-// Matched case-insensitively via substring containment against detectedIndustry's free text —
-// same matching style as resolveTypography's requested.has(candidateSignal), adjusted for
-// substring rather than exact-token matching since detectedIndustry is a free-text descriptor
-// ("residential and commercial dental clinic"), not a single normalized token.
-//
+// Task 3.2a. Collapses every run of non-alphanumeric characters (slashes, hyphens, parens,
+// extra whitespace) to a single space, lowercased. Fixes the real gap 3.3's five-client run
+// found: BC Security's real detectedIndustry is "commercial security / systems integration" —
+// the slash-and-space between "security" and "systems" meant the literal substring "security
+// systems" never appeared, even though the business obviously IS one. Normalizing both the
+// input text and each keyword the same way before matching means "security / systems",
+// "security-systems", and "security systems" all resolve identically.
+function normalizeText(text: string): string {
+  return text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function escapeRegex(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Task 3.2a. Word-boundary match, not raw substring containment (the original 3.2 behaviour) —
+// switched specifically so a single-word keyword like "law" can be added safely (see the
+// "legal" entry's own comment above) without also matching "law" inside an unrelated word like
+// "lawn". \b already behaves correctly on a multi-word keyword like "law firm" or "real
+// estate" — the boundary only needs to hold at the very start and very end of the phrase.
+function matchesKeyword(normalizedText: string, keyword: string): boolean {
+  const normalizedKeyword = normalizeText(keyword);
+  return new RegExp(`\\b${escapeRegex(normalizedKeyword)}\\b`).test(normalizedText);
+}
+
 // null is a first-class return, never a guess and never a sentinel value standing in for a
 // real vertical — build plan §5.5's central point, restated here at the one function that
 // actually produces it: a null detectedIndustry, an empty string, or real text matching none of
@@ -95,9 +120,9 @@ const VERTICAL_TABLE: VerticalKeywordEntry[] = [
 export function classifyVertical(detectedIndustry: string | null): Vertical | null {
   if (!detectedIndustry || !detectedIndustry.trim()) return null;
 
-  const normalized = detectedIndustry.toLowerCase();
+  const normalized = normalizeText(detectedIndustry);
   for (const entry of VERTICAL_TABLE) {
-    if (entry.keywords.some((kw) => normalized.includes(kw))) return entry.vertical;
+    if (entry.keywords.some((kw) => matchesKeyword(normalized, kw))) return entry.vertical;
   }
   return null;
 }
