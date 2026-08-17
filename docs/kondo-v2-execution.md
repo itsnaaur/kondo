@@ -3112,6 +3112,147 @@ go-ahead — not started this session.
 ---
 
 ---
+### 1.1a — computed style signal quality
+**Timestamp:** 2026-08-17
+**Git SHA at start:** b74655a
+**Status:** DONE-VERIFIED
+
+**What I did:**
+Read-only investigation, no changes to `crawler.ts` or any capture code. Wrote a throwaway standalone
+Playwright script (not the crawler, not committed) that navigates directly to a homepage and, for each
+of the current selectors, returns **every** matching element in document order — tag, class, visible
+text snippet, computed background/colour, visibility, and whether it sits inside `<main>` — instead of
+the first match `captureComputedStyles` actually keeps. Ran it against Princeton Dental plus four other
+real clients with visibly different site builds (WordPress/Elementor-style, a Bricks-builder site, a
+Squarespace site, a modern Tailwind/Next-style site, a Divi/WordPress site).
+
+**1. Princeton Dental — every button-selector match, in document order:**
+
+```
+[0]  <a> class="button"                text="Contact Us"     bg=rgb(255,255,255) color=rgb(51,51,51)
+[1]  <a> class="button"                text="Office Hours"   bg=rgb(255,255,255) color=rgb(51,51,51)
+[2]  <a> class="sticky-button..."      text="*Gap Free..."   bg=rgba(0,0,0,0)    color=rgb(255,255,255)
+[3]  <a> class="btn"                   text="BOOK ONLINE"    bg=rgb(78,142,154)  color=rgb(255,255,255)
+[4]  <a> class="btn"                   text="BOOK NOW"       bg=rgb(78,142,154)  color=rgb(255,255,255)
+[5]  <a> class="btn"                   text="BOOK NOW"       bg=rgb(78,142,154)  color=rgb(255,255,255)
+[6]  <a> class="btn"                   text="MEET DR. LUKE DODD"        bg=rgb(78,142,154) color=rgb(255,255,255)
+[7]  <a> class="btn"                   text="MEET DR. NINA ONG"         bg=rgb(78,142,154) color=rgb(255,255,255)
+[8]  <a> class="btn"                   text="Learn more about Check & Cleans"     bg=rgb(78,142,154) color=rgb(255,255,255)
+[9]  <a> class="btn"                   text="Learn more...Children's Dentistry"  bg=rgb(78,142,154) color=rgb(255,255,255) visible=false
+[10] <a> class="btn"                   text="Learn more...Crowns & Bridges"      bg=rgb(78,142,154) color=rgb(255,255,255) visible=false
+[11] <a> class="btn"                   text="Learn more...Emergency Care"        bg=rgb(78,142,154) color=rgb(255,255,255) visible=false
+[12] <a> class="btn"                   text="Learn more...General Dentistry"     bg=rgb(78,142,154) color=rgb(255,255,255) visible=false
+[13] <a> class="btn"                   text="Learn more...Root Canals"           bg=rgb(78,142,154) color=rgb(255,255,255) visible=false
+[14] <a> class="btn"                   text="Learn more...Teeth Whitening"       bg=rgb(78,142,154) color=rgb(255,255,255) visible=false
+[15] <a> class="btn"                   text="Contact Us"     bg=rgb(78,142,154)  color=rgb(255,255,255)
+[16] <button> class="...ui button"     text="Send Message"   bg=rgb(224,225,226) color=rgba(0,0,0,.6) visible=false
+[17] <button> class="...ui button"     text="Send Message"   bg=rgb(224,225,226) color=rgba(0,0,0,.6) visible=false
+[18] <a> class="social_share_button..." text="Share on X"    bg=rgba(0,0,0,0)    color=rgb(255,255,255)
+[19] <a> class="social_share_button..." text="Share on FB"   bg=rgba(0,0,0,0)    color=rgb(255,255,255)
+[20] <a> class="social_share_button..." text="Share via Email" bg=rgba(0,0,0,0)  color=rgb(255,255,255)
+[21] <a> class="...button cboxElement" text="Email Us"       bg=rgb(0,0,0)       color=rgb(255,255,255)
+[22] <button> class="cookie-btn--ghost"     text="Reject All"        bg=rgba(0,0,0,0) color=rgb(161,161,170)
+[23] <button> class="cookie-btn--secondary" text="Accept Essentials" bg=rgba(0,0,0,0) color=rgb(228,228,231)
+[24] <button> class="cookie-btn--primary"   text="Accept"            bg=rgb(37,99,235) color=rgb(255,255,255)
+[25]-[28] <button> Prev/Next/Slideshow/Close (lightbox controls) — bg transparent or black, all visible=false
+```
+`nav, header` matched **0 elements** — confirmed again, same as `1.1-VERIFIED`. `h1` matched 1:
+`color=rgb(3,41,46)` (a dark, desaturated near-black teal). Every single matched button, all 29 of
+them, shows `inMain=false` — this real site has no `<main>` landmark wrapping any of its content.
+
+**Why white won:** the current selector list is `button, a[class*="btn"], a[class*="button"], input[type="submit"], input[type="button"]`, and CSS's `[class*="btn"]` / `[class*="button"]` attribute-substring matching does not distinguish "a class literally named `btn`" from "a class literally named `button`" — both are legitimate hits, and this theme happens to use `class="button"` for two small header utility links (a phone-hours popup trigger, a contact link) that render as plain white text-links, styled with no fill, positioned *before* the real `class="btn"` teal CTAs in document order. `querySelector`'s first-match semantics picked the decoy. The real brand colour — `rgb(78,142,154)`, a teal — is not missing from the page; it's the single most common non-white, non-transparent background across the whole match set (13 of 29 matches), just not first.
+
+**2. Per-client summary — does a plausible brand colour exist in the match set, and does first-match find it:**
+
+| Client (site build) | First match | Plausible brand colour present? | First-match correct? |
+|---|---|---|---|
+| Princeton Dental (WordPress, custom theme) | `.button` white decoy | **Yes** — `rgb(78,142,154)` teal, 13/29 matches | **No** |
+| BC Security (Bricks builder) | generic mobile-menu `<button>`, transparent | **Yes** — `rgb(2,68,112)` navy, 16/23 matches, literally classed `bricks-background-primary` | **No** |
+| Downseal Solutions (Squarespace) | skip-link, white bg | **No usable bg-colour signal at all** — even the real CTAs (`sqs-button-element--primary`, "Work With Us") render `background-color: rgba(0,0,0,0)`; this theme's primary button style is an outline/ghost button with no fill | N/A — nothing to find |
+| Propell Property (Tailwind/Next-style) | nav-menu link, transparent, near-black text | **Yes** — `rgb(14,30,57)` dark navy, classed `btnPrimary`, appears at indices 5/6/8/23 | **No** |
+| Allen Evans Family Lawyers (Divi/WordPress) | `et_pb_button` cyan CTA | **Yes** — `rgb(84,201,234)` cyan, and it's the first match | **Yes** |
+
+**4 of 5 real sites have a genuinely plausible brand colour sitting in the current match set already —
+this isn't a capture-mechanism problem, it's a selection problem.** First-match only gets it right on
+1 of 5. On the other 3, the real colour is present and repeats (13/29, 16/23, several/26) while the
+decoy that wins is a one-off. Downseal is a different, third case: the correct element is found, but
+its background genuinely carries no colour — a real "nothing here" result, not a selection failure.
+
+**3. Proposed selector strategy — not implemented, for confirmation:**
+
+1. **Keep collecting every match** (already effectively free — `querySelectorAll`, not
+   `querySelector`), rather than stopping at the first.
+2. **Filter out near-neutral backgrounds before ranking anything.** Reuse the exact heuristic already
+   proven in this codebase — `lib/content/extract-colors.ts`'s `isNearNeutral` (`max > 235 || min < 20
+   || max - min < 12`, i.e. near-white, near-black, or low-saturation grey) — plus treat
+   `rgba(0,0,0,0)`/any alpha-transparent background as neutral too. This alone removes every decoy seen
+   above: Princeton's white `.button` links, BC Security's transparent mobile-toggle buttons, Propell's
+   transparent nav-menu items.
+3. **Rank survivors by frequency, not saturation alone.** The repeated pattern in every real case above
+   — the correct colour is the *most common* non-neutral background across the match set, not
+   necessarily the most saturated one — points at the same frequency-count approach
+   `lib/crawl/download-images.ts`'s `pickBestLogoCandidate` already uses for logo selection, not a new
+   technique. Quantize and count, take the mode.
+4. **Do not filter by `<main>` as a hard exclusion.** Tested directly against this data: Princeton
+   Dental's real buttons are *all* `inMain=false` — a hard `<main>`-only filter would zero out the
+   entire correct answer on that site. It could still be used as a soft tiebreak between two similarly-
+   frequent candidates, not as a pre-filter.
+5. **Treat "no non-neutral candidate survives" as a real, honest result — `null`, not a forced pick.**
+   Downseal Solutions is the live proof this case exists: the right element is genuinely findable, and
+   its background is genuinely uninformative. Whatever consumes this in `1.2` needs its own fallback
+   for that case (the existing pixel-bucketing extraction, most likely) — this is a real gap this
+   capture step alone can't close, not a selector tuning problem.
+6. **Keep `linkColor` and button background as separate signals, ranked independently** — this is
+   already true structurally in the current code; the proposal is to apply the same filter-then-rank
+   treatment to link colours too, rather than taking the first link's colour (which, per the raw dumps,
+   is just as decoy-prone — Princeton's first link is a promotional banner's white text, not a brand
+   colour).
+
+This is a proposal, not a diff. No selector, no capture code, no ranking logic has been changed.
+
+**On the untested failure path, noted as instructed:** the null-degradation branch in `captureComputedStyles`'s caller (`crawler.ts:140-144`, the `try/catch` around the evaluate call) has still never fired — `1.1-VERIFIED`'s 92-page crawl succeeded 92/92, and this entry's investigation used a separate, standalone script that calls `page.evaluate` directly, not through the crawler's own try/catch, so it adds no new evidence about that specific path either. The failure branch exists and was reasoned about at implementation time; it remains unexercised by any real run to date.
+
+**Files created/modified:** none — read-only investigation, no application code touched. The throwaway diagnostic script was created and deleted within this entry, never committed.
+
+**Verification command:**
+```
+(standalone Playwright script, not committed — chromium.launch(), page.goto() against each client's
+real homepage, page.evaluate() dumping every match for each selector, deleted after use)
+```
+
+**Output:** the full Princeton Dental dump and the five-client summary table above are the real,
+unedited output (button entries condensed for length where multiple `visible=false` "Learn more"
+buttons repeat the identical `class="btn"`/`bg=rgb(78,142,154)` pattern — none of the condensed rows
+differ from what's shown).
+
+**Failures, retries and dead ends:** none — every one of the 5 navigations succeeded on the first try.
+
+**Shortcuts taken:** the diagnostic script samples only the first 40 `<a>` elements per page for the
+"links" dump (not exhaustive, unlike buttons/nav/h1, which report every match) — buttons were the part
+that actually needed exhaustive coverage per the task; links were sampled for a supporting signal, not
+the primary question.
+
+**Deviations from the task spec:** none — all three numbered items done as asked, no code changed.
+
+**Not run / not verified:**
+- Whether the proposed frequency-ranking approach, if implemented, would actually pick the right
+  colour on all 5 sites — this entry establishes what's *in* the data, not what a new ranking function
+  would output; that's exactly what implementing and testing the proposal would confirm.
+- The null-degradation path in the real crawler, per above — still unexercised.
+- Whether `linkColor`'s decoy problem is as severe as `primaryButtonBg`'s — noted qualitatively above
+  (Princeton's first link is a banner, not brand-informative) but not tabulated across all 5 clients
+  the way buttons were, since the task's numbered items centred on the button-colour question
+  specifically.
+
+**Confidence:** High — every claim is backed by real, pasted output from real live sites, not
+inferred. The proposal in item 3 is a recommendation built from that evidence and from patterns already
+proven elsewhere in this codebase (`isNearNeutral`, frequency-ranking), not a guess.
+
+**Next task:** awaiting the human's confirmation of the proposed strategy before any implementation —
+`1.2` stays on hold until then, per instruction.
+---
+
+---
 
 # PART E — For the human reviewing this log
 
