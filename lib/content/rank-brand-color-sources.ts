@@ -127,20 +127,38 @@ function rankComputedStylesSource(
     (v): v is Record<string, unknown> => v !== null && typeof v === "object"
   );
 
-  // Preference order within this one source: a filled button background is the strongest
-  // "this is the brand's action colour" signal; its border is next-best (see 1.1b's
-  // Downseal finding — sometimes the fill is genuinely absent but the border isn't, though
-  // sometimes, also per 1.1b, neither is); link colour last, since it's a text colour, not
-  // a fill, and more prone to picking up plain body-copy links.
+  // Specificity order within this one source, not a ranked list of independent fallbacks —
+  // 1.2c fixed a real bug here. A filled button background is the strongest, most direct "this
+  // is the brand's action colour" signal; buttonBorderColor exists specifically for the
+  // Downseal case 1.1b found (a real button with a genuinely absent fill but a real border);
+  // linkColor is weaker still, a text colour rather than a fill. Falling through to the next
+  // field is only correct when the current one found NOTHING (an empty array — no non-neutral,
+  // non-excluded candidate survived at all) — that's "this signal doesn't exist on this site,"
+  // and the next, less specific signal is worth trying. It is NOT correct when the current
+  // field found something but it was too WEAK to trust (rejected by
+  // isWeakComputedStylesWinner) — that means computed styles as a whole don't carry a coherent
+  // signal, and the fix is to hand off to the next SOURCE (logo, then imagery), not to keep
+  // trying progressively less specific fields until one is generous enough to pass. 1.2b had
+  // this backwards: Princeton Dental's primaryButtonBg correctly failed the weak-winner gate
+  // (its real teal/green .btn colours are real but page-specific, not sitewide), and the old
+  // "continue on weak, same as continue on empty" logic fell through to buttonBorderColor,
+  // which happened to have a generic theme link-colour with just enough sitewide coverage to
+  // pass — a second wrong, confident answer, not the abstention the gate was built for. See
+  // 1.2c's log entry for the real before/after evidence.
   for (const field of ["primaryButtonBg", "buttonBorderColor", "linkColor"] as const) {
     const perPage = ran.map((cs) => {
       const v = cs[field];
       return Array.isArray(v) ? (v as ColorCandidate[]) : [];
     });
     const merged = mergeColorCandidates(perPage);
-    if (merged.length === 0) continue;
+    if (merged.length === 0) continue; // nothing here at all — try the next, less specific field
     const [winner, runnerUp] = merged;
-    if (isWeakComputedStylesWinner(winner, runnerUp, pageCoverageOf(perPage, winner.color))) continue;
+    if (isWeakComputedStylesWinner(winner, runnerUp, pageCoverageOf(perPage, winner.color))) {
+      // Found something, but too thin to trust — this is a verdict on computed styles as a
+      // whole, not just this field. End the source here; do not try buttonBorderColor/linkColor
+      // as a way to still get an answer out of a source that just said it doesn't have one.
+      return null;
+    }
     return { candidates: merged, field };
   }
   return null;
