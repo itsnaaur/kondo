@@ -17,6 +17,24 @@ import type {
 } from "./types";
 import { ANALYSIS_CHAR_BUDGET } from "./select-relevant-pages";
 
+// Diagnostic only — never called unless a caller explicitly supplies a reporter (see
+// structureAndRewriteContent's optional third parameter below). Nothing in the production
+// path (lib/content/run-analysis.ts) passes one, so this stays silent in production by
+// design, not by accident — r2's §8 rules out logging full content, and per-item drop
+// reasons sit close enough to that line to be deliberate about it rather than unconditional.
+// Exists to answer one question: when an array field's kept count is lower than what the
+// model actually wrote, how much of that is coerceTextArray silently dropping malformed
+// items versus the model genuinely writing fewer items — see scripts/check-extraction.ts's
+// --report-coercion flag for the harness that consumes this.
+export type CoercionDrop = { index: number; reason: string };
+export type CoercionFieldReport = {
+  field: string;
+  rawCount: number;
+  keptCount: number;
+  drops: CoercionDrop[];
+};
+export type CoercionReporter = (report: CoercionFieldReport) => void;
+
 const TOOL_NAME = "structure_site_content";
 const MAX_ATTEMPTS = 3;
 // Raised from 8192 after adding serviceAreas/hours/offers/credentials on top of an already
@@ -438,18 +456,38 @@ function validateShape(input: unknown): { valid: true; value: Record<string, unk
 function coerceTextArray<T extends { confidence: ConfidenceLevel; flagged: boolean; flagReason?: string }>(
   raw: unknown,
   fields: (keyof T)[],
-  forceFlagged?: boolean
+  forceFlagged?: boolean,
+  fieldName?: string,
+  reporter?: CoercionReporter
 ): T[] {
-  if (!Array.isArray(raw)) return [];
+  if (!Array.isArray(raw)) {
+    // Whole field missing or not an array at all — a different failure shape from a
+    // per-item drop below, but reported the same way (rawCount 0, no items to itemize)
+    // so the harness's raw-minus-kept arithmetic holds without a special case.
+    if (fieldName && reporter) reporter({ field: fieldName, rawCount: 0, keptCount: 0, drops: [] });
+    return [];
+  }
   const out: T[] = [];
-  for (const entry of raw) {
-    if (!entry || typeof entry !== "object") continue;
+  const drops: CoercionDrop[] = [];
+  for (let index = 0; index < raw.length; index++) {
+    const entry = raw[index];
+    if (!entry || typeof entry !== "object") {
+      drops.push({ index, reason: "entry is not an object" });
+      continue;
+    }
     const e = entry as Record<string, unknown>;
-    if (fields.some((f) => typeof e[f as string] !== "string")) continue;
+    const missingField = fields.find((f) => typeof e[f as string] !== "string");
+    if (missingField) {
+      drops.push({ index, reason: `missing/non-string field: ${String(missingField)}` });
+      continue;
+    }
     const item = { ...e, confidence: isConfidence(e.confidence) ? e.confidence : "low" } as T;
     if (forceFlagged) item.flagged = true;
     else item.flagged = typeof e.flagged === "boolean" ? e.flagged : false;
     out.push(item);
+  }
+  if (fieldName && reporter) {
+    reporter({ field: fieldName, rawCount: raw.length, keptCount: out.length, drops });
   }
   return out;
 }
@@ -458,19 +496,23 @@ function coerceTextArray<T extends { confidence: ConfidenceLevel; flagged: boole
 // were actually offered — an AI response that skips an image, uses a bad index, or omits
 // the whole images array degrades to "unknown/low-confidence" for the affected images
 // rather than failing the entire structuring call.
-function resolveStructuredContent(raw: Record<string, unknown>, imageCandidates: ImageCandidateInput[]): StructuredContentResult {
-  const services = coerceTextArray<Omit<ContentService, "id">>(raw.services, ["name", "description"]);
-  const testimonials = coerceTextArray<Omit<ContentTestimonial, "id">>(raw.testimonials, ["quote", "author"]);
-  const stats = coerceTextArray<Omit<ContentStat, "id">>(raw.stats, ["value", "label"], true);
-  const faqs = coerceTextArray<Omit<ContentFaq, "id">>(raw.faqs, ["question", "answer"]);
-  const differentiators = coerceTextArray<Omit<ContentDifferentiator, "id">>(raw.differentiators, ["title", "description"]);
-  const process = coerceTextArray<Omit<ContentProcessStep, "id">>(raw.process, ["title", "description"]);
+function resolveStructuredContent(
+  raw: Record<string, unknown>,
+  imageCandidates: ImageCandidateInput[],
+  reporter?: CoercionReporter
+): StructuredContentResult {
+  const services = coerceTextArray<Omit<ContentService, "id">>(raw.services, ["name", "description"], undefined, "services", reporter);
+  const testimonials = coerceTextArray<Omit<ContentTestimonial, "id">>(raw.testimonials, ["quote", "author"], undefined, "testimonials", reporter);
+  const stats = coerceTextArray<Omit<ContentStat, "id">>(raw.stats, ["value", "label"], true, "stats", reporter);
+  const faqs = coerceTextArray<Omit<ContentFaq, "id">>(raw.faqs, ["question", "answer"], undefined, "faqs", reporter);
+  const differentiators = coerceTextArray<Omit<ContentDifferentiator, "id">>(raw.differentiators, ["title", "description"], undefined, "differentiators", reporter);
+  const process = coerceTextArray<Omit<ContentProcessStep, "id">>(raw.process, ["title", "description"], undefined, "process", reporter);
   // Forced flagged: true on all four, same as stats — new-field territory, unproven
   // against real data yet, so every entry gets a human's eyes before it ships.
-  const serviceAreas = coerceTextArray<Omit<ContentServiceArea, "id">>(raw.serviceAreas, ["name"], true);
-  const hours = coerceTextArray<Omit<ContentHours, "id">>(raw.hours, ["days", "hours"], true);
-  const offers = coerceTextArray<Omit<ContentOffer, "id">>(raw.offers, ["name", "price"], true);
-  const credentials = coerceTextArray<Omit<ContentCredential, "id">>(raw.credentials, ["label"], true);
+  const serviceAreas = coerceTextArray<Omit<ContentServiceArea, "id">>(raw.serviceAreas, ["name"], true, "serviceAreas", reporter);
+  const hours = coerceTextArray<Omit<ContentHours, "id">>(raw.hours, ["days", "hours"], true, "hours", reporter);
+  const offers = coerceTextArray<Omit<ContentOffer, "id">>(raw.offers, ["name", "price"], true, "offers", reporter);
+  const credentials = coerceTextArray<Omit<ContentCredential, "id">>(raw.credentials, ["label"], true, "credentials", reporter);
 
   const byIndex = new Map<number, Record<string, unknown>>();
   if (Array.isArray(raw.images)) {
@@ -521,6 +563,31 @@ function resolveStructuredContent(raw: Record<string, unknown>, imageCandidates:
   };
 }
 
+export type ReplayResult =
+  | { ok: true; value: StructuredContentResult }
+  | { ok: false; reason: string };
+
+// Replay mode — no network, no model call. Feeds a previously-captured raw tool-call
+// response through exactly the same deterministic chain the live path uses
+// (normalizeStringifiedJson -> validateShape -> resolveStructuredContent), so a fixture
+// exercises the real parsing/coercion code rather than a reimplementation of it. This is
+// the whole reason coerceTextArray's index-matching (see byIndex above) depends on being
+// given the SAME imageCandidates the original call used — index 3 has to mean the same
+// photo on replay as it did the first time, or replaying a fixture proves nothing about
+// the real pipeline. Deterministic by construction if resolveStructuredContent is: no
+// network I/O, no clock, no randomness anywhere in this chain (verified by inspection —
+// see 0.1c's log entry).
+export function replayStructuredContent(
+  rawResponse: unknown,
+  imageCandidates: ImageCandidateInput[] = [],
+  reporter?: CoercionReporter
+): ReplayResult {
+  const normalized = normalizeStringifiedJson(rawResponse);
+  const validation = validateShape(normalized);
+  if (!validation.valid) return { ok: false, reason: validation.reason };
+  return { ok: true, value: resolveStructuredContent(validation.value, imageCandidates, reporter) };
+}
+
 const SYSTEM_PROMPT = `You are helping an agency turn a prospect's existing website into sales-ready content \
 for a landing-page mockup. You are not designing anything — a human-built template will \
 render whatever you produce. Your job is purely: read, structure, and rewrite.
@@ -568,7 +635,17 @@ enough to be confident it's their standard phrase rather than a one-off link cap
 
 export async function structureAndRewriteContent(
   pageTexts: { url: string; title: string; text: string }[],
-  imageCandidates: ImageCandidateInput[] = []
+  imageCandidates: ImageCandidateInput[] = [],
+  // Diagnostic only, never supplied by run-analysis.ts — see CoercionReporter's comment
+  // above for why this stays opt-in rather than an always-on env var.
+  coercionReporter?: CoercionReporter,
+  // Diagnostic only, same reasoning as coercionReporter. Called once per attempt with the
+  // exact, unprocessed tool_use.input this call got back — before normalizeStringifiedJson
+  // touches it — so a caller can capture a real raw response for a replay fixture (see
+  // replayStructuredContent above). Called on every attempt, not just the one that
+  // eventually succeeds, so a caller can also capture the malformed input from an attempt
+  // that failed validateShape, not only the final good one.
+  onRawToolInput?: (raw: unknown, attempt: number) => void
 ): Promise<StructuredContentResult> {
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -654,6 +731,7 @@ export async function structureAndRewriteContent(
       const toolUse = result.content.find(
         (block): block is Anthropic.ToolUseBlock => block.type === "tool_use"
       );
+      onRawToolInput?.(toolUse?.input ?? null, attempt);
       const normalized = toolUse ? normalizeStringifiedJson(toolUse.input) : null;
       const validation = validateShape(normalized);
 
@@ -662,7 +740,7 @@ export async function structureAndRewriteContent(
         throw new Error(`Claude did not return valid structured content: ${validation.reason}`);
       }
 
-      return resolveStructuredContent(validation.value, imageCandidates);
+      return resolveStructuredContent(validation.value, imageCandidates, coercionReporter);
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
       correctionNote = lastError.message;
