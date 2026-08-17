@@ -1,5 +1,7 @@
 import { chromium } from "playwright";
+import type { Page } from "playwright";
 import { prisma } from "@/lib/prisma";
+import { Prisma } from "@/app/generated/prisma/client";
 import { fetchRobotsDisallowPaths, isDisallowed } from "./robots";
 import { normalizeUrl, isCrawlableLink } from "./url-utils";
 import { extractPageData } from "./extract";
@@ -11,6 +13,48 @@ import { isLikelyChallengePage } from "./detect-challenge-page";
 const MAX_PAGES = 150;
 const REQUEST_DELAY_MS = 400;
 const PAGE_TIMEOUT_MS = 20_000;
+// Defensive only — a design system with hundreds of custom properties is unusual, and this
+// exists purely so a pathological page can't balloon the stored JSON, not because normal
+// sites get anywhere close.
+const MAX_CUSTOM_PROPERTIES = 100;
+
+// Captured in the same page visit extractPageData already uses — no second navigation. Every
+// field is independently nullable: a site with no visible button, no <nav>/<header>, or no
+// <h1> is a normal case, not a defect in this function. The whole call is wrapped by its
+// caller so a thrown evaluation (a detached frame, a weird page state) degrades to `null`
+// for the page rather than failing the crawl.
+//
+// No named function declarations/consts inside the evaluate callback — see the identical
+// note in extract.ts: esbuild's name-preservation transform wraps them in a __name() call
+// that doesn't exist inside the browser context page.evaluate() serializes this into.
+function captureComputedStyles(page: Page) {
+  return page.evaluate((maxCustomProperties) => {
+    const buttonEl = document.querySelector(
+      'button, a[class*="btn"], a[class*="button"], input[type="submit"], input[type="button"]'
+    );
+    const primaryButtonBg = buttonEl ? getComputedStyle(buttonEl).backgroundColor : null;
+
+    const linkEl = document.querySelector("a");
+    const linkColor = linkEl ? getComputedStyle(linkEl).color : null;
+
+    const navEl = document.querySelector("nav, header");
+    const navBackground = navEl ? getComputedStyle(navEl).backgroundColor : null;
+
+    const h1El = document.querySelector("h1");
+    const h1Color = h1El ? getComputedStyle(h1El).color : null;
+
+    const rootStyle = getComputedStyle(document.documentElement);
+    const customProperties: Record<string, string> = {};
+    for (let i = 0; i < rootStyle.length && Object.keys(customProperties).length < maxCustomProperties; i++) {
+      const prop = rootStyle[i];
+      if (!prop.startsWith("--")) continue;
+      const value = rootStyle.getPropertyValue(prop).trim();
+      if (value) customProperties[prop] = value;
+    }
+
+    return { primaryButtonBg, linkColor, navBackground, h1Color, customProperties };
+  }, MAX_CUSTOM_PROPERTIES);
+}
 
 export async function crawlClientSite(
   clientId: string,
@@ -90,12 +134,25 @@ export async function crawlClientSite(
             const record: PageExtraction = { url, ...extracted };
             pageRecords.push(record);
 
+            // Own try/catch, deliberately separate from the one around gotoAndSettle above —
+            // a style-capture failure (a detached frame, an unusual page state) must not be
+            // treated as a failed page load. Same page, no second navigation.
+            let computedStyles: Awaited<ReturnType<typeof captureComputedStyles>> | null = null;
+            try {
+              computedStyles = await captureComputedStyles(page);
+            } catch (err) {
+              console.error(`[crawl] failed to capture computed styles for ${url}:`, err);
+            }
+
             await prisma.crawledPage.create({
               data: {
                 clientId,
                 url,
                 title: extracted.title,
                 textContent: extracted.text.slice(0, 20_000),
+                // Prisma.DbNull, not plain null or Prisma.JsonNull — a real SQL NULL when
+                // capture failed or found nothing, not a stored JSON "null" literal.
+                computedStyles: computedStyles ?? Prisma.DbNull,
               },
             });
 

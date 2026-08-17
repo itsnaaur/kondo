@@ -105,6 +105,13 @@ model CrawledPage {
   title       String?
   textContent String?
   createdAt   DateTime @default(now())
+
+  // Captured in the same Playwright page visit that produces title/textContent — see
+  // lib/crawl/crawler.ts. Null when the capture itself failed or nothing on the page
+  // matched (a site with no visible button is normal, not an error). Shape:
+  // { primaryButtonBg, linkColor, navBackground, h1Color, customProperties } — every
+  // field independently nullable, not an all-or-nothing object.
+  computedStyles Json?
 }
 
 // The structured, human-reviewable content record produced by Analyse Site — business
