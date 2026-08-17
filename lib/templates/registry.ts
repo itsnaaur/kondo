@@ -1,6 +1,11 @@
 import { renderShell } from "./shell";
 import type { TemplateContent, TemplateMeta, TemplateSection } from "./types";
-import { scoreTemplate, type SuitabilityResult } from "./suitability";
+import {
+  scorePatternEligibility,
+  type ContentCoverage,
+  type EligibilityResult,
+} from "@/lib/design/pattern-eligibility";
+import type { CapabilitySummary } from "@/lib/content/assign-image-roles";
 import { renderLedger } from "./ledger";
 import { meta as ledgerMeta } from "./ledger/meta";
 import { renderShowcase } from "./showcase";
@@ -81,7 +86,44 @@ export function renderTemplateToHtml(key: string, content: TemplateContent): str
 // via its dark-gradient no-image treatment) than on Showcase.
 const FALLBACK_TEMPLATE_KEY = ledgerMeta.key;
 
-const STATUS_RANK: Record<SuitabilityResult["status"], number> = { recommended: 0, works: 1, "not-suited": 2 };
+const STATUS_RANK: Record<EligibilityResult["status"], number> = { recommended: 0, works: 1, "not-suited": 2 };
+
+// Task 3.1 transitional adapters — this whole file is deleted in Task 3.8 along with the
+// templates it scores, so these exist only to keep it compiling and working correctly in the
+// meantime, not as a model for how real Phase 3 pattern-selection should get its inputs.
+//
+// ContentCoverage's fields are a direct 1:1 read off TemplateContent — no approximation needed.
+function contentCoverageFromTemplateContent(content: TemplateContent): ContentCoverage {
+  return {
+    servicesCount: content.services.length,
+    testimonialsCount: content.testimonials.length,
+    hasPhone: Boolean(content.contactPhone),
+    hasPricing: (content.offers?.length ?? 0) > 0,
+    hasCredentials: (content.credentials?.length ?? 0) > 0,
+  };
+}
+
+// This one IS an approximation, disclosed as such: TemplateContent has no real per-role image
+// classification data (that requires a real assignImageRoles() call against the client's actual
+// Asset rows — lib/content/assign-image-roles.ts — which this render-time gallery view has never
+// had wired in). Derived instead from the two older, template-facing fields TemplateContent does
+// have (heroImageUrl, galleryImages) — exactly the "mechanism 2" chain Task 1.10 found and this
+// task's own log entry says NOT to trust once the real templates are gone. Using it here anyway,
+// narrowly, is the acknowledged cost of keeping this doomed file's existing behaviour working
+// until 3.8 deletes it outright — not a recommendation for anything built after that.
+function approximateCapabilitySummary(content: TemplateContent): CapabilitySummary {
+  const hasHero = Boolean(content.heroImageUrl);
+  const galleryCount = content.galleryImages.length;
+  return {
+    heroGrade: hasHero ? 1 : 0,
+    sectionBackgroundGrade: 0,
+    galleryGrade: Math.max(0, galleryCount - (hasHero ? 1 : 0)),
+    teamGrade: 0,
+    featureInlineGrade: 0,
+    unusable: 0,
+    logoPresent: Boolean(content.logoUrl),
+  };
+}
 
 const META_BY_KEY: Record<string, TemplateMeta> = Object.fromEntries(
   Object.values(TEMPLATES).map((t) => [t.meta.key, t.meta])
@@ -123,15 +165,26 @@ const TIE_BREAK_PRIORITY = [showcaseMeta.key, ledgerMeta.key, atlasMeta.key];
 
 // Every template scored against this client's actual content — the one call site both
 // the gallery (for sorting/labels) and pickDefaultTemplate (below) need, so scoring logic
-// only lives in lib/templates/suitability.ts and isn't duplicated here.
+// only lives in lib/design/pattern-eligibility.ts and isn't duplicated here.
 export function scoreAllTemplates(
   content: TemplateContent
-): { key: string; label: string; status: SuitabilityResult["status"]; reason?: string }[] {
-  return Object.values(TEMPLATES).map((t) => ({
-    key: t.meta.key,
-    label: t.meta.label,
-    ...scoreTemplate(t.meta, content),
-  }));
+): { key: string; label: string; status: EligibilityResult["status"]; reason?: string }[] {
+  const coverage = contentCoverageFromTemplateContent(content);
+  const images = approximateCapabilitySummary(content);
+  return Object.values(TEMPLATES).map((t) => {
+    // meta.requires (heroImage/phone/minServices/minGallery) is structurally a subset of
+    // PatternRequirements' 8 fields — passed through as-is, no translation needed.
+    const result = scorePatternEligibility(t.meta.requires ?? {}, coverage, images);
+    return {
+      key: t.meta.key,
+      label: t.meta.label,
+      status: result.status,
+      // scoreAllTemplates keeps the old singular `reason` shape — TemplateGallery.tsx (also
+      // deleted in 3.8) reads t.reason directly and wasn't worth updating for a file this task
+      // doesn't otherwise touch.
+      reason: result.reasons.length > 0 ? result.reasons.join("; ") : undefined,
+    };
+  });
 }
 
 // Requirements beat industry match — a clinic with no photos shouldn't get Ledger
