@@ -4362,6 +4362,43 @@ after."
 ---
 
 ---
+### 1.2c-CARRY-FORWARD — Princeton Dental's logo pick is a real open question for Task 1.5
+**Timestamp:** 2026-08-17
+**Git SHA at start:** 3c65457
+**Status:** NOTE — no code change, nothing to verify by command; flagging for a future task.
+
+**Not a correction to `1.2c` — that entry's result and reasoning are unchanged and correct: Princeton
+Dental abstaining from computed styles and landing on the logo tier at `#002000`, low confidence, is
+the right behaviour of the chain fix.** This note is about what happens **downstream** of that result,
+specifically for whoever implements Task 1.5 (extending `normalize-brand-colors.ts`'s `pickHue` to
+consume `rankBrandColorSources`' output — out of scope for every task run this session so far).
+
+**The concern:** `#002000` is a near-black, low-lightness dark green. It won its tier on a **saturation
+tie** (winner 100% vs. runner-up 100%, per `1.2c`'s own table) — `rankLogoSource`'s saturation-only
+ranking (from `1.2`) has no tiebreak beyond RGB channel order for two candidates tied at the ceiling,
+and a value this close to black is exactly the kind of pixel a small transparent-background logo PNG
+produces at its anti-aliased edges, not necessarily a real design colour. `1.2b`'s own entry flagged
+this as "not independently confirmed further" when it first appeared as a simulated result; `1.2c`
+didn't investigate it either, since the chain-termination fix was the scoped question, not the logo
+tier's output quality.
+
+**Why this matters specifically for Task 1.5, not as a standalone bug:** `pickHue` is the function that
+will actually consume this value as an input. A near-black colour with only "low" confidence behind it
+is a case Task 1.5 needs to handle deliberately — e.g. treating a low-confidence, near-black/near-white
+input with extra scepticism, or preferring a documented fallback over trusting it outright — rather than
+silently piping it through as if it were an ordinary hue. Not proposing a specific mechanism here; that
+is Task 1.5's design question, not something to pre-empt in a note.
+
+**Files created/modified:** none.
+
+**Confidence:** High that `#002000` is real, measured output (matches `1.2c`'s table exactly, not
+restated from memory). Low on whether it's a meaningful brand colour or a bucketing artifact — flagged
+as genuinely open, not resolved either way.
+
+**Next task:** `1.3` — Contrast utilities, unrelated to this note, begun immediately after.
+---
+
+---
 
 # PART E — For the human reviewing this log
 
