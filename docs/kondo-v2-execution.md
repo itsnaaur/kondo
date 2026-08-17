@@ -8673,6 +8673,233 @@ any real pattern library (none exists) or a larger real-industry sample.
 **Next task:** not specified — awaiting direction.
 ---
 
+### 3.3 — Deterministic stylesheet generator
+**Timestamp:** 2026-08-18
+**Git SHA at start:** 3d390fb
+**Status:** DONE-VERIFIED — `tsc --noEmit` clean, `lint` clean, full suite 14 files / 205 tests
+passing (195 → 205, exactly the 10 new tests). Determinism proven (20 repeated calls,
+byte-identical). All 5 real clients generated and run through the contrast checker against their
+own real, current derived palettes — 12/12 pairs pass for every client. Two real findings surfaced
+by that real run, beyond what the task asked about, reported honestly below rather than left out.
+
+**What I did:** New `lib/design/generate-stylesheet.ts` — `generateStylesheet({ palette, tokens })
+=> string`, a pure CSS string template consuming only `Palette` (`1.5`/`1.6`) and `TemplateTokens`
+(`2.4`), no AI, no per-request state. Its output is handed to `lib/templates/shell.ts`'s existing
+`renderShell({ css, ... })` unchanged — that file already inlines `css` into one `<style>` block
+alongside its own `SHELL_CSS` reset, which is build plan §6.4's own required shape, so no shell
+change was needed for this task.
+
+**Constraint 1 — contrast guaranteed by construction.** The central design decision: `color` is
+never set on a typographic element (`h1`-`h6`, `p`, `a`) on its own — only font properties, or
+`color: inherit` for links. Colour appears in exactly two shapes: (a) a `.surface-*` class (plus
+`body` itself, and the two self-contained button variants `.btn--solid`/`.btn--secondary`) that
+sets `background` and `color` together as one atomic pair, safe regardless of nesting context
+since it never relies on an ambient colour it didn't declare itself; (b) a colour utility
+(`.text-muted`, `.text-accent`, `.btn--outline`) nested *under* the one specific `.surface-*`
+selector where that exact pairing is validated (e.g. `.surface-mist .text-accent`, since `accent`
+is validated as text only against `mist`, nowhere else) — outside that selector the class simply
+has no rule, and the element falls back to its already-safe ambient colour, never an invalid one.
+Ordinary text always inherits colour from the nearest ancestor surface via plain CSS inheritance —
+a markup author cannot produce an invalid pairing through normal use, because there is no
+free-floating "set this text colour" utility outside those two shapes.
+
+This was verified structurally, not just designed this way and trusted: `generate-stylesheet.test.ts`
+parses the actual generated CSS text (comment-stripped, comma-separated selectors split) and
+asserts every selector that sets `color` matches one of the two documented safe shapes. Getting this
+parser right took three real iterations — see "Failures, retries and dead ends" below.
+
+**The 12-pair correspondence is exact, checked both ways.** `lib/design/validated-text-pairs.ts` is
+a new file — Task `1.6`/`1.6a`/`1.6b`'s own 12-pair list and its `hslStringToHex`-equivalent
+converter, extracted out of `lib/design/build/validate-contrast.ts` (which used to declare both
+inline) so there is exactly one canonical source of truth, imported by both that build-time gate
+and this task's runtime CSS emission — not a hand-copied second list that could silently drift.
+`validate-contrast.ts` was re-run immediately after the extraction to confirm its own result is
+byte-identical: **`Checked 191 palettes, 12 pairs each (2292 total checks) ... SUMMARY: 191/191
+palettes fully AA-passing`** — unchanged from `1.6b`'s own recorded result. A test
+(`EMITTED_PAIRS` vs. `VALIDATED_TEXT_PAIRS`, both hand-enumerated then asserted equal as sets)
+confirms the generator emits *exactly* those 12 pairs — no more, no fewer:
+
+| Emitted rule | Pair |
+|---|---|
+| `body`, `.surface-paper` | `ink` on `paper` |
+| `.surface-mist` | `ink` on `mist` |
+| `.surface-accent-soft` | `ink` on `accentSoft` |
+| `.surface-accent`, `.btn--solid` | `accentInk` on `accent` |
+| `.surface-secondary`, `.btn--secondary` | `onSecondary` on `secondary` |
+| `.surface-deep` | `paper` on `deep` |
+| `.surface-deep-soft` | `paper` on `deepSoft` |
+| `.surface-destructive` | `onDestructive` on `destructive` |
+| `.surface-{paper,mist,accent-soft} .text-muted` | `inkMuted` on `paper`/`mist`/`accentSoft` |
+| `.surface-mist .text-accent`, `.surface-mist .btn--outline` | `accent` on `mist` |
+
+**Constraint 2 — deterministic.** Pure string template, no `Date.now()`/`Math.random()`, no object
+key iteration (every field referenced by name). Test: 20 repeated calls with identical input,
+asserted byte-identical.
+```ts
+it("byte-identical output across 20 repeated calls with identical input", () => {
+  const results = Array.from({ length: 20 }, () => generateStylesheet(REAL_HUE_INPUT));
+  const first = results[0];
+  for (const r of results) expect(r).toBe(first);
+});
+```
+
+**Constraint 3 — the class vocabulary is the contract with `3.4`.** `--kebab-case` CSS custom
+property names (`--accent`, `--font-body`, `--radius-btn`, etc.) are not new — they're the exact
+names the three now-`3.8`-doomed templates already used to bind resolved Palette/TemplateTokens
+values to CSS, carried forward deliberately before that deletion (same principle as `3.2`'s
+vertical list rescuing those templates' `industries[]` words). The *class* vocabulary
+(`.surface-*`, `.btn--*`, `.card`, `.container`, `.section`, ...) is new — the old templates'
+`.tl-*`/`.sc-*`/`.at-*` BEM markup was template-specific structure, not something a semantic-
+HTML-writing model should inherit. Exported as a real, structured list —
+`CLASS_VOCABULARY: {className, description}[]` — not just a comment, so `3.4`'s own
+prompt-construction code can read it directly and the documentation a model is given can never
+drift from the actual rules. Two new layout defaults not derived from any token
+(`--maxw: 1280px`, `--gutter: clamp(18px, 3.4vw, 44px)`) are disclosed as deliberate, universal
+choices near the three real templates' own independently-hardcoded values (1240/1280/1320px) —
+nothing upstream through `3.2` supplies real breakpoints. Per-section rhythm (`scaledBand`'s own
+`min`/`vw`/`max` triple) is explicitly **not** reproduced — `.section` uses one flat rule scaled by
+the real `bandMultiplier` token instead, left for `3.4` to refine once real section markup exists
+to tune it against, rather than inventing per-section numbers with nothing to check them against.
+
+**Constraint 4 — the `pickHue` carry-forward, surfaced but not fixed.** Both named clients
+generate fully AA-safe stylesheets on the fallback slate-indigo palette, confirmed by a fresh,
+real run today:
+- **BC Security** (`#024470`, L≈22.35%, recomputed fresh and matching the carry-forward's own
+  cited ≈22%) — `derivedFrom: "fallback"`, `accent: hsl(222 58% 41%)`, all 12 pairs pass
+  (4.83:1–18.39:1).
+- **Propell Property** (`#0e1e39`, L≈13.92%, matching the carry-forward's cited ≈14%) —
+  `derivedFrom: "fallback"`, same slate-indigo accent, all 12 pairs pass.
+
+**What it costs, exactly as asked:** nothing on safety — the fallback hue runs through the exact
+same corpus-validated derivation every hue does, so the 12/12 pass is not a coincidence of these
+two clients, it's the same guarantee every client gets. The cost is entirely branding: both clients
+get a generic, competent slate-indigo page that looks nothing like their own navy brand.
+
+**Two real findings beyond the two named clients, surfaced only because this task ran the real
+5-client verification rather than trusting the carry-forward's own scope — reported honestly, not
+smoothed over or left out:**
+
+1. **Two more clients also fall back, for two different reasons neither one is "genuine navy
+   wrongly rejected."** Princeton Dental's real brand hex is `#002000` — computed HSL: H=120°
+   (pure green), S=100%, **L≈6.3%**. This is not a borderline case: it's near-black, and it's the
+   *exact* case `normalize-brand-colors.ts`'s own header comment already names ("Princeton Dental
+   came back as black + two near-identical greens") — `pickHue` rejecting it is the code working
+   as designed, not the carry-forward's failure mode. Downseal Solutions' real brand hex is
+   `#606040` — computed HSL: H≈60°, **S≈20.0%**, L≈31.4%. This clears the lightness floor but fails
+   the *saturation* floor (`s < 25`) — a third, distinct rejection path, a muted olive/khaki tone
+   too desaturated to read as a strong hue, not a lightness problem at all. Neither belongs in the
+   same carry-forward as BC Security/Propell's "high-confidence real navy, wrongly rejected by the
+   lightness floor" — conflating them would overstate the carry-forward's real scope. Noted here as
+   a new, distinct, disclosed observation, not folded into the existing item.
+2. **`classify-vertical.ts` (`3.2`) misses BC Security's own real `detectedIndustry` text.**
+   `"commercial security / systems integration"` does not classify to any vertical (`resolveDesignSystem`
+   returns `ok: false, reason: "no-vertical-match"`) — `trades-construction`'s `"security systems"`
+   keyword requires that exact contiguous substring, and the real text has `"security / systems"`
+   (a slash and space in between) instead. A related, second imprecision: Allen Evans Family
+   Lawyers' `detectedIndustry` is `"professional services (family law)"` — contains no `legal`
+   keyword (`legal`, `law firm`, `lawyer`, `attorney`, `solicitor`), so it falls through to
+   `financial-professional-services` via the `"professional services"` keyword instead of `legal`,
+   despite being, throughout this entire session, a family law firm. Neither breaks this task's own
+   done-when — `generateStylesheet` only needs `palette`/`tokens`, present on *both* branches of
+   `3.2`'s union, so BC Security's stylesheet generates and passes all 12 pairs identically whether
+   `resolveDesignSystem` returns `ok: true` or `ok: false` — a real, working validation of `3.2`'s
+   own `NeutralSystem` design. Not fixed here: `classify-vertical.ts`'s keyword coverage is `3.2`'s
+   scope, not this task's, and this task's job is the stylesheet, not vertical-classification
+   accuracy. Carried forward for whoever next touches `classify-vertical.ts`.
+
+**Real 5-client run (fresh, via a throwaway script — `scripts/_tmp-3.3-verify.ts`, deleted after
+use — querying each client's real `ContentRecord.brandColors`/`detectedIndustry`, filtering
+`confidence !== "low"` exactly as `to-template-content.ts` does, calling `resolveDesignSystem` then
+`generateStylesheet`, then checking all 12 `VALIDATED_TEXT_PAIRS` via `contrastRatio` against the
+real resulting palette):**
+
+| Client | detectedIndustry | real brand hex | resolveDesignSystem | palette.derivedFrom | 12/12 pairs |
+|---|---|---|---|---|---|
+| Princeton Dental | "medical/clinic" | #002000 | ok:true, vertical=medical-dental | fallback | PASS (4.83–18.39:1) |
+| BC Security | "commercial security / systems integration" | #024470 | **ok:false, no-vertical-match** | fallback | PASS (4.83–18.39:1) |
+| Propell Property | "property investment advisory" | #0e1e39 | ok:true, vertical=financial-professional-services | fallback | PASS (4.83–18.39:1) |
+| Allen Evans Family Lawyers | "professional services (family law)" | #54c9ea | ok:true, vertical=financial-professional-services | **brand** | PASS (4.64–17.52:1) |
+| Downseal Solutions | "commercial construction / trade services" | #606040 | ok:true, vertical=trades-construction | fallback | PASS (4.83–18.39:1) |
+
+Allen Evans is the one client of five whose real brand colour actually survives `pickHue` today
+(`#54c9ea`, a bright cyan — S≈68%, L≈65%, comfortably clear of both floors) — its stylesheet is the
+only one of the five that isn't the generic slate-indigo fallback.
+
+**Files created/modified:**
+```
+$ git status --porcelain
+ M lib/design/build/validate-contrast.ts
+?? lib/design/generate-stylesheet.test.ts
+?? lib/design/generate-stylesheet.ts
+?? lib/design/validated-text-pairs.ts
+```
+
+**Verification commands and output:**
+```
+$ npx tsx lib/design/build/validate-contrast.ts   (re-run after extracting validated-text-pairs.ts)
+Checked 191 palettes, 12 pairs each (2292 total checks), AA minimum 4.5:1.
+SUMMARY: 191/191 palettes fully AA-passing across all 12 checked pairs.
+
+$ npx tsc --noEmit && npm run lint && npx vitest run
+ Test Files  14 passed (14)
+      Tests  205 passed | 1 todo (206)
+
+(throwaway script, deleted after use: scripts/_tmp-3.3-verify.ts — real 5-client run per the
+table above)
+```
+
+**Failures, retries and dead ends — three real bugs in my own structural test, none in the
+generated CSS itself, each caught by running the test rather than assuming the parser was right:**
+1. First run: `"body"` flagged as an unexpected colour-declaring selector. Real gap in the test's
+   safelist, not the code — `body` legitimately sets `background: paper; color: ink` (the page's
+   own default, functionally identical to `.surface-paper`), which the safelist hadn't accounted
+   for. Fixed by allowlisting `body` explicitly, with a comment explaining why it's safe.
+2. Second run: a CSS *comment* immediately before `.surface-paper` got swallowed into the
+   "selector" capture group by the naive `[^{}]+` regex, which has no concept of `/* ... */`.
+   Fixed by stripping comments before parsing.
+3. Third run: the `.text-muted` rule declares a comma-separated selector list (three selectors,
+   one rule body) — the parser was treating the whole joined string as one selector, which
+   matched neither safe pattern. Fixed by splitting on commas and checking each branch
+   independently. A fourth, smaller instance of the same class of gap (`.btn--solid`/
+   `.btn--secondary` not matching the `.surface-*`-only safe-selector regex) was caught and fixed
+   the same way immediately after.
+None of these were bugs in `generate-stylesheet.ts`'s actual CSS — every failure was the test's own
+parser being wrong about what it was looking at, caught by iterating until the test's own logic was
+actually correct, not by loosening the assertion to make a false positive pass.
+
+**Shortcuts taken:** `minTouchTarget` (declared only by the `clinical-precise` style bundle in
+`style-bundles.json`) isn't consumed here — `TemplateTokens` (`2.4`'s own flattened output, which
+this module's input type is built from) never surfaced that field in the first place, and reaching
+past `TemplateTokens` into the raw `StyleBundle` for one bundle-specific field would cut around
+`2.4`'s own established abstraction boundary rather than respect it. A real, disclosed gap for
+whoever next revisits that boundary, not this task's to fix.
+
+**Deviations from the task spec:** none. Both new files as scoped; the 12-pair contrast guarantee
+is exact in both directions (every emitted pair is validated, every validated pair is used
+somewhere); determinism proven; the class vocabulary is documented and exported for `3.4`; the
+`pickHue` carry-forward is surfaced with real, fresh numbers for both named clients, not fixed.
+
+**Not run / not verified:**
+- No real caller wires `generateStylesheet` into `renderTemplateToHtml`/`Concept` generation yet —
+  that's `3.4`'s and later tasks' wiring work, not this task's scope.
+- Visual review of any of the five generated stylesheets in a real browser — this task verified
+  contrast numerically (`contrastRatio`) and structurally (selector-safety parsing), not by
+  rendering and looking, consistent with `2.3-CARRY-FORWARD`'s still-open visual-review item.
+- The two newly-disclosed `classify-vertical.ts` findings (BC Security's keyword miss, Allen
+  Evans' legal-vs-financial-professional-services ambiguity) — named, not investigated further or
+  fixed, since both are `3.2`'s scope, not this task's.
+
+**Confidence:** High on the contrast guarantee — proven three ways (the exact-correspondence set
+test, real numeric `contrastRatio` checks against both a real derived hue and the fallback palette
+in the unit suite, and a real live run against all 5 clients' actual current data). High on
+determinism — directly tested, not inferred. Medium-high on the class vocabulary's real-world
+adequacy, since no real markup (`3.4`) exists yet to exercise it against; the vocabulary is
+internally consistent and documented, but "is this enough classes, and the right ones" can't be
+fully answered until `3.4` tries to use it.
+
+**Next task:** not specified — awaiting direction.
+---
+
 ---
 
 # PART E — For the human reviewing this log
