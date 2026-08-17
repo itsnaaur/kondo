@@ -5965,6 +5965,229 @@ this session.
 ---
 
 ---
+### 1.8 — Image vision classification, separate and cached
+**Timestamp:** 2026-08-17
+**Git SHA at start:** 986306d
+**Status:** DONE-VERIFIED — done-when met exactly: first call made real API calls, second made
+zero, results identical (checked correctly, not by a naive comparison that would have falsely
+flagged them as different — see below).
+
+**Investigated before writing anything, per instruction — both questions answered with evidence, not
+assumed.**
+
+**Is the existing embedded classification reusable, or genuinely superseded?** Neither, precisely —
+it's real, current, working code (`structure-and-rewrite.ts`'s `buildImagesTool`, folded into the one
+extraction call), not legacy debris, but it's exactly the thing this task's own framing says to stop
+doing ("a separate Claude call, not folded into extraction"). Its *patterns* are reusable and were
+reused (below); its *code* stays untouched, since this task builds a new, separate module rather than
+carving the old one apart — replacing it isn't this task's job. Confirmed its exact shape by reading
+it directly: hand-written JSON Schema (no Zod anywhere in the AI path), streaming
+`messages.stream(...).finalMessage()`, `output_config:{effort:"high"}`, forced `tool_choice`, a
+5-value `subject` enum (`people/place/work/product/abstract`) far narrower than `§5.3`'s 11-value
+one, and an index-based lenient join (`byIndex.get(index)`, degrading a skipped/malformed entry to
+safe defaults) that this task's own module mirrors deliberately, not by coincidence.
+
+**Is there dead vision code from the July pipeline worth reusing?** No — checked with
+`git log --all --diff-filter=D`, not assumed from the docs' own mention of a torn-out pipeline.
+Every file from that era (`lib/generation/visual-read.ts` and its ten-odd siblings,
+`lib/crawl/visual-shots.ts`, `lib/crawl/analyze.ts`, `lib/source-analysis/analyzer.ts`,
+`lib/audit/*`, `lib/design-standards/index.ts`, the matching React components) is genuinely deleted,
+confirmed absent from the working tree (`git status --porcelain` clean, directories don't exist). The
+only residue is two stale code comments (`lib/ai/anthropic-retry.ts`, `lib/ai/json-tool-utils.ts`)
+still naming files that no longer exist — misleading if read literally, not touched in this task
+(out of scope), flagged here so a future reader doesn't chase a dead reference.
+
+**What got reused, concretely, not just described as "reused":** `resizeForVisionClassification`
+(unchanged, called exactly as-is — 512px long edge, JPEG quality 80, base64 out); `withTransientRetry`
+(unchanged, wraps every real Anthropic call); `normalizeStringifiedJson` (unchanged, runs on every
+tool response before validation); the index-label-then-image content-block shape
+(`[i] nearbyText` text block immediately before the image); the index-based lenient-join pattern for
+degrading a skipped entry to a safe default instead of failing the whole call; and the
+`output_config:{effort:"high"}`/forced-`tool_choice`/streaming call shape itself.
+
+**Schema, per build plan §5.3, implemented exactly as specified.** New file
+`lib/content/classify-images.ts` exports `ImageClassification` with every field named: `subject`
+(the 11-value enum given verbatim), `isHeadshot`, `peopleCount`, `shotQuality`
+(`professional`/`competent`/`amateur`), `hasBurnedInText`, `hasWatermark`, `focalPoint` (`{x,y}`,
+normalised, clamped to `[0,1]` defensively even though the schema asks for that range), `clearSpace`
+(`none`/`left`/`right`/`top`/`bottom`/`centre`), `heroSuitable` (modelled as `{suitable, reason}`,
+matching the spec's own "bool + reason" phrasing as one unit), `caption` (nullable — kept optional
+like the existing embedded call's own caption field, deliberately not forced, so the model isn't
+pushed to fabricate a caption for an image with nothing genuinely describable), and `confidence`.
+
+**"Ask what an image is, never what it feels like" — held as a real constraint on the prompt text,
+not just a section header.** The system prompt and every per-field tool description are written in
+terms of literal, checkable facts — what's depicted, whether text/a watermark is burned into the
+pixels, where the visual weight sits. `shotQuality` and `heroSuitable` are the two fields closest to a
+judgement call, and both are explicitly scoped to concrete photographic/compositional facts (focus,
+lighting, framing, clear space) in their own tool descriptions, with the system prompt calling this
+out directly: *"Never describe how it feels, what mood or atmosphere it conveys, or whether it fits a
+brand."* No mood, atmosphere, or brand-fit vocabulary appears anywhere in the prompt or schema.
+
+**Migration — confirmed a new column was needed, not assumed reusable from `1.7a`, applied with the
+same discipline.** `Asset.metrics` (Task `1.7`) is explicitly reserved for deterministic metrics —
+its own schema comment already anticipated this exact question ("or for Task 1.8's classification
+cache once that exists, which is a different field, not layered into this one"). Added
+`Asset.classification Json?`. Confirmed `DATABASE_URL` (pooled, port `6543`) and `DIRECT_URL`
+(direct, port `5432`) again before touching anything — same host/database as every prior migration
+this session:
+```sql
+-- AlterTable
+ALTER TABLE "Asset"
+  ADD COLUMN     "classification" JSONB;
+```
+Applied via `npx prisma db execute --file ...`, then `npx prisma migrate resolve --applied
+20260817000002_add_asset_classification`, then `npx prisma generate` — `npx prisma migrate status`
+confirmed up to date; the migration file itself re-read afterward and confirmed byte-identical to what
+was applied, not silently re-diffed by tooling.
+
+**Caching — "classified once, ever," genuinely global, not per-client, checked directly rather than
+assumed from reading the code.** `findCachedClassification` looks up any Asset row *anywhere* with a
+matching `contentHash` and a non-null `classification` — no `clientId` filter — because
+`saveAsset`'s own dedup (`lib/crawl/download-images.ts`) is scoped per client, so the same stock/theme
+image downloaded for two different clients gets two different Asset rows sharing one `contentHash`.
+An asset with `contentHash === null` (a manually-uploaded replacement — see that column's own schema
+comment) never participates in the cache in either direction, by construction: `Prisma`'s
+`where: { contentHash: null }` would generate `IS NULL` and match every null-hash row
+indiscriminately, so the lookup is only ever called with a real, truthy hash — guarded explicitly in
+code, not left to accident. Within one batch, two images sharing a `contentHash` (the same photo used
+twice on one site) are classified once and copied, not sent to Claude twice.
+
+**Real verification — the done-when, met exactly, with the sampling-variance note taken seriously.**
+Used Allen Evans Family Lawyers' 9 real `IMAGE` assets (all with real `contentHash`, none previously
+classified anywhere — confirmed via a global `count` query before starting, not assumed clean).
+
+*Run 1 — first-ever classification of these assets:*
+```
+9 real assets to classify
+=== First call (expect real API calls) ===
+[classify-images] attempt 1: stop_reason=tool_use output_tokens=1391/8000
+API calls made: 1
+=== Second call, same client, same images (expect ZERO API calls) ===
+API calls made: 0
+```
+One real Claude call classified all 9 images in a single batch (matching the existing embedded call's
+own one-call-per-batch shape); the second call, same process, made zero.
+
+**A real bug caught in my own verification script, not shipped silently — worth reporting precisely
+because the task warned about exactly this class of mistake.** My first diff check used raw
+`JSON.stringify` equality and reported all 9 assets as "DIFFERS." They weren't — Postgres JSONB does
+not preserve key insertion order, so the second call's results (read back from the database) stringify
+with different key ordering than the first call's freshly-constructed objects, even though every field
+value is identical. This is exactly the kind of "looks like a real difference, isn't" trap the task's
+own note (irreducible sampling variance; verify, don't assume) was warning about, just showing up one
+layer down, in the verification tooling itself rather than the classification. Fixed with a
+canonical (recursively key-sorted) comparison and re-ran:
+
+*Run 2 — a fresh process, same 9 assets, now cached from Run 1:*
+```
+=== First call (expect real API calls) ===
+API calls made: 0
+=== Second call, same client, same images (expect ZERO API calls) ===
+API calls made: 0
+=== Diff (canonical/key-sorted comparison, not raw stringify) ===
+IDENTICAL — every asset's result matches exactly (values, not just key order).
+SUMMARY: firstCallCount=0 secondCallCount=0 identical=true
+```
+Run 2's "0 then 0" is itself real evidence, not a weaker result than Run 1's "1 then 0" — it shows the
+cache survives a full process restart (a fresh `tsx` invocation, not the same in-memory Node process),
+not just repeated calls within one script run. Full per-asset classification output (both runs) is
+real, pasted in this entry's accompanying chat reply, not summarised away.
+
+**Cross-client caching, tested directly — the specific claim "once, ever" makes, not just "once per
+client," which Runs 1/2 alone don't distinguish (both used the same client).** Took Allen Evans'
+already-cached `site-image-2.jpg` classification and called `classifyImages` with a *different
+client's* (BC Security's) real, currently-unclassified asset id, paired with Allen Evans' real
+`contentHash` and a deliberately-broken buffer (`Buffer.from("not a real image")`) that would throw
+inside `resizeForVisionClassification` if the cache path were ever bypassed:
+```
+API calls made: 0
+Result: {..."subject":"people","peopleCount":5,...} — matches Allen Evans' cached value exactly
+```
+Zero API calls and the correct cached result, using a buffer that could not have produced this result
+any other way — real, positive evidence the cache path executed, not an absence-of-error inference.
+Reverted BC Security's test asset back to `classification: null` immediately after, so this synthetic
+test leaves no misleading residue on a real client's real row.
+
+**Scoping decision, stated plainly, matching this session's established pattern (Task `1.3`'s
+`contrast.ts`, Task `1.7`'s `image-metrics.ts`).** `classify-images.ts` is **not** wired into
+`lib/content/run-analysis.ts` in this task. The existing embedded classification in
+`structure-and-rewrite.ts` is untouched and keeps running as production's real path. This task builds
+and, critically, *really verifies* the new module standalone — not a dead unused file the way an
+unwired module can silently rot, but not yet the thing production actually calls either. Deciding
+whether/how the two relate (replace the embedded one? run both? which `subject` enum does `1.9`
+actually consume?) is exactly the kind of decision this session's discipline reserves for the task
+that does the wiring, not this one.
+
+**Files created/modified:**
+```
+$ git status --porcelain
+ M prisma/schema.prisma
+?? lib/content/classify-images.ts
+?? prisma/migrations/20260817000002_add_asset_classification/
+```
+
+**Verification command:**
+```
+npx tsc --noEmit && npm run lint && npx vitest run
+npx prisma db execute --file prisma/migrations/20260817000002_add_asset_classification/migration.sql
+npx prisma migrate resolve --applied 20260817000002_add_asset_classification
+npx prisma migrate status && npx prisma generate
+(throwaway script, deleted after use: fetch Allen Evans Family Lawyers' 9 real assets' bytes,
+resetClassifyImagesCallCount, classifyImages, record call count and results, repeat, canonical diff)
+(throwaway script, deleted after use: cross-client cache-hit test using BC Security's real asset id
++ Allen Evans' real contentHash + a broken buffer, reverted after)
+```
+
+**Output:**
+```
+$ npx tsc --noEmit
+(exit 0)
+$ npm run lint
+(exit 0)
+$ npx vitest run
+ Test Files  9 passed (9)
+      Tests  89 passed | 1 todo (90)
+$ npx prisma migrate status
+Database schema is up to date!
+```
+Full classification output for all 9 assets, both runs, and the cross-client test are pasted in full
+in this entry's accompanying chat reply.
+
+**Failures, retries and dead ends:**
+1. The `JSON.stringify`-based diff bug above — caught by actually inspecting the "DIFFERS" output
+   (every field value was visibly identical, only key order differed) rather than trusting the
+   boolean result, then fixed and re-verified.
+
+**Shortcuts taken:** batching is not chunked for arbitrarily large inputs — documented in the code as
+a deliberate scope limit (nothing in this codebase currently produces a batch bigger than 11 images),
+not an oversight.
+
+**Deviations from the task spec:** none — separate call (confirmed not folded into extraction),
+`§5.3` schema implemented field-for-field, cache on `contentHash` (confirmed global, not per-client),
+forced tool use with `withTransientRetry` reused, existing resize path reused unmodified, migration
+need stated and confirmed before applying.
+
+**Not run / not verified:**
+- Whether `1.9`'s role assignment can consume this schema as-is, or needs a mapping between this
+  11-value `subject` enum and the existing embedded call's 5-value one — not decided here, flagged as
+  live for whoever wires this in.
+- Total-failure behaviour (all `MAX_ATTEMPTS` exhausted) — implemented to throw, matching
+  `structure-and-rewrite.ts`'s own core-field behaviour, but not exercised live; would need a way to
+  force every attempt to fail, not attempted.
+- The two stale file-reference comments in `lib/ai/anthropic-retry.ts`/`lib/ai/json-tool-utils.ts` —
+  noted, not fixed, out of this task's scope.
+
+**Confidence:** High — every claim is backed by a real command or a real, re-verified script run,
+including the one place my own verification tooling was wrong and got caught before being reported as
+a passing result.
+
+**Next task:** awaiting the human's direction — likely `1.9` (role assignment, consuming `1.7`'s
+metrics and this task's classification together) or wiring `classify-images.ts` into
+`run-analysis.ts` in place of or alongside the embedded call. Not started this session.
+---
+
+---
 
 # PART E — For the human reviewing this log
 
