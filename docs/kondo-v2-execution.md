@@ -6418,6 +6418,154 @@ specific real photos were wrongly excluded — named precisely rather than round
 ---
 
 ---
+### 1.9a — soften the two hard gates, without touching thresholds
+**Timestamp:** 2026-08-17
+**Git SHA at start:** 70d7719
+**Status:** DONE-VERIFIED — implemented exactly as specified, real re-run across all 5 clients,
+one prediction (the human's, not mine) checked against real data and found wrong, reported rather
+than silently corrected to match.
+
+**What I did:** `lib/content/assign-image-roles.ts`'s two hard vetoes from `1.9` (`hasAlpha === true`
+→ unusable; `min(width,height) < REAL_PHOTO_MIN_DIM_PX` → unusable) are now each *forgivable* by a
+single, explicit bar — `hasStrongClassificationSupport(c)`: `heroSuitable.suitable === true &&
+shotQuality === "professional" && confidence === "high"` — exactly the three conditions named in the
+task. Both existing numbers (`REAL_PHOTO_MIN_DIM_PX = 500`, the `hasAlpha` signal itself) are
+unchanged; only how they're applied changed, per instruction:
+- **`hasAlpha`**: no longer disqualifies alone. `alphaFlag && !strongSupport` → unusable (unchanged
+  in spirit — a weak or unremarkable classification still loses to it); `alphaFlag && strongSupport`
+  → proceeds to normal role assignment, with the concession noted in the resulting `reason` string,
+  not silently dropped.
+- **Dimension**: a new `DIMENSION_MARGIN_FRACTION = 0.2` policy band (`500 × 0.8 = 400px` floor) —
+  explicitly disclosed in the code comment as a **policy choice, not a data-derived number**, since
+  `1.7b` validated the 500px boundary itself, not a tolerance around it. Sized to comfortably admit
+  the real case that motivated this (BC Security's 409px, 18% short) without being wide enough to
+  admit a substantially smaller image on classification support alone. Below `400px`: unusable
+  regardless of support. `400–500px` with `strongSupport`: admitted. `400–500px` without it: still
+  unusable, same as `1.9`.
+- **Watermark** was left untouched, as instructed — a hard veto, since `1.8` directly observes it on
+  the image rather than correlating a proxy metric with it.
+- **`assignWithoutClassification`** (the no-classification fallback) is explicitly **not** touched,
+  and can't be — `hasStrongClassificationSupport` needs `heroSuitable`/`shotQuality`/`confidence`,
+  none of which exist when `1.8` hasn't classified an asset. Documented directly in that function's
+  own comment so this isn't mistaken for an oversight later.
+
+**Guard 1 — the over-exclusion bias, checked across all 5 clients, not assumed to still hold.**
+Re-ran `assignImageRoles` against the same real, already-classified data from `1.9` (no new Claude
+calls needed — nothing about `1.8`'s classifications changed, only how this file reads them).
+Checked every asset that moved out of `unusable` for a watermark, a genuinely-tiny dimension outside
+the margin band, or a non-photographic subject: **none found.** Every asset that gained a showcase
+role is real, unwatermarked, genuinely photographic per `1.8`'s own classification, and within the
+disclosed margin band. The guard holds.
+
+**Guard 2 — reported exactly, including where the human's own prediction was wrong, not
+corrected to match it.** The task predicted Downseal and BC Security would gain assets, the other
+three unchanged. Real result:
+
+| Client | Changed? | What happened |
+|---|---|---|
+| Princeton Dental | No | Unchanged — matches prediction. |
+| **BC Security** | **No** | **Did not change — contradicts the prediction.** `site-image-10.png` (409px, `heroSuitable: true`, `professional`) is within the new margin band, but its real `confidence` is **`"medium"`**, not `"high"`. `hasStrongClassificationSupport` requires all three conditions; this asset clears two of three. Implemented the bar exactly as specified rather than loosening it to `confidence !== "low"` to match the prediction — see below for why that would have been the wrong fix. |
+| Downseal Solutions | **Yes** | Matches prediction. `site-image-4.webp` (1185×1777, `heroSuitable: true`, `professional`, `confidence: "high"` — clears all three conditions) moved `unusable` → `section-background`. |
+| Propell Property | No | Unchanged — matches prediction. |
+| **Allen Evans Family Lawyers** | **Yes** | **Not predicted — a real, unanticipated change, stopped and reported per instruction before this entry was written.** `site-image-2.jpg` (408px, `heroSuitable: true`, `professional`, `confidence: "high"`) moved `unusable` → `hero` directly (the client's only real-photo candidate, so admission alone made it the winner). |
+
+**The prediction error, recorded here as instructed, not just resolved in conversation.** The human's
+prediction assumed BC Security's borderline asset was high-confidence; it's `medium`. Checking that
+assumption against real data — rather than either bending the rule to match the prediction, or
+quietly noting the discrepancy without surfacing it — is exactly what this guard was for, and it
+caught a real error in the prediction, not a bug in the implementation. **Confirmed directly**: Allen
+Evans' `site-image-2.jpg` (408px) and BC Security's `site-image-10.png` (409px) are near-identical on
+every dimension-adjacent fact — both real people/office scenes, both `professional` shot quality,
+both `heroSuitable: true`, dimensions a single pixel apart — and differ on exactly one field:
+classification confidence. **This is a clean natural experiment, not a coincidence**: the rule
+discriminating between two near-identical cases purely on the one signal that actually differs is
+the rule working as designed, not a flaw to patch. Explicitly **not** loosening
+`hasStrongClassificationSupport` to `confidence !== "low"` to rescue BC Security's case too — that
+would weaken the bar for every future borderline asset to fix one named instance, precisely the
+reactive, one-case tuning this session has avoided throughout (see `1.6`, `1.7b`, `1.9`'s own
+instruction not to retune after finding these two cases in the first place).
+
+**BC Security's zero-showcase result — a disclosed limitation, not a defect, stated plainly as
+instructed.** This client has exactly one asset (`site-image-10.png`) that could plausibly earn a
+showcase role, and it sits at `medium` confidence on a borderline dimension. The system declining it
+is the correct, conservative behaviour this rule is designed to produce — not a gap in coverage to
+be engineered around. A client with genuinely thin real photography, where the one photo close to
+usable doesn't clear a stated confidence bar, is expected to show exactly this result. If this needs
+fixing, it needs better source photography or a deliberate, separately-decided policy change to the
+confidence bar — not a quiet exception for this one client.
+
+**Allen Evans' hero — correct under the rule, but thin, flagged explicitly as a Phase 3
+carry-forward, not treated as simply "fixed."** Nine of ten non-logo assets are `unusable`; the
+tenth, admitted only via the new margin band and a `high`-confidence classification, becomes the
+client's sole `hero`. This is the rule doing exactly what `1.9a` asked of it — but a capability
+summary of "1 hero-grade, 0 section-background, 0 gallery, 0 team, 0 feature-inline" describes a
+client with almost nothing to work with, resting on one borderline asset. **Carry-forward for
+whoever wires pattern eligibility in Phase 3: reading `heroGrade >= 1` alone as "this client can use
+a photo-led hero pattern" would be wrong for exactly this case.** A capability summary this thin (one
+hero-grade image and nothing else) should route to a typographic/content-led layout, not a
+photo-heavy one — stretching Allen Evans' single borderline photo across a large hero banner is
+precisely the embarrassing outcome the `unusable` boundary exists to prevent, and admitting an asset
+past a margin band doesn't retroactively make it strong enough to anchor an entire template's visual
+identity. Not fixed here — this is `1.9a`'s own output correctly surfacing a case Phase 3's pattern
+selection needs to handle deliberately, not something this file should paper over by refusing the
+asset a second time.
+
+**Files created/modified:**
+```
+$ git status --porcelain
+ M lib/content/assign-image-roles.ts
+```
+
+**Verification command:**
+```
+npx tsc --noEmit && npm run lint && npx vitest run
+(throwaway script, deleted after use: assignImageRoles + summarizeCapabilities/describeCapabilities
+across all 5 clients' real, unchanged Asset rows — no new Claude calls, same classification data as
+1.9 — full per-asset output compared against 1.9's own recorded results)
+```
+
+**Output:**
+```
+$ npx tsc --noEmit
+(exit 0)
+$ npm run lint
+(exit 0)
+$ npx vitest run
+ Test Files  9 passed (9)
+      Tests  89 passed | 1 todo (90)
+```
+Full per-client, per-asset role assignments (post-`1.9a`) are in this task's chat history, compared
+line-by-line against `1.9`'s own recorded output to identify every change, not spot-checked.
+
+**Failures, retries and dead ends:** none in the implementation. The real "failure" this task
+surfaced was in the human's own prediction, not in the code — reported as such, not smoothed into
+"as expected."
+
+**Shortcuts taken:** none.
+
+**Deviations from the task spec:** none in what was built. The *outcome* deviated from the task's
+own stated prediction for one client (BC Security, unchanged instead of gaining) and gained one
+client the prediction didn't name (Allen Evans) — both surfaced per the task's own "stop and report"
+instruction before this entry was written, not discovered after the fact.
+
+**Not run / not verified:**
+- Whether `DIMENSION_MARGIN_FRACTION = 0.2` is well-calibrated beyond the two real cases that
+  motivated it (Downseal admitted, Allen Evans incidentally also within it) — a policy choice,
+  disclosed as such, not validated against a larger sample the way `REAL_PHOTO_MIN_DIM_PX` itself
+  was.
+- Whether Phase 3's pattern-eligibility logic will actually read `describeCapabilities`'s output the
+  way the carry-forward above assumes it should — flagged as a requirement for that future task, not
+  built or tested here.
+
+**Confidence:** High — every claim in this entry is backed by a real re-run against real,
+already-classified data, and the one place a prediction (not an implementation) turned out wrong was
+checked directly (both assets' full field values compared) rather than asserted.
+
+**Next task:** `1.10` — closes Phase 1: ship `1.1` through `1.9` into the existing templates, full
+`vitest`/`tsc`/`lint` pass, five clients rendered and honestly described. Not started this session.
+---
+
+---
 
 # PART E — For the human reviewing this log
 
