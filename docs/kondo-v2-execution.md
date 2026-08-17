@@ -9014,6 +9014,173 @@ beyond these five clients and the existing test phrases.
 **Next task:** not specified — awaiting direction on `3.3a`.
 ---
 
+### 3.3a — `pickHue`'s lightness floor
+**Timestamp:** 2026-08-18
+**Git SHA at start:** 3328dd5
+**Status:** DONE-VERIFIED — `tsc --noEmit` clean, `lint` clean, full suite 15 files / 219 tests
+passing (214 → 219, exactly the 5 new tests). Both required guards re-run clean: the 191-palette
+contrast gate is still 191/191, and `1.5`'s golden test (including the existing, dedicated
+Princeton-near-black test) is still byte-identical. All five real clients re-run against live DB
+data: BC Security and Propell now derive real brand hues; Princeton and Downseal still correctly
+fall back, for two different, unaffected reasons.
+
+**What I did — one line changed in `lib/content/normalize-brand-colors.ts`'s `pickHue`:**
+`if (parsed.l < 26 || parsed.l > 82) continue;` → `if (parsed.l < 10 || parsed.l > 82) continue;`.
+Only the dark-side floor touched, exactly as scoped — the near-white side (`> 82`) wasn't part of
+this task and wasn't examined.
+
+**Why 10, and why this alone is the right fix (not a chroma-based rewrite):** `buildPalette` never
+actually uses the INPUT colour's own lightness for anything — `accentL` is always one of two fixed
+constants (32 or 41, set a few lines after `pickHue` returns), regardless of how dark or light the
+extracted colour was. The old 26 floor was filtering for "is this hue reliable," not "is this the
+right lightness to render at," so a dark-but-real hue was never actually unusable — it was only
+ever treated as if it were. This is exactly the "the derivation already controls lightness
+downstream" reasoning the task named; no separate lightening step was needed in `pickHue` itself
+because `buildPalette` already re-lightens to a controlled value unconditionally, for every
+accepted hue, dark or light. The real engineering question was only ever "what's the correct floor
+value," not "what new mechanism is needed."
+
+**10 was chosen by real margin against the two real cases it has to separate, not curve-fit to
+land precisely between them.** Princeton Dental's `#002000` computes to L≈6.3% — at that lightness
+a colour reads as black to the eye regardless of hue, independent of what the ratio-based
+saturation formula computes (which, worth noting: it reads 100% for `#002000` too, exactly like a
+genuinely vivid colour would — ratio-saturation alone cannot distinguish "near-black artifact" from
+"genuine dark colour," which is why a lightness floor is still needed at all, just a much lower
+one). Propell's `#0e1e39` computes to L≈14% — a colour genuinely perceptible and describable as
+navy. 10 sits with ~3.7 points of margin below Princeton and ~3.9 points of margin above Propell —
+comfortable on both sides, not a knife-edge number. Disclosed directly: unlike `MIST_S`/
+`SECONDARY_LIGHTNESS_DELTA`/`DESTRUCTIVE` elsewhere in this file, 10 is **not** derived from the
+191-palette corpus — that corpus is pre-designed "good" primaries, not raw noisy extractions, so it
+has no examples of this specific near-black-vs-dark-navy boundary to derive a number from. A
+disclosed design judgement, not a corpus-derived constant.
+
+**Found and fixed a stale, directly-misleading comment on the exact line being edited.** The old
+comment read `"A dark muddy tint (BC Security's #402020, L=19%) is a shadow..."` — `#402020` (a
+muddy reddish-brown, hue 0°) is **not** BC Security's real brand colour; the real one, confirmed
+throughout this session including this task's own fresh DB query, is `#024470` (a saturated navy,
+hue ≈204°). Given the top-of-file comment separately says BC Security's extracted colours were
+"black + two greys," this codebase's own comments have described at least three different BC
+Security colour sets across this session's history — plausibly three different extraction-pipeline
+states as the crawler improved over many earlier tasks, each comment accurate when written, now
+stale relative to the current real value. Corrected in place since it sat directly on the line
+being changed and citing a wrong example right next to a lightness-floor fix would have been
+actively confusing to the next reader. Not otherwise investigated or reconciled — out of scope for
+this task, named here rather than silently fixed elsewhere.
+
+**Guard 1 — the 191-palette contrast gate, re-run clean:**
+```
+$ npx tsx lib/design/build/validate-contrast.ts
+Checked 191 palettes, 12 pairs each (2292 total checks), AA minimum 4.5:1.
+SUMMARY: 191/191 palettes fully AA-passing across all 12 checked pairs.
+```
+Unsurprising once the actual mechanism is understood: the contrast gate depends only on
+`accentS`/`accentL`'s fixed constants and the AA-deepening loop, none of which this change
+touches — `pickHue`'s lightness floor only ever decides accept/reject, never feeds a value into
+the contrast-relevant derivation. Re-run anyway, per the task's own explicit guard, not assumed
+safe from that reasoning alone.
+
+**Guard 2 — `1.5`'s golden test, confirmed byte-identical, including the dedicated near-black
+test.** Checked directly, not assumed: none of the six `GOLDEN` fixtures' input hexes sit between
+10% and 26% lightness (blueTech 53%, greenClinic 30%, mixedWithNeutral's `#DC2626` 51%, yellowish
+47%, both neutral-only fixtures unaffected by any lightness change since they fail the separate
+`s < 25` gate) — so lowering the floor could not have flipped any existing golden's `derivedFrom`
+or `accent`. `normalize-brand-colors.test.ts`'s own pre-existing "Princeton Dental carry-forward"
+block (`#002000` must fall back) — which happens to be the exact carry-forward case this task
+names as "keep rejecting" — passes unchanged.
+```
+$ npx vitest run lib/content/normalize-brand-colors.test.ts
+ Test Files  1 passed (1)
+      Tests  18 passed (18)
+```
+
+**Five new tests added to `normalize-brand-colors.test.ts`**, following the file's own existing
+"named carry-forward, `derivedFrom`-only, not a full golden" pattern (not added to the frozen
+`GOLDEN` dict, which is reserved for byte-identical role comparisons):
+- BC Security's real navy now derives `"brand"`, `accent: hsl(204 58% 41%)`.
+- Propell Property's real navy now derives `"brand"`, `accent: hsl(218 58% 41%)`.
+- Princeton Dental's near-black still derives `"fallback"` (a second, more specific pin next to
+  the new tests, alongside the pre-existing dedicated test).
+- Downseal Solutions' low-saturation olive still derives `"fallback"` — via the unchanged `s < 25`
+  gate, stated explicitly so a future reader knows this isn't accidentally passing for the wrong
+  reason.
+- A boundary test pinning the exact threshold value (10), not left as an untested magic number —
+  three synthetic, fully-saturated reds differing only in lightness (`#330000` at L=10% exactly,
+  `#2b0000` at L≈8.4%, `#3d0000` at L≈12%), empirically run against the real `hexToHsl`
+  implementation first (not hand-derived HSL math that could round differently), then pinned:
+  `derivedFrom` is `"brand"` at L=10 and L≈12, `"fallback"` at L≈8.4 — confirming the `<` in the
+  source is strict (10 itself is accepted).
+
+**All five real clients, re-run fresh via a throwaway script (`scripts/_tmp-3.3a-verify.ts`,
+deleted after use) — real hue and source, straight from live `ContentRecord.brandColors`, filtered
+`confidence !== "low"` exactly as `to-template-content.ts` does:**
+
+| Client | real brand hex | derivedFrom | accent |
+|---|---|---|---|
+| Princeton Dental | #002000 | fallback | hsl(222 58% 41%) |
+| BC Security | #024470 | **brand** (was fallback) | hsl(204 58% 41%) |
+| Propell Property | #0e1e39 | **brand** (was fallback) | hsl(218 58% 41%) |
+| Allen Evans Family Lawyers | #54c9ea | brand (unchanged) | hsl(193 58% 35%) |
+| Downseal Solutions | #606040 | fallback (unchanged) | hsl(222 58% 41%) |
+
+Four of five clients now derive a real brand hue, up from one of five before this task. Only
+Princeton Dental's genuine near-black remains on the generic fallback — its own, separate,
+unaddressed failure mode (not part of this task's scope; `pickHue`'s upper `l > 82` bound and any
+possibility of recovering SOME signal from a near-black-but-not-fully-neutral colour were both
+out of scope here).
+
+**Files created/modified:**
+```
+$ git status --porcelain
+ M lib/content/normalize-brand-colors.test.ts
+ M lib/content/normalize-brand-colors.ts
+```
+
+**Verification commands and output:**
+```
+$ npx tsc --noEmit && npm run lint && npx vitest run
+ Test Files  15 passed (15)
+      Tests  219 passed | 1 todo (220)
+
+$ npx tsx lib/design/build/validate-contrast.ts
+SUMMARY: 191/191 palettes fully AA-passing across all 12 checked pairs.
+
+$ npx vitest run lib/content/normalize-brand-colors.test.ts
+ Test Files  1 passed (1)
+      Tests  18 passed (18)
+
+(throwaway script, deleted after use: scripts/_tmp-3.3a-verify.ts — real 5-client run per the
+table above)
+```
+
+**Failures, retries and dead ends:** none — the single-line floor change worked on the first
+implementation; both guards passed on the first re-run, no iteration needed. (An earlier line of
+reasoning, considered but not implemented, is worth naming: an absolute-chroma-based gate instead
+of a lightness-based one, which would separate Princeton/Downseal from BC Security/Propell using a
+different axis entirely — rejected in favour of the simpler, more surgical floor-value change,
+since the existing `s < 25` gate already correctly handles Downseal on its own, unchanged, making a
+second new mechanism unnecessary to solve the problem actually in front of this task.)
+
+**Shortcuts taken:** none.
+
+**Deviations from the task spec:** none. Only the dark-side floor changed; both guards re-run and
+confirmed clean, not assumed; both preserved rejections (Princeton, Downseal) verified for their
+correct, distinct, unaffected reasons rather than merely re-checking the top-line `derivedFrom`
+value.
+
+**Not run / not verified:** whether 10 is the right floor for real client colours beyond this
+session's five known clients — no broader sweep exists to test against. The near-white (`l > 82`)
+side of `pickHue`'s floor was not examined, per the task's own scope.
+
+**Confidence:** High — both guards are exact re-runs of existing, established verification
+scripts/tests, not new ones invented for this task, and both came back clean on the first attempt.
+High on the "why 10, not some other number" reasoning, since it's grounded in the two real cases
+this task named plus a directly-tested boundary. Medium on 10 generalizing beyond these five
+clients — it's a disclosed design judgement, not a corpus-derived constant, and this task's own
+evidence base is five real data points.
+
+**Next task:** not specified — awaiting direction.
+---
+
 ---
 
 # PART E — For the human reviewing this log
