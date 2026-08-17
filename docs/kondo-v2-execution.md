@@ -5017,6 +5017,115 @@ now, deferred to a numbered task, or left as a known, documented gap. Not starte
 ---
 
 ---
+### 1.6a — `onSecondary`, dropping the inferred pair, prediction check
+**Timestamp:** 2026-08-17
+**Git SHA at start:** 770ec5c
+**Status:** DONE-VERIFIED — prediction confirmed exactly.
+
+**What I did, the three items as specified:**
+1. Added `onSecondary` to `Palette`/`buildPalette` (`lib/content/normalize-brand-colors.ts`) via
+   `pickOnColor(secondary)` — same pattern as `onDestructive`.
+2. `lib/design/build/validate-contrast.ts`: replaced the `accentInk`/`secondary` pair with
+   `onSecondary`/`secondary`; the inferred pairing is gone entirely, not kept as a documented
+   "should fail" case.
+3. Re-ran the gate.
+
+**A real bug surfaced immediately, not anticipated by the task, fixed as necessary plumbing to
+make item 1 actually work — not scope creep.** `pickOnColor(secondary)` threw: `Invalid hex colour:
+hsl(221 58% 41%)`. `1.5`'s `onDestructive = pickOnColor(DESTRUCTIVE)` never hit this because
+`DESTRUCTIVE` is a hex literal (`"#dc2626"`) — `secondary`, like every hue-derived role, is an
+`hsl(H S% L%)` string, and `pickOnColor`/`contrastRatio` (Task 1.3) only ever accepted `#RRGGBB`,
+by design, not something to widen now. Added `hslStringToHex()` to `normalize-brand-colors.ts` —
+parses the *already-rounded* `hsl()` string (not raw pre-rounding floats), so `onSecondary` is
+picked against the exact colour `secondary` actually renders as, not a hypothetical
+higher-precision variant nothing ships. Same RGB-branch structure as the file's own existing
+`luminance()` function, not a fourth independent implementation of HSL→RGB in this codebase.
+
+**Golden test extended, not just re-checked.** Added `onSecondary` to the "five new roles present"
+assertions (renamed from "four" to "five"), and a dedicated test asserting `onSecondary` equals
+`pickOnColor(hslStringToHex(secondary))` specifically — not just "is a string" — with a comment
+explaining why: a copy-paste bug (`onSecondary` accidentally set to `accentInk`) would pass a weaker
+"is this a valid colour" check, since `accentInk` is *also* a real, validly-typed colour; only
+comparing directly against `pickOnColor` of `secondary` itself would catch that specific mistake.
+The test file's own hex-conversion helper is a **second, independent implementation** of
+`hslStringToHex` — deliberately not imported from the source file, so a bug in that helper couldn't
+hide from its own test by both sides using the same buggy conversion.
+
+**The original 10 roles remain byte-identical — the golden test's own core claim, still true:**
+```
+$ npx vitest run lib/content/normalize-brand-colors.test.ts
+ Test Files  1 passed (1)
+      Tests  18 passed (18)
+```
+
+**Prediction check — exact, not just the count:** the task predicted "exactly 41 failures... all
+`accent on mist`, on the palettes that currently fail that pair." Re-ran the gate:
+```
+Checked 191 palettes, 12 pairs each (2292 total checks), AA minimum 4.5:1.
+
+FAILURES (41 pair-failures across 41 of 191 palettes):
+  palette #3 (primary #059669): accent on mist — ratio 4.29:1 (needs 4.5:1)
+  palette #8 (primary #0891B2): accent on mist — ratio 4.32:1 (needs 4.5:1)
+  [... 39 more lines, every one "accent on mist" — full list in this entry's chat reply]
+
+SUMMARY: 150/191 palettes fully AA-passing across all 12 checked pairs.
+```
+**Confirmed exact, not approximate — diffed the sorted palette-ID set against `1.6`'s own recorded
+41 `accent`-on-`mist` failures and it is byte-identical, not just the same count by coincidence.**
+This is real, positive evidence that Cause 2 (`accentInk`-on-`secondary`) was a complete, correct
+diagnosis with no second hidden factor — fixing exactly that one thing removed exactly and only
+those 62 failures, leaving Cause 1 completely untouched, exactly as predicted. Nothing else is in
+play.
+
+**Files created/modified:**
+```
+$ git status --porcelain
+ M lib/content/normalize-brand-colors.test.ts
+ M lib/content/normalize-brand-colors.ts
+ M lib/design/build/validate-contrast.ts
+```
+
+**Verification command:**
+```
+npx tsc --noEmit && npm run lint && npx vitest run
+npx tsx lib/design/build/validate-contrast.ts
+```
+
+**Output:**
+```
+$ npx tsc --noEmit
+(exit 0)
+$ npm run lint
+(exit 0)
+$ npx vitest run
+ Test Files  9 passed (9)
+      Tests  89 passed | 1 todo (90)
+```
+Gate output pasted in full above and in the accompanying chat reply.
+
+**Failures, retries and dead ends:** the `pickOnColor(secondary)` type-format bug above — found
+immediately on first run, fixed with `hslStringToHex`, not worked around by loosening
+`contrast.ts`'s own hex-only contract (which would have been a bigger, undiscussed change to
+already-shipped Task 1.3 code).
+
+**Shortcuts taken:** none.
+
+**Deviations from the task spec:** the `hslStringToHex` addition wasn't explicitly named in the
+task's three items, but implementing item 1 literally (`pickOnColor(secondary)`) doesn't type/run
+without it — necessary plumbing to do what was asked, not an extra feature.
+
+**Not run / not verified:** `accent on mist` (Cause 1) — untouched, exactly as instructed
+("`accent on mist` is `1.6b`"). Not investigated further in this entry.
+
+**Confidence:** High — the prediction wasn't just met in count, it was verified exact (diffed
+palette-ID sets, not eyeballed), which is strong evidence the fix's diagnosis was complete and
+correct, not partially right.
+
+**Next task:** `1.6b` — `accent on mist` — awaiting the human's direction, per instruction. Not
+started this session.
+---
+
+---
 
 # PART E — For the human reviewing this log
 
