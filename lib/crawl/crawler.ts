@@ -55,7 +55,17 @@ function rgbToHsl(r: number, g: number, b: number): { h: number; s: number; l: n
 function isNearNeutralOrTransparent(rgb: { r: number; g: number; b: number; a: number }): boolean {
   if (rgb.a < 0.5) return true;
   const { s, l } = rgbToHsl(rgb.r, rgb.g, rgb.b);
-  return l >= 97 || l <= 3 || s < 15;
+  // l >= 90, not 97 — refined during Task 1.2, found live against Downseal Solutions'
+  // linkColor: its theme's near-white page background, rgb(246, 243, 238), is l~=95%/
+  // s~=31%, so it survived a 97%-lightness / 15%-saturation cutoff and won that field at a
+  // count in the thousands with "high" confidence — the page background bleeding through a
+  // link's inherited colour, not an intentional brand choice. HSL saturation is a noisy
+  // signal this close to the lightness extremes: a faint warm/cool cast on an almost-white
+  // pixel reads as "30% saturated" numerically without being a real, legible colour, and
+  // text actually coloured this close to white would have near-zero contrast against a
+  // light background anyway. See lib/content/rank-brand-color-sources.ts for the sibling
+  // fix and docs/kondo-v2-execution.md's 1.2 entry for the full finding.
+  return l >= 90 || l <= 3 || s < 15;
 }
 
 function parseComputedColor(value: string): { r: number; g: number; b: number; a: number } | null {
