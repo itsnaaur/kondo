@@ -6566,6 +6566,262 @@ checked directly (both assets' full field values compared) rather than asserted.
 ---
 
 ---
+### 1.10 — Ship Phase 1 into the existing templates
+**Timestamp:** 2026-08-17
+**Git SHA at start:** c7c7dbc
+**Status:** DONE-VERIFIED, with two real architecture findings surfaced rather than adapted around
+(see below) — full `vitest`/`tsc`/`lint` pass, all 5 named clients re-analysed for real (real crawl,
+real Claude calls) and rendered through all 3 templates, output inspected directly (grepped HTML,
+screenshotted two in a browser), not assumed.
+
+**Constraint 1 — not a redesign.** No template's body-building logic (`index.ts`) changed. The only
+template edits are in each `styles.ts`: 5 new CSS custom properties added to `:root`, `--ring` swapped
+in for `--accent` on two pre-existing `:focus-visible` rules (see Constraint 4 below — this is
+visually a no-op today), and the credentials pill's `background`/`color` swapped from
+`var(--paper)`/`var(--ink-muted)` to `var(--secondary)`/`var(--on-secondary)` in all three. That pill
+swap **is** a real, visible change — screenshotted on Princeton Dental (see below) — disclosed, not
+hidden inside "just plumbing."
+
+**Constraint 2 — alongside, not replace, stated plainly.** `structureAndRewriteContent`'s embedded
+classification is untouched and still the sole source of `caption`/`subject`/`subjectConfidence` on
+every `ContentImage` — `1.8` has no caption generator to substitute, and the Review Extraction screen
+already depends on those fields. `1.8`/`1.9`/`1.9a` now run for real in `run-analysis.ts`, alongside
+it, and take over exactly two things: which single image is authoritative as **hero**, and which
+images are excluded from the images array entirely as **unusable**. Consequence, disclosed rather than
+hidden: every gallery/hero candidate is now vision-classified **twice** by two separate real Claude
+calls (confirmed in the real run's logs — both `[classify-images]` and `[structure-and-rewrite]` lines
+appear per client), and resized twice for the vision payload (classify-images.ts does its own resize
+internally rather than reusing `imageCandidatesForAi`'s already-resized buffers). A real, known
+inefficiency this task's scope doesn't cover fixing — the natural fix (teach
+`structureAndRewriteContent` to consume `1.8`'s cached classification instead of running its own) is a
+Phase 2/3-sized change, not plumbing.
+
+**Constraint 3 — `pickHue`'s confidence carry-forward: consumed, not left unconsumed, but at the call
+site, not inside `pickHue` itself.** `run-analysis.ts` now calls `rankBrandColorSources` (computed
+styles → logo-by-saturation → imagery, in that order) instead of the old single-buffer
+`extractDominantColors`, and gates on its `confidence` field before persisting: a `"low"`-confidence
+result still gets written to `ContentRecord.brandColors` (one entry, `flagged: confidence === "low"`)
+so the review screen can show what was detected and why it wasn't trusted, but
+`to-template-content.ts`'s `brandColors` mapping now filters `confidence !== "low"` before handing the
+array to `buildPalette`. `pickHue` itself (`normalize-brand-colors.ts`) is untouched — deliberately,
+per this task's own earlier reasoning: widening its signature to accept confidence directly is a
+larger, `1.5`-file-touching change than "plumbing" calls for, and gating at the one assembly point
+achieves the same practical effect. **Real, live consequence found in the 5-client run, not
+hypothetical:** BC Security's `#024470` and Propell Property's `#0e1e39` are both real,
+**high**-confidence winners from `rankBrandColorSources` (source: computed styles, sitewide, clean
+margins) that clear my confidence gate — and are then **independently rejected by `pickHue`'s own
+pre-existing lightness floor** (`l < 26`; both colours sit at L≈22% and L≈14%). Both clients still
+render with the generic fallback slate-indigo palette, exactly as before this task, despite the color
+pipeline now finding a real, well-evidenced, high-confidence brand colour for them. This is not a bug
+in what I built — `pickHue`'s lightness band is `1.3`/`1.5` territory, out of this task's scope to
+touch — but it means the carry-forward's stated goal ("wire confidence into the palette decision") is
+only partially realised for these two real clients: confidence gates whether a colour is *offered*,
+not whether it's *dark enough to survive* once offered. Flagged as a real Phase 3 (or earlier)
+carry-forward: either widen `pickHue`'s lightness band for a colour that arrives with real evidence
+behind it, or accept that "high confidence, too dark" is a distinct, disclosed failure mode from "low
+confidence."
+
+**Constraint 4 — no migration.** Every value this task persists already has a column:
+`brandColors`/`images` are the same `Json?` columns as before (this task changes what's computed and
+filtered, not the schema), and `Asset.metrics`/`Asset.classification` already exist from `1.7a`/`1.8`.
+The capability summary (`summarizeCapabilities`/`describeCapabilities`) is computed and logged
+(`console.log`, visible in the real run's output below) but **not persisted** — no column for it was
+added, and none was needed for this task's own done-when. Not asked about, because the answer is "no,"
+reasoned through rather than assumed from precedent.
+
+**A real architecture finding, surfaced rather than adapted around, per this task's own instruction.**
+`ContentImage.role` (`lib/content/types.ts`) only supports `"logo" | "hero" | "gallery" |
+"partner-logo"` — four values. `assign-image-roles.ts`'s `ImageRole` has seven:
+`"section-background"`, `"team"`, and `"feature-inline"` have **no rendering surface in any of the
+three templates at all**. Confirmed by reading, not assumed: `content-guards.ts`'s own
+`teamFromCaptions` detects "team" photos by parsing a comma out of the AI-generated caption
+("Michael Pell, Managing Director"), never by consulting `1.8`'s `isHeadshot` field or `1.9`'s `team`
+role. None of the three templates read a "feature-inline" or "section-background" concept at all —
+Showcase's own `feature`/`about` slots are filled by `allocateImages`'s orientation-based allocator,
+blind to `1.9`'s role output entirely. **Decision, disclosed rather than hidden:** these three roles
+collapse to `"gallery"` at the one place `ContentImage.role` gets written in `run-analysis.ts`, and
+`"unusable"` is excluded from the array entirely (see below) — a lossy but honest mapping, not a
+redesign of three templates' rendering logic to give these roles real meaning (which constraint 1
+forbids). Left as a named, explicit Phase 3 carry-forward: when the templates are rebuilt, `1.9`'s
+richer taxonomy has real information a 4-role `ContentImage.role` currently throws away.
+
+**A second real architecture finding, found live in the 5-client run, not predicted.** There are
+**three independent, never-reconciled hero-selection mechanisms** in this codebase: (1)
+`selectHeroAssetId` (crawl-time, geometry-only, sets `ContentImage.role`), (2)
+`to-template-content.ts`'s tier1/tier2 chain (consumes `role`, applies its **own** `aspect >= 1.25`
+gate, produces `heroImageUrl` — read directly by Ledger and Showcase), (3) `content-guards.ts`'s
+`pickHero()` (consumes `suitableAsHero`, applies the **same** `aspect >= 1.25` gate independently, used
+only by Atlas, and even there only to seed a pooled "aside" image, not a literal hero band — Atlas has
+no hero photo at all, by original design). This task wires `1.9`/`1.9a`'s hero pick into both (1) via
+`ContentImage.role` and (2)/(3) via `suitableAsHero`, on the reasoning that consuming a purely
+geometric heuristic (as the pre-1.10 `selectHeroAssetId` alone) is strictly worse than 1.9a's
+classification-informed pick — but `assignImageRoles` itself has **no aspect-ratio check anywhere**,
+while tier1/`pickHero` both hard-require `aspect >= 1.25`. **Live consequence, not hypothetical:**
+Downseal Solutions' `1.9a` hero winner is a 1185×1777 **portrait** photo (`heroSuitable: true`,
+`professional`, `confidence: "high"` — a clean win under `1.9a`'s own rules). Grepped the real rendered
+HTML directly: neither Ledger, Showcase, nor Atlas ever shows this image. Ledger/Showcase's tier1
+rejects it (aspect ≈0.67, tagged `role: "hero"` so tier2 — which only promotes `role: "gallery"`
+images — can't rescue it either); `heroImageUrl` falls through to a **different** 2500×1667 landscape
+gallery photo, promoted via tier2. Atlas's `pickHero()` independently lands on the **same** landscape
+photo, but via its own unrelated "widest wide-enough scene" fallback tier, not because of anything
+`1.9a` decided (`suitableAsHero` is `true` only on the rejected portrait, `false` everywhere else — the
+portrait fails Atlas's own `wideEnough` gate too, so Atlas's flagged-tier never fires either). All
+three templates happen to converge on the same visible photo, but not for any reason `1.9a`'s hero
+logic actually controls — a coincidence of this client's specific asset set, not something the wiring
+guarantees. **Not fixed here** — reconciling three independently-tuned aspect gates (one of which,
+`to-template-content.ts`'s, exists specifically to guard against a different legacy failure mode:
+`selectHeroAssetId` wrongly tagging a blown-up wordmark) is real design work, not plumbing. Left as a
+named Phase 3 carry-forward: either teach `assignImageRoles` to weigh aspect ratio when there's more
+than one hero-eligible candidate, or accept that a portrait hero-eligible photo currently can never
+become the rendered hero on any of the three templates.
+
+**A third, smaller finding — the pre-existing hero pick is structurally exempt from `1.9a`'s
+`unusable` gate.** `roleInputs` in `run-analysis.ts` only includes assets still tagged `role:
+"gallery"` at that point in the pipeline — the one asset `selectHeroAssetId` already promoted to
+`role: "hero"` earlier never enters `assignImageRoles` at all, so it can never be marked `unusable`,
+even if `1.9a`'s rules would have rejected it. Confirmed live: BC Security's capability summary reads
+"0 hero-grade ... 8 unusable" (every real gallery candidate `1.9a` evaluated was rejected), yet the
+rendered page still shows a real product-shot hero — the old `selectHeroAssetId` pick, never evaluated
+by the new rules, surviving by construction rather than by passing them. Not a bug (the fallback
+chain — "use `1.9a`'s pick if it found one, else fall back to the old heuristic, unchanged" — is
+exactly what was designed and stated above) but worth naming precisely: "0 hero-grade" in a capability
+summary does not mean a client is guaranteed to render with no hero photo.
+
+**Princeton's `#002000`, rendered for the first time, as asked.** It never reaches `buildPalette` at
+all. `rankBrandColorSources` returns it from the **logo** source (saturation-ranked, not
+frequency-ranked, per `1.2`) at `confidence: "low"` (a weak saturation margin against the runner-up) —
+the confidence gate (Constraint 3) strips it before persistence reaches the templates. Separately,
+even had it passed that gate, `pickHue`'s own `l < 26` floor would have rejected it anyway (`#002000`
+is L≈6%). Princeton renders with the same designed fallback slate-indigo (`hsl(222 58% 41%)`) it would
+have rendered with regardless — screenshotted directly (see below): a clean, unbroken page, "Book Now"
+and the italic tagline both in the fallback blue, no trace of `#002000` anywhere. Confirms the carry-
+forward's worry was real (a near-black logo artefact reaching a template would have been bad) and that
+this task's confidence gate closes it, doubly backed by `pickHue`'s own independent floor.
+
+**Allen Evans' hero — did not surface, and the real reason is a different, pre-existing module, found
+by tracing it rather than assumed.** The capability summary read "0 hero-grade ... 2 unusable, logo
+present" — the opposite of the "will surface for the first time" expectation. Traced directly (queried
+every `Asset` row ever created for this client, 10 total, all from an earlier crawl in this session):
+the one real photo, `site-image-2.jpg` (612×408, `subject: "people"`, `heroSuitable: true`,
+`confidence: "high"` — the exact asset `1.9a`'s earlier testing found), is **still there**, but this
+run's persisted `images` array shows it as `role: "partner-logo"`, not `"gallery"` — meaning
+`classify-partner-logos.ts` (deterministic, pre-existing, untouched by any task in this phase) pulled
+it out of the pipeline **before** `1.8`/`1.9`/`1.9a` ever saw it. Read that file directly to confirm
+the mechanism: its `SURROUNDING_TEXT_PATTERN` (`/accepted|health fund|insurance|partner|accredit|
+member of|we work with|certified/i`) matches the word "member" — and Allen Evans' credentials list
+(rendered further down the page) is full of "... member" phrases ("Law Society ... member",
+"Collaborative Professionals (NSW) member"), the kind of text that plausibly sits near a real team
+photo on a professional-services About page. This is a genuine false positive in an existing,
+untouched module — not something `1.10`'s wiring introduced, and not something in this task's scope to
+fix (`classify-partner-logos.ts` wasn't part of Phase 1's build plan) — but it is the real, traced
+answer to "what does it actually look like": Allen Evans renders with **no hero photo at all**, on all
+three templates, via each one's designed no-photo fallback path. Screenshotted directly (see below):
+the dark-band fallback with the real brand hue (`#54c9ea`, a genuine `derivedFrom: "brand"` result —
+the one client where the new colour pipeline's improvement is fully visible end-to-end) — a clean,
+unbroken page, just without a photo.
+
+**Five-client honest render summary** (screenshotted Princeton Dental and BC Security's Ledger render
+directly in a browser; Allen Evans, Downseal and Propell verified by grepping the actual rendered HTML
+for the specific asset URLs/CSS values named above, not assumed from the capability summary alone):
+
+| Client | Palette | Hero | Notable |
+|---|---|---|---|
+| Princeton Dental | Fallback (`#002000` correctly suppressed, doubly) | Extracted, 1572×928, passes tier1 cleanly | Clean render, screenshotted; credentials now solid blue pills |
+| BC Security | Fallback (`#024470` high-confidence but too dark for `pickHue`) | Old `selectHeroAssetId` pick survives despite 8/8 gallery candidates unusable (finding 3) | Gallery grid genuinely empty; degrades to a facts panel, no visual breakage |
+| Propell Property | Fallback (`#0e1e39`, same too-dark case as BC Security) | `1.9a` winner, 1920×960, passes tier1 cleanly | Normal case — no architecture mismatch here |
+| Allen Evans Family Lawyers | **Brand** (`#54c9ea`, real end-to-end win) | None — real photo misclassified as partner-logo upstream (finding above) | No-photo fallback renders cleanly, screenshotted |
+| Downseal Solutions | Fallback (no brand colour source produced anything usable) | `1.9a`'s actual winner (portrait) never renders on any template (finding 2); all 3 converge on a different photo by coincidence | Nothing broken, but the specific image `1.9a` chose is invisible everywhere |
+
+**Nothing looked worse than before** in the sense of a broken layout, missing section, or crash — every
+client's page is clean and coherent in all three templates. What changed in ways worth naming plainly:
+credential pills are now solid-filled instead of outlined/white (a real, deliberate, visible style
+change, not a defect); Showcase's credential pills specifically went from **no background at all**
+(transparent) to a filled pill — the largest single visual delta of the five CSS changes, since the
+other two templates already had an opaque white pill before this task.
+
+**Files created/modified:**
+```
+$ git status --porcelain
+ M lib/content/run-analysis.ts
+ M lib/content/to-template-content.ts
+ M lib/templates/atlas/styles.ts
+ M lib/templates/ledger/styles.ts
+ M lib/templates/showcase/styles.ts
+```
+
+**Verification command:**
+```
+npx vitest run && npx tsc --noEmit && npm run lint
+(throwaway script, deleted after use: ran the real production runAnalysisInBackground for all 5 named
+clients — real crawl, real classify-images + structure-and-rewrite Claude calls — then rendered all 3
+templates from the resulting ContentRecord via toTemplateContent + the same render functions the app
+uses, wrote each to a standalone HTML file, and inspected the output directly: grepped for hero image
+URLs/CSS values, queried the Asset table for Allen Evans' full history, and opened two renders in a
+browser for a real screenshot)
+```
+
+**Output:**
+```
+$ npx vitest run
+ Test Files  9 passed (9)
+      Tests  89 passed | 1 todo (90)
+$ npx tsc --noEmit
+(exit 0)
+$ npm run lint
+(exit 0)
+```
+Real run's console output (per-client capability summaries, brand colour results):
+```
+Princeton Dental: 0 hero-grade, 2 section-background-grade, 2 gallery-grade, 0 team, 0 feature-inline, 1 unusable, logo present
+  brandColors persisted: [{"hex":"#002000","confidence":"low","flagged":true}] -> filtered to [] -> palette fallback
+BC Security: 0 hero-grade, 0 section-background-grade, 0 gallery-grade, 0 team, 0 feature-inline, 8 unusable, logo present
+  brandColors persisted: [{"hex":"#024470","confidence":"high","flagged":false}] -> passed through -> palette STILL fallback (pickHue's own l<26 floor)
+Propell Property: 1 hero-grade, 4 section-background-grade, 1 gallery-grade, 0 team, 0 feature-inline, 2 unusable, logo present
+  brandColors persisted: [{"hex":"#0e1e39","confidence":"high","flagged":false}] -> passed through -> palette STILL fallback (same l<26 case)
+Allen Evans Family Lawyers: 0 hero-grade, 0 section-background-grade, 0 gallery-grade, 0 team, 0 feature-inline, 2 unusable, logo present
+  brandColors persisted: [{"hex":"#54c9ea","confidence":"high","flagged":false}] -> passed through -> palette derivedFrom=brand (real win)
+Downseal Solutions: 1 hero-grade, 3 section-background-grade, 0 gallery-grade, 0 team, 0 feature-inline, 0 unusable, logo present
+  brandColors persisted: [{"hex":"#606040","confidence":"low","flagged":true}] -> filtered to [] -> palette fallback
+```
+
+**Failures, retries and dead ends:** the initial `contentImagesWithCaptions` role-reassignment ternary
+failed `tsc` on first pass (`role: string` not narrowing back to `ContentImage["role"]`) — fixed with
+an explicit type assertion at that one expression, not by loosening the field's type. No dead ends in
+the real 5-client run itself; every client completed its real analysis and rendered.
+
+**Shortcuts taken:** the capability summary is `console.log`'d, not surfaced anywhere in the app UI —
+correct per Constraint 4's "no migration" conclusion, but worth naming as a shortcut: nothing today
+reads it except this task's own verification run and whoever tails worker logs.
+
+**Deviations from the task spec:** none from what was asked. Two real, load-bearing findings (the
+three-hero-system mismatch, and `classify-partner-logos.ts`'s false-positive on Allen Evans) were
+surfaced rather than engineered around, exactly as the task's own closing note asked for.
+
+**Not run / not verified:**
+- Whether `pickHue`'s lightness band should widen for high-confidence-but-dark brand colours (BC
+  Security, Propell) — flagged, not decided or built.
+- Whether `classify-partner-logos.ts`'s `SURROUNDING_TEXT_PATTERN` should be narrowed (e.g. requiring
+  the match to be closer to the image, or excluding plain "member" without an accompanying org name) —
+  flagged, not touched; out of this task's scope and not part of any task in this phase's build plan.
+- Ledger and Showcase were verified by grepping real rendered HTML for every client; only Princeton
+  Dental and BC Security's Ledger render were actually opened and screenshotted in a browser. The
+  other 13 of 15 rendered files (5 clients × 3 templates, minus the 2 screenshotted) were inspected as
+  HTML text, not visually — a real gap between "grepped and confirmed the right data is present" and
+  "looked at it," disclosed rather than papered over with "rendered fine" language.
+- Whether the credential-pill colour change reads as an improvement or a regression is a design
+  judgement, not verified against any bar — reported as a real, visible change with a screenshot, left
+  for the human reviewing this entry to judge.
+
+**Confidence:** High on everything stated as directly observed (grepped HTML, screenshots, real
+console output, a real Asset-table query). Medium on the two architecture findings' completeness — the
+three-hero-system reconciliation and the partner-logo false positive are both real and traced to their
+actual mechanism, but neither was tested beyond the specific client that surfaced it, so "this is the
+only place this happens" is not a claim being made.
+
+**Next task:** Phase 1 sign-off — reserved for the human, not written here, per instruction.
+---
+
+---
 
 # PART E — For the human reviewing this log
 
