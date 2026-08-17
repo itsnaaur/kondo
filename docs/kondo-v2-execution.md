@@ -295,6 +295,29 @@ Ships into the **existing templates**. Nothing is deleted in this phase.
 
 **Nothing is deleted until 3.1–3.7 are `DONE-VERIFIED` and the human has signed off.**
 
+**3.0 — Nonce-based CSP** — *Added out of sequence under an explicit, one-time human exception to
+Part A5's "this section stays as written" rule. Supersedes `0.2`, which turned out not to be
+achievable as a static config change — see the `0.2-RECLASSIFY` log entry for why.*
+- Scope: `next.config.ts` (move the CSP header out of the static `headers()` config),
+  `proxy.ts`/middleware (generate the per-request nonce and set the header there instead), any
+  layout/component that needs the nonce threaded to it.
+- Goal: a per-request nonce generated in middleware, threaded to Next's own script tags, with the
+  CSP header computed per response rather than as a static string — Next's documented mechanism for
+  allowing its own inline hydration scripts (`self.__next_f.push(...)`) without `'unsafe-inline'`.
+- Done when: production `script-src` carries a nonce and **no** `'unsafe-inline'`, and an
+  **authenticated dashboard page** — not `/login`, not a public `/p/[slug]` page, both of which are
+  insufficient tests (see `0.2`'s entry for why) — hydrates with zero CSP violations in the browser
+  console. This closes the untested-authenticated-page gap carried forward from `0.2`.
+- **Hard dependency, stated explicitly: Task `3.4` must not ship while `'unsafe-inline'` is still in
+  production CSP.** Before `3.4`, the only model-authored markup reaching the public `/p/[slug]`
+  route is the experimental per-section editor, and it sits behind an authenticated action. After
+  `3.4`, the entire page at `/p/[slug]` is model-authored and served to an anonymous public visitor
+  — at that point `'unsafe-inline'` is a live exposure on genuinely untrusted generated content, not
+  a theoretical one.
+- Verify: `npm run build && npm start`, then load an authenticated dashboard page and `curl -I` it —
+  paste the full header, confirm a nonce value is present and `'unsafe-inline'` is absent — and paste
+  the browser console showing zero CSP violations on that page.
+
 **3.1 — Lift and extend `suitability.ts`**
 - Scope: move out of `lib/templates/`, extend with `minTestimonials`, `needsPricing`,
   `needsTeamPhotos`, `needsCredentials`
@@ -820,6 +843,1981 @@ re-read fresh rather than from memory, and it unambiguously supports the human's
 
 **Next task:** unchanged from RECON-01 — per Part C, Task 0.1 or 0.2 (both `NOT STARTED`); 0.3 and 0.4
 remain human tasks. Not started this session.
+---
+
+---
+### 0.4 — The July architecture question
+**Timestamp:** 2026-08-17
+**Git SHA at start:** 21709f5
+**Status:** DONE-VERIFIED
+
+**What I did:**
+This is a human task per Part C ("*HUMAN TASK.* Why was the design-spec/generation pipeline removed
+on 31 July?"), reassigned to git archaeology because the human's memory doesn't hold a specific
+reason. Read-only throughout — no code touched, no `.gitattributes` added.
+
+1. Found the rebuild commit by locating which commit introduced the migration named in the task:
+   `git log --oneline --all -- prisma/migrations/20260731120000_rebuild_content_pipeline` →
+   `5f35c60 Rebuild Kondo as a sales-asset generator, replacing the AI website engine`.
+2. Pulled full commit messages (not just subjects) for the 4 commits before and 4 after, via
+   `git log --reverse --format="...%B..." "6019208~1..73d8903"`.
+3. Located the five files the `anthropic-retry.ts` stale comment names, via `git log --all --oneline
+   --follow -- "*<filename>"` for each. Four exist in history; one does not (below).
+4. Read all four real files in full at their last living commit (`5f35c60~1`, the parent of the
+   rebuild) via `git show 5f35c60~1:<path>`.
+5. Ran `git show --diff-filter=D --name-only` across every commit in the range to get the complete
+   deletion list and confirm which commit(s) actually did the deleting.
+6. Grepped the four files for cost/latency/budget language to check for an explicit stated cost
+   concern (found none — see below).
+
+**Answers to the four specific questions:**
+
+**1. `max_tokens` on the old page-generation call, and did it produce HTML+CSS in one response?**
+The file that actually generates markup is `lib/generation/generate.ts` (Call 2 — "executes the
+approved spec," per its own comment). At its last living commit:
+```
+max_tokens: 64000
+output_config: { effort: "medium" }
+```
+— **64,000, not 16,000.** This is the highest ceiling of any of the four deleted calls (the other
+three, which produce structured JSON only — brief interpretation, visual read, design spec — all
+use `max_tokens: 16000`).
+
+It did produce HTML and CSS together in one response, and the instruction to do so is explicit, not
+inferred. `lib/generation/prompt.ts` (the prompt builder feeding this call) states outright:
+> "Produce a polished, modern static website: at minimum index.html and style.css."
+
+and:
+> "A single self-contained HTML file per page is fine, but split style.css out separately if that's
+> cleaner — either way, no build step."
+
+The tool schema (`GENERATE_SITE_TOOL` in `generate.ts`) returns a `files` array of arbitrary
+`{path, content}` pairs in one tool call — so a real run could include `index.html`, `style.css`, and
+potentially more (multiple pages, or WordPress theme files per the sibling `wp-theme-prompt.ts`,
+which existed for the `WORDPRESS_TRANSFER` intent). And on any edit/regeneration, `prompt.ts` requires
+the model to **re-emit everything, not a diff**:
+> "Return the FULL updated set of files reflecting this change, including any files left unchanged."
+This means the output-size problem did not just exist once per client — it compounded on every
+iteration, since nothing was ever incremental.
+
+**One correction to the plan's framing, stated plainly rather than glossed over:** the current plan's
+§6.4 cites "a 16,000 ceiling" as the thing the old system ran against. That figure describes the
+*current* `structure-and-rewrite.ts`'s ceiling (used as a stand-in estimate for what a new
+markup-only call might face), not a literal quote of the old system's actual limit — the old system's
+real markup-generating call used **64,000**. This doesn't weaken the truncation hypothesis — if
+anything it strengthens it, since the evidence below shows the team was still visibly fighting
+truncation risk at 4× the ceiling the current plan is reasoning from — but the plan's own text should
+not be read as citing the old system's actual number.
+
+**2. Was there retry, continuation, or chunking logic?**
+Retry: yes, on all four calls, identical house style — a blind, full-resend retry loop
+(`MAX_ATTEMPTS = 2` in `generate.ts`; `= 3` in the other three), each attempt appending a
+"your previous attempt was rejected: `<reason>`" correction note. This is a **restart-from-scratch**
+retry, not a continuation — a truncated or invalid response is discarded entirely, not resumed or
+patched.
+
+True continuation/chunking logic: **not found**. No code splits the response into parts, requests a
+continuation from a truncation point, or streams partial file content back for stitching.
+
+What *is* present, and is exactly "the kind of thing you only write when fighting a limit," is a
+deliberate field-ordering countermeasure baked into the tool schema itself
+(`GENERATE_SITE_TOOL.input_schema.properties.files.description` in `generate.ts`):
+> "Write this first, before the summary — it's the important part if space runs out."
+Ordering the important field first specifically so a truncated response still contains something
+salvageable is a direct, if partial, mitigation for a real anticipated truncation risk — not a
+hypothetical one a developer would guard against for no reason.
+
+**3. Comments recording a failure, cost, or quality problem?**
+Yes, several, none of them about API dollar cost specifically (grepped all four files for
+"cost/expensive/slow/latency/budget" — the only hits were an unrelated UX-failure-severity enum field
+in `visual-read.ts`, not a spend concern). What's actually recorded:
+
+- `generate.ts`: "Forced tool_choice occasionally still comes back with an empty/malformed tool call
+  at this effort level on a long prompt — retried once by the caller rather than failing the whole
+  generation outright." — a live reliability problem, not hypothetical.
+- `generate.ts` and all three sibling calls: explicit `if (message.stop_reason === "max_tokens")`
+  handling with a user-facing error ("...too large for one response" / "...cut off by the token limit
+  before finishing") — code is only written this specifically when the condition has actually been
+  observed to fire.
+- `design-direction.ts`: a `DEBUG_DESIGN_SPEC`-gated verbose logger that dumps `stop_reason`, block
+  count, block types, and the first 4000 characters of the (possibly malformed) tool input on every
+  attempt — built specifically to diagnose validation failures. **This is very likely the origin of
+  the claim in `SECURITY-CHECKLIST.md` (flagged as stale in the first Kondo audit) that "the one line
+  that logs a slice of generated JSON is gated behind a debug env var that won't be set in
+  production"** — that description doesn't match anything in the current codebase, but it matches
+  this deleted file exactly. The checklist appears to have been written while this file still existed
+  and was never updated after the rebuild removed it.
+- `design-direction.ts`: a comment explaining why attempt-1 success/failure is logged as a distinct,
+  always-on metric: "a retry recovering on attempt 2 is not the same thing as the primary path
+  working... reporting it as 'the retry worked as designed' hides a primary-path failure that may be
+  routine rather than rare." This is a team actively worried the *first* attempt was failing often
+  enough to need separate tracking.
+- The commit message for `b714e9b` (4 days before the rebuild, the commit that added this whole
+  pipeline) states directly: "confirmed unstable by a 5x repeat test on identical input before the
+  enum enforcement fixed it" — direct evidence of measured non-determinism in the pipeline this close
+  to its deletion.
+- That same commit added `scripts/verify-conflict-detection.ts` (443 lines) — real verification
+  tooling for the new pipeline's hardest logic. `5f35c60` deleted that exact 443-line file four days
+  later, alongside everything else. Investment in verification continued right up until the whole
+  subsystem was scrapped — this reads as a fast, deliberate pivot, not a slow abandonment.
+
+**The rebuild commit's own message does not explicitly cite token truncation, cost, or quality as
+its stated reason** — stated plainly, not glossed over. `5f35c60`'s message frames the change as a
+product-direction pivot ("Rebuild Kondo as a sales-asset generator, replacing the AI website
+engine") and lists bugs found *while testing the new system afterward* (page selection, a mailto
+link shadowing the real contact email, the hero heuristic, a CSP gap, extraction misses on Princeton
+Dental) — none of those bullets describe why the *old* system was removed. So: the evidence strongly
+and directly corroborates that truncation/reliability was a real, live, actively-fought problem in
+the removed pipeline right up to its last days — but no commit message says "we removed this because
+of truncation." The two things sit together honestly: a real technical problem existed, and the team's
+own stated framing for the rebuild was broader than that one problem.
+
+**4. Did the removal happen in one commit or several?**
+**One commit — `5f35c60`.** Checked every commit in the 9-commit range (`6019208` through `73d8903`)
+for deletions: only two commits in the whole window deleted anything. `b714e9b` (4 days earlier)
+deleted 6 files — the old markdown-based "design-standards" archetype system it was itself replacing,
+per its own commit message ("Replaces the old archetype-driven design-standards system with a
+three-call pipeline"). `5f35c60` then deleted all 35 files that made up that entire three-call
+pipeline plus its supporting audit/crawl/storage infrastructure, in a single commit — full file list
+pasted in Output below. This matches and extends the first Kondo audit's schema-level finding (the
+migration was "a hard reset... total, at the schema level, in a single migration") — now confirmed
+true at the code level too: one commit removed the whole thing, not a gradual decline over several.
+
+**On the `build-page.ts` name specifically:** `git log --all --oneline --follow -- "*build-page.ts"`
+returns nothing — **no file by that name ever existed anywhere in this repository's history.** The
+`anthropic-retry.ts` stale comment names five files; four are real and were deleted in `5f35c60`
+(`design-direction.ts`, `visual-read.ts`, `brief-synthesis.ts`, `generate.ts`); `build-page.ts` is not
+one of them and never existed. The functionality a name like that would suggest — building the actual
+page output — lived in `generate.ts` instead. Worth flagging as a second, independent instance of
+imprecise documentation from that same comment, on top of the four-real/one-fictional split.
+
+**Was the old pipeline removed for a reason the current plan does not address? Conclusion: no —
+not BLOCKED.** Two dimensions to this, checked separately:
+- **The technical risk the archaeology surfaced (model-authored markup + CSS truncating a long,
+  high-ceiling response) is directly and explicitly addressed by the current plan's central
+  architectural decision.** `kondo-v2-build-plan-r2.md` §6.4 ("The token split — deterministic CSS,
+  model markup") and §8 ("Do not let the model author CSS") are built specifically against this
+  class of failure — deterministic CSS generation, markup-only model output at an estimated
+  4,000–6,000 tokens against a 16,000 ceiling, mandatory validation (§6.5), and a fallback renderer
+  (§7) for when generation still fails. This is a materially different architecture from the deleted
+  one, not a repeat of it.
+- **The product-direction dimension of the rebuild (pivot from "AI generates your replacement live
+  website" to "human-reviewed sales-asset concept for cold outreach") is preserved, not reverted, by
+  the current plan.** `kondo-v2-build-plan-r2.md` §1 states the pitch is explicitly "this is what
+  your landing page could look like... a concept, not a claim" — consistent with, not a reversion of,
+  the July pivot. The plan does move the *human gate* from extraction (July's model) to page review
+  (Phase 4) — a deliberate, reasoned, and documented change, not an unexamined reversion to a
+  rejected approach.
+
+No task in Part C is blocked by this finding.
+
+**Files created/modified:**
+None — read-only investigation; only this file (docs) is touched, appending this entry.
+
+**Verification command:**
+```
+git log --oneline --all -- prisma/migrations/20260731120000_rebuild_content_pipeline
+git log --reverse --format="COMMIT %H%nAuthor: %an <%ae>%nDate:   %ad%n%n%B%n----" --date=iso "6019208~1..73d8903"
+git log --all --oneline --follow -- "*design-direction.ts" "*visual-read.ts" "*brief-synthesis.ts" "*build-page.ts" "*generate.ts"
+git show 5f35c60~1:lib/generation/generate.ts
+git show 5f35c60~1:lib/generation/design-direction.ts
+git show 5f35c60~1:lib/generation/visual-read.ts
+git show 5f35c60~1:lib/generation/brief-synthesis.ts
+git show 5f35c60~1:lib/generation/prompt.ts
+git show --diff-filter=D --name-only --format="" 6019208 33a14df 656e30f b714e9b 5f35c60 3b7c1cd 47df53c 2e845b3 73d8903
+```
+
+**Output:**
+```
+$ git log --oneline --all -- prisma/migrations/20260731120000_rebuild_content_pipeline
+5f35c60 Rebuild Kondo as a sales-asset generator, replacing the AI website engine
+
+$ (deletion count per commit, 6019208..73d8903)
+6019208: 0 file(s) deleted
+33a14df: 0 file(s) deleted
+656e30f: 0 file(s) deleted
+b714e9b: 6 file(s) deleted
+5f35c60: 35 file(s) deleted
+3b7c1cd: 0 file(s) deleted
+47df53c: 0 file(s) deleted
+2e845b3: 0 file(s) deleted
+73d8903: 0 file(s) deleted
+
+$ git show --diff-filter=D --name-only --format="" b714e9b
+lib/design-standards/anti-patterns.md
+lib/design-standards/brief-interpretation.md
+lib/design-standards/color-palettes.md
+lib/design-standards/index.ts
+lib/design-standards/layout-patterns.md
+lib/design-standards/typography.md
+
+$ git show --diff-filter=D --name-only --format="" 5f35c60
+app/api/clients/[id]/export/route.ts
+app/api/clients/[id]/preview/[...path]/route.ts
+components/AuditNotesForm.tsx
+components/ClientBriefPanel.tsx
+components/DesignSpecReview.tsx
+components/GenerationForm.tsx
+components/GenerationProgress.tsx
+components/IntentFields.tsx
+components/InterpretedBriefReview.tsx
+components/MessageList.tsx
+components/ReferenceFields.tsx
+lib/actions/audit.ts
+lib/actions/generation.ts
+lib/audit-common.ts
+lib/audit-types.ts
+lib/audit/narrative.ts
+lib/crawl/analyze.ts
+lib/crawl/reference-screenshot.ts
+lib/crawl/visual-shots.ts
+lib/generation/adjective-translations.ts
+lib/generation/anti-defaults.ts
+lib/generation/brief-synthesis.ts
+lib/generation/design-direction.ts
+lib/generation/design-spec-types.ts
+lib/generation/generate.ts
+lib/generation/interpreted-brief-types.ts
+lib/generation/prompt.ts
+lib/generation/quality-floor.ts
+lib/generation/types.ts
+lib/generation/visual-read-types.ts
+lib/generation/visual-read.ts
+lib/generation/wp-theme-prompt.ts
+lib/source-analysis/analyzer.ts
+lib/storage.ts
+scripts/verify-conflict-detection.ts
+
+$ git log --all --oneline --follow -- "*build-page.ts"
+(no output — file never existed under this name anywhere in history)
+```
+(Full commit messages for the 9-commit range, and full source of all four deleted files, were read in
+full during this investigation and are quoted/excerpted in "What I did" and the four numbered answers
+above — reproducing all of it verbatim here would roughly double this entry's length without adding
+new information beyond what's already quoted inline.)
+
+**Failures, retries and dead ends:**
+Looked for `build-page.ts` on the assumption it might be a rename of one of the other four —
+`git log --all --follow` found nothing under that name at any point in history, in `lib/generation/`
+or anywhere else. Concluded it's an inaccuracy in the stale comment rather than a file this
+investigation failed to find.
+
+**Shortcuts taken:**
+Did not read `lib/generation/adjective-translations.ts`, `anti-defaults.ts`, `design-spec-types.ts`,
+`interpreted-brief-types.ts`, `quality-floor.ts`, `types.ts`, `visual-read-types.ts`, or
+`wp-theme-prompt.ts` in full — these are the type-definition/validation/constant-table siblings of
+the four call-site files the task named specifically, and skimmed evidence (validation function names,
+type shapes referenced from the four main files) was sufficient to confirm they're supporting
+infrastructure for the same four calls, not additional call sites with their own token ceilings. If
+the human wants the full picture of every one of the 35 deleted files, that's a larger follow-up, not
+done here.
+
+**Deviations from the task spec:** none — followed the four-item instruction list and the "3-4
+commits either side" scope as given (used 4 either side).
+
+**Not run / not verified:**
+- Whether cost (API spend) was a *verbal* factor in the actual decision, discussed outside of code and
+  commit messages (Slack, a call, notes) — git history cannot answer that, and none of the artifacts
+  examined mention dollar cost. If the human recalls or can check a discussion elsewhere, that would
+  be the only way to confirm or rule this out.
+- The 8 supporting files listed under "Shortcuts taken" were not read in full.
+
+**Confidence:** High on all four specific sub-questions — each is answered by a direct, verbatim
+quote from the actual deleted source or an actual commit message, not inference. Medium on the
+overarching "why was it removed" question, stated honestly above: the *technical* evidence for
+truncation/reliability problems is strong and direct, but the rebuild commit's own stated framing is a
+broader product pivot, and no artifact found explicitly says "removed because of truncation" in those
+words — that specific causal claim is corroborated, not proven.
+
+**Next task:** per Part C, Task 0.1 or 0.2 (both `NOT STARTED`); Task 0.3 (production reality) remains
+a human task, unanswered. Not started this session.
+---
+
+---
+### 0.4-PLAN-IMPACT — corrects the volume argument in build plan §6.4
+**Timestamp:** 2026-08-17
+**Git SHA at start:** 21709f5
+**Status:** DONE-VERIFIED
+
+**What I did:**
+Human-flagged correction. `kondo-v2-build-plan-r2.md` §6.4 (lines 294-299, quoted verbatim below)
+states the old pipeline was "north of 15,000–25,000 output tokens against a 16,000 ceiling" and
+names this as the "**Primary suspicion for why the July architecture didn't survive.**" Entry `0.4`
+(this file, above) established from the actual deleted source that the old page-generation call
+(`lib/generation/generate.ts`) ran at `max_tokens: 64000` — not 16,000. The volume argument as
+written in §6.4 is wrong: the old system was never running against a 16k ceiling, so a "north of
+15–25k against 16k" framing doesn't describe what actually happened.
+
+`kondo-v2-build-plan-r2.md:294-299`, verbatim:
+> "Our templates run ~450–600 lines of HTML plus ~350 of CSS each. A model writing both is north of
+> 15,000–25,000 output tokens against a 16,000 ceiling. It truncates, and the existing
+> `stop_reason === "max_tokens"` retry resends the whole payload and truncates again. **Primary
+> suspicion for why the July architecture didn't survive.**"
+
+**The token split itself remains correct — on revised grounds.** Entry `0.4` documents
+*instability*, not overflow, as what the deleted code was actually fighting: explicit
+`stop_reason === "max_tokens"` handling present on all four deleted calls (written because the
+condition was observed, not hypothetical), a deliberate field-ordering countermeasure in
+`generate.ts`'s own tool schema ("write this first... in case space runs out"), an attempt-1
+success-rate metric added specifically because the *first* attempt was suspected unreliable, and
+"confirmed unstable by a 5x repeat test on identical input" recorded in the commit that introduced
+this pipeline four days before it was deleted. Layered on top of that: blind full-restart retries
+with no continuation logic meant every failure — truncation or otherwise — re-paid the full cost of
+the call from scratch, and `prompt.ts` required the *entire* file set to be re-emitted on every edit,
+never a diff, so the problem compounded over a client's lifetime rather than staying constant.
+
+**Revised rationale for the token split:** deterministic CSS removes the largest and most variable
+portion of the model's output — the part most exposed to whatever was driving the instability entry
+`0.4` documents — leaving the model to author markup only, a smaller and more bounded task. This
+makes retries cheap (less to re-generate, less surface for the same instability to recur on) and
+reduces the failure surface generally. That's a defensible, evidence-backed rationale. "It truncates
+against a 16k ceiling" is not, and should not be cited as the reason going forward.
+
+**Task 3.4 is unaffected and now doubles as confirmation.** Its done-when condition ("five real
+clients generate markup under 8,000 output tokens with no truncation," verified by pasting
+`stop_reason`/`output_tokens` for all five) was never dependent on the old ceiling being 16k — it's a
+direct measurement of the *new* markup-only call's own behaviour. When Task 3.4 runs, its result is
+the actual test of whether the token-split fix worked, regardless of which historical framing
+motivated it.
+
+**Also recorded here, per instruction, since it bears on Task 3.8:** entry `0.4` established that
+`build-page.ts` never existed anywhere in this repository's history — `git log --all --oneline
+--follow -- "*build-page.ts"` returns nothing. The stale comment in `lib/ai/anthropic-retry.ts`
+(scheduled for deletion by Task 3.8, per `kondo-v2-build-plan-r2.md` §7 and Part C's Task 3.8 scope)
+names five files as the old pipeline's call sites — four real (`design-direction.ts`,
+`visual-read.ts`, `brief-synthesis.ts`, `generate.ts`) and one fictional (`build-page.ts`). Worth
+having on record before that comment is deleted, so whoever does Task 3.8 isn't left wondering
+whether a fifth call site was missed by this investigation — it wasn't; it never existed.
+
+**Files created/modified:**
+None — this entry only, in this file.
+
+**Verification command:**
+```
+(re-read, not re-run — build-plan-r2.md §6.4 lines 294-299, and entry 0.4 above in this same file)
+```
+
+**Output:**
+```
+docs/kondo-v2-build-plan-r2.md:294:### 6.4 The token split — deterministic CSS, model markup
+docs/kondo-v2-build-plan-r2.md:296-299:
+Our templates run ~450–600 lines of HTML plus ~350 of CSS each. A model writing both is north of
+15,000–25,000 output tokens against a 16,000 ceiling. It truncates, and the existing
+stop_reason === "max_tokens" retry resends the whole payload and truncates again. Primary
+suspicion for why the July architecture didn't survive.
+```
+
+**Failures, retries and dead ends:** none — this is a documentation correction, not a technical
+investigation with retries.
+
+**Shortcuts taken:** none.
+
+**Deviations from the task spec:** none — this is a correction entry per Part D's rule, referencing
+entry `0.4` it corrects, same as `RECON-01-CORRECTION` referenced `RECON-01`.
+
+**Not run / not verified:** nothing new — both cited facts (the plan's §6.4 text, and entry `0.4`'s
+`max_tokens: 64000` finding) were established with direct evidence already in this log.
+
+**Confidence:** High — this is a direct comparison between a verbatim plan quote and a verbatim
+already-verified code fact; no inference involved.
+
+**Next task:** unchanged — Task 0.1 or 0.2, both `NOT STARTED`; Task 0.3 remains a human task.
+---
+
+---
+### GITATTRIBUTES-01 — normalise line endings to LF
+**Timestamp:** 2026-08-17
+**Git SHA at start:** 21709f5
+**Status:** DONE-VERIFIED
+
+**What I did:**
+Created `.gitattributes` at the repo root with the single line `* text=auto eol=lf`, per
+`kondo-v2-build-plan-r2.md` §3.4's vendoring rule ("Hash after LF normalisation, or every Windows
+checkout produces a different digest") and the same CRLF problem the uupm audit documented on the
+*upstream* repo (§1.5) — this repo is checked out on Windows with `core.autocrlf` evidently enabled,
+so the risk is real here too, not just theoretical. Confirmed live during this same session: staging
+an unrelated change to `docs/kondo-v2-execution.md` produced the warning `LF will be replaced by
+CRLF the next time Git touches it` — direct, present-tense evidence of exactly the problem this file
+exists to prevent for the files Task 1.4 will hash. Staged and committed **only** this one file, not
+the other changes sitting in the working tree at the same time (`docs/kondo-v2-execution.md`,
+`scripts/check-extraction.ts`, both from this session's other work) — confirmed by inspecting the
+commit's own `--stat` output before considering this done.
+
+**Files created/modified:**
+```
+$ git show --stat HEAD
+commit 23d7b357b61934f10105ae68bd9ef5ac6b1189c5
+Author: nauuuurmi_ <noemibanaay01@gmail.com>
+Date:   Mon Aug 17 08:48:59 2026 +0800
+
+    Normalise line endings to LF
+
+ .gitattributes | 1 +
+ 1 file changed, 1 insertion(+)
+```
+
+**Verification command:**
+```
+git add .gitattributes && git status --porcelain
+git commit -m "Normalise line endings to LF"
+git log --oneline -3
+git show --stat HEAD
+```
+
+**Output:**
+```
+$ git add .gitattributes && git status --porcelain
+A  .gitattributes
+ M docs/kondo-v2-execution.md
+ M scripts/check-extraction.ts
+?? scripts/baselines/
+
+$ git commit -m "Normalise line endings to LF"
+[main 23d7b35] Normalise line endings to LF
+ 1 file changed, 1 insertion(+)
+ create mode 100644 .gitattributes
+
+$ git log --oneline -3
+23d7b35 Normalise line endings to LF
+21709f5 Add Kondo v2 planning docs and execution log
+3cbfa6b Add per-section AI concept editing; fix an image-dedup key collision and a bot-challenge crawl gap
+```
+
+**Failures, retries and dead ends:** none.
+
+**Shortcuts taken:**
+This adds the attribute for *future* checkouts/hashing only. It does **not** renormalise any
+already-tracked file's line endings in the repo or the index (that would need `git add
+--renormalize .`, a much broader change touching every tracked file, not requested and not done
+here). If any currently-tracked file still has mixed or CRLF line endings, this commit alone does not
+fix it.
+
+**Deviations from the task spec:** none.
+
+**Not run / not verified:**
+`git add --renormalize .` was not run — out of scope for what was asked. Whether any currently
+tracked file actually has CRLF endings in the repository (as opposed to just the working-tree warning
+observed on one file) was not audited.
+
+**Confidence:** High — the commit is real, minimal, and independently confirmed via `--stat` to
+contain only the one intended file.
+
+**Next task:** 0.1 (this session, immediately below).
+---
+
+---
+### 0.1 — Extend the evaluation harness
+**Timestamp:** 2026-08-17
+**Git SHA at start:** 23d7b35
+**Status:** DONE-UNVERIFIED
+
+**What I did:**
+Scoped to the two capabilities per instruction: (1) writing a baseline snapshot to disk, (2) diffing
+a later run against that saved baseline and exiting non-zero on an unexpected difference. Did **not**
+rebuild the "run against cached `CrawledPage` rows without re-crawling" behaviour — that already
+existed (confirmed in `RECON-01`) and was left as-is.
+
+Added CLI parsing (`--client <id>`, `--baseline`) to `scripts/check-extraction.ts`. `--client <id>`
+alone scopes a run to one client instead of looping over every non-deleted one, printing the same
+summary as before. `--client <id> --baseline`: if no baseline file exists yet for that client, writes
+one to `scripts/baselines/<clientId>.json` and exits 0; if one already exists, reads it back, diffs
+the fresh run against it field-by-field, prints every mismatch, and sets a non-zero exit code if
+anything differs.
+
+**Deliberate design decision, stated up front:** the baseline is a coarse structured summary — page
+counts, each `ARRAY_FIELDS` count, `inferredServices`, `ctaLabel` — the same figures this script
+already prints, not the full free-text extraction. The structuring call is a live, non-deterministic
+Claude call every time; a full-text baseline would essentially never match between two independently
+executed runs even when nothing regressed, which would make the harness useless for its actual
+purpose (catching a real regression against normal run-to-run noise). This is exactly what the
+verification below ended up testing, for real.
+
+**Verification command:**
+```
+npx tsx --env-file=.env scripts/check-extraction.ts --client cms7rxpku0001f0ffb0pd5wwe --baseline
+(run once, then the identical command again — Princeton Dental, 92 cached CrawledPage rows,
+picked because it's the client already referenced by name throughout the pipeline's own code
+comments)
+```
+
+**Output:**
+```
+$ npx tsx --env-file=.env scripts/check-extraction.ts --client cms7rxpku0001f0ffb0pd5wwe --baseline
+[structure-and-rewrite] attempt 1: stop_reason=tool_use output_tokens=4250/16000
+
+Princeton Dental: 92 crawled -> 11 selected (44242 chars)
+  services=16 testimonials=0 stats=4 faqs=6 differentiators=6 process=0 serviceAreas=1 hours=5 offers=2 credentials=9
+  services inferred: 6/16
+  ctaLabel: Book Now
+
+Baseline written: C:\Users\acer\Documents\project room\JRNY-Digital\kondo\scripts\baselines\cms7rxpku0001f0ffb0pd5wwe.json
+EXIT CODE: 0
+
+$ npx tsx --env-file=.env scripts/check-extraction.ts --client cms7rxpku0001f0ffb0pd5wwe --baseline
+[structure-and-rewrite] attempt 1: stop_reason=tool_use output_tokens=4818/16000
+
+Princeton Dental: 92 crawled -> 11 selected (44242 chars)
+  services=15 testimonials=0 stats=4 faqs=11 differentiators=7 process=0 serviceAreas=1 hours=5 offers=2 credentials=9
+  services inferred: 8/15
+  ctaLabel: Book Now
+
+Princeton Dental: diffing against saved baseline (C:\Users\acer\Documents\project room\JRNY-Digital\kondo\scripts\baselines\cms7rxpku0001f0ffb0pd5wwe.json)
+  MISMATCH inferredServices: baseline=6 current=8
+  MISMATCH counts.services: baseline=16 current=15
+  MISMATCH counts.faqs: baseline=6 current=11
+  MISMATCH counts.differentiators: baseline=6 current=7
+  DIFF DETECTED against baseline
+EXIT CODE: 1
+```
+
+Also ran, both clean:
+```
+$ npx tsc --noEmit
+(no output — exit 0)
+
+$ npm run lint
+> kondo@0.1.0 lint
+> eslint
+(no output — exit 0)
+
+$ npx vitest run
+ Test Files  6 passed (6)
+      Tests  55 passed (55)
+```
+
+**The task's literal done-when — "run it twice against the same client and the second run reports
+zero diff" — was NOT met, and I'm not reporting this as a success.** The harness code is correct and
+does exactly what it was built to do: it wrote a real baseline, then correctly detected and reported
+four genuine differences on a second run against the *same cached pages*, with no code change
+between the two runs, and exited non-zero exactly as specified. That's the mechanism working. But the
+underlying extraction call is non-deterministic enough that even this coarse, count-level summary
+drifted between two consecutive live calls on identical input — services 16→15, faqs 6→11,
+differentiators 6→7, inferred-services 6→8. Faqs nearly doubling is not rounding noise.
+
+**Failures, retries and dead ends:**
+Did not retry to try to get a "clean" zero-diff pair — that would mean re-running (and re-paying for)
+the live call repeatedly hoping for two runs that happen to agree, which would misrepresent the
+harness's actual behaviour rather than reveal it. The first real pair of runs is the honest result and
+is what's pasted above.
+
+**Shortcuts taken:** none in the implementation. The coarse-summary-not-full-text baseline design is
+a considered choice with its rationale stated above, not a corner cut.
+
+**Deviations from the task spec:**
+1. Interpreted "the two capabilities" as baseline-write and baseline-diff-with-nonzero-exit,
+   treating "re-run against cached pages without re-crawling" as pre-existing, not new — flag this if
+   that reading is wrong.
+2. The done-when condition as written in Part C ("the second run reports zero diff") could not be
+   satisfied by two genuine, unmodified consecutive runs — see above. I did not relax or reinterpret
+   that condition to force a pass; I'm reporting the real outcome and flagging it as a decision for
+   the human, per Part A7/A6's spirit of raising a conflict rather than resolving it unilaterally,
+   even though this is a build task rather than a report-only one. Options this suggests, not decided
+   here: (a) redefine "done" as a tolerance band rather than exact equality; (b) redefine it as "the
+   *collapse* detector doesn't regress" (the existing `>=8/9 empty` heuristic this script already has,
+   which is far coarser and more stable than exact counts); (c) run N baseline samples and compare
+   against a range, not a point value; (d) accept that day-to-day extraction variance is real and this
+   harness's job is to catch a *large* shift a code change causes, not to prove zero variance exists.
+
+**Not run / not verified:**
+- Only one client (Princeton Dental) was tested. Whether the same magnitude of run-to-run variance
+  holds for the other five clients in the dev database, or whether some are more stable, is unknown.
+- Whether this variance is inherent to `structure-and-rewrite.ts`'s current prompt/temperature-less
+  configuration, or would shrink with a prompt change, is a separate question this entry doesn't
+  answer.
+- Whether wiring this into CI as currently written would produce false-positive failures on every run
+  — almost certainly yes, at this variance level, until the done-when question above is resolved.
+
+**Confidence:** High that the code is correct (typechecked, linted, and its two behaviours — write
+and diff-with-nonzero-exit — were each independently exercised and produced exactly the expected real
+output, including a real detected mismatch). Low confidence that the task as specified is actually
+achievable at its literal "zero diff" bar without a design decision from the human first.
+
+**Next task:** awaiting human sign-off on the done-when question raised above before 0.2 or a revised
+0.1.
+---
+
+---
+### 0.1-TEMP-EXPERIMENT — temperature isolation experiment against Princeton Dental
+**Timestamp:** 2026-08-17
+**Git SHA at start:** 23d7b35
+**Status:** BLOCKED
+
+**What I did:**
+Built a throwaway runner (`scripts/_tmp-temp-experiment.ts`, deleted after use, never committed) that
+fetches Princeton Dental's cached `CrawledPage` rows once, runs `selectRelevantPages` **once**, and
+reuses that identical resulting array as the input to every subsequent `structureAndRewriteContent`
+call — satisfying "same fixture, no other changes" as an actual invariant (byte-identical input
+object reused by reference), not just "should be the same because it's deterministic."
+
+**Set 1 — baseline, current settings, 5 runs:** ran clean, no code changes. Real output below.
+
+**Set 2 — `temperature: 0`, 5 runs:** attempted a scoped one-line edit to
+`lib/content/structure-and-rewrite.ts` (`temperature: 0` added to the `anthropic.messages.stream()`
+call, commented `// TEMPORARY — 0.1-TEMP-EXPERIMENT, reverted after measurement`), then ran a single
+smoke-test call before committing to the full 5 — **it failed immediately, at the API layer, before
+any content generation**:
+```
+400 {"type":"error","error":{"type":"invalid_request_error","message":"`temperature` is deprecated for this model."}}
+```
+This isn't a guess or something inferred from a comment — it's the literal, live API response,
+retried 3 times internally by `structureAndRewriteContent`'s own `MAX_ATTEMPTS` loop (each attempt
+independently rejected with the identical 400, confirming it's a hard parameter-validation
+rejection, not a transient fluke), then thrown to the caller. It's also independently corroborated by
+two other sources found this session: the vendored SDK's own type definition
+(`node_modules/@anthropic-ai/sdk/resources/messages/messages.d.ts:2248-2251`, verbatim: *"Models
+released after Claude Opus 4.6 do not support setting temperature. A value of 1.0 of will be accepted
+for backwards compatibility, all other values will be rejected with a 400 error"*), and a comment in
+the pre-rebuild `design-direction.ts` (deleted in `5f35c60`, read in full under entry `0.4`): *"No
+temperature — removed on Sonnet 5... Sonnet 5 rejects temperature/top_p/top_k outright."* Three
+independent sources — a live API response, the current SDK's own docs, and a two-and-a-half-week-old
+comment from a team member who'd already hit this — all agree. **Set 2 as specified cannot be run on
+this model, at any value other than the useless default of 1.0.**
+
+Reverted the edit immediately after the smoke test. Confirmed the revert is real and complete, not
+just visually similar, via `git diff -- lib/content/structure-and-rewrite.ts` showing **zero**
+output — byte-identical to the tracked version. Deleted the throwaway script. Re-ran `tsc --noEmit`,
+`npm run lint`, and the full `vitest` suite afterward — all clean, confirming nothing was left in a
+broken state.
+
+**Set 1 results — per-field spread, 5 runs, current settings, identical fixture:**
+
+| Field | Values | Min | Max | Range |
+|---|---|---|---|---|
+| services | `[15,15,15,15,16]` | 15 | 16 | 1 |
+| faqs | `[6,3,8,11,9]` | 3 | 11 | 8 |
+| differentiators | `[6,6,6,8,7]` | 6 | 8 | 2 |
+| inferredServices | `[8,8,7,7,9]` | 7 | 9 | 2 |
+
+Shape-validation failures: **0/5** — every run succeeded on internal attempt 1 (no retry fired).
+
+**Set 2 results:** not obtained — blocked before any content-generation attempt could run. 1 smoke-
+test call made (3 internal sub-attempts, all rejected identically at the API layer, 0 tokens of
+actual generation consumed since the 400 fires on request validation before the model runs).
+
+**What this actually answers, and what it doesn't:**
+
+The literal question — "how much of the 6→11 faqs drift is temperature" — cannot be measured by
+isolating temperature, because temperature isn't a variable this model exposes at all; it's fixed,
+not merely defaulted. So the honest answer is: **0% of the drift is attributable to temperature, by
+definition, because there is no temperature lever available to attribute anything to.** 100% of
+whatever's producing the variance comes from something else — the model's inherent sampling
+behaviour at whatever fixed setting `claude-sonnet-5` actually runs at, which this account has no
+visibility into or control over via this API.
+
+What the baseline-only data *does* answer, and it's directly relevant to the underlying question:
+**the variance found in Task `0.1` (services 16→15, faqs 6→11, differentiators 6→7) was not an
+outlier — it's ordinary, already visible within a clean 5-run baseline with nothing else changed.**
+`faqs` alone ranged from 3 to 11 (range 8) across 5 back-to-back runs on the identical fixture. The
+`0.1` entry's two runs (6 and 11) both fall inside that same range. This is real, load-bearing
+information for the "how much infrastructure to build around this" decision even though it doesn't
+come packaged as the requested before/after comparison: **whatever is driving this variance, it's
+not something a `temperature` setting could ever have fixed on this model, so that's not a lever
+worth spending design time on.**
+
+**Files created/modified:**
+None persisted. `scripts/_tmp-temp-experiment.ts` was created and deleted within this entry; the
+`temperature: 0` edit to `lib/content/structure-and-rewrite.ts` was made and fully reverted (confirmed
+via empty `git diff`). Working tree at the end of this entry is identical to working tree at the
+start (still just the two pre-existing modifications and the untracked baselines dir from entries
+`GITATTRIBUTES-01`/`0.1`, unrelated to this experiment).
+
+**Verification command:**
+```
+RUNS=5 npx tsx --env-file=.env scripts/_tmp-temp-experiment.ts        (Set 1, current settings)
+(edit: add temperature: 0)
+RUNS=1 npx tsx --env-file=.env scripts/_tmp-temp-experiment.ts        (Set 2 smoke test)
+(revert the edit)
+git diff -- lib/content/structure-and-rewrite.ts
+rm scripts/_tmp-temp-experiment.ts
+npx tsc --noEmit && npm run lint && npx vitest run
+```
+
+**Output:**
+```
+$ RUNS=5 npx tsx --env-file=.env scripts/_tmp-temp-experiment.ts
+Fixture: 92 crawled -> 11 selected pages (same array reused for every run)
+[structure-and-rewrite] attempt 1: stop_reason=tool_use output_tokens=4322/16000
+RUN 1: OK services=15 faqs=6 differentiators=6 inferred=8 attempts=1
+[structure-and-rewrite] attempt 1: stop_reason=tool_use output_tokens=3619/16000
+RUN 2: OK services=15 faqs=3 differentiators=6 inferred=8 attempts=1
+[structure-and-rewrite] attempt 1: stop_reason=tool_use output_tokens=4375/16000
+RUN 3: OK services=15 faqs=8 differentiators=6 inferred=7 attempts=1
+[structure-and-rewrite] attempt 1: stop_reason=tool_use output_tokens=4645/16000
+RUN 4: OK services=15 faqs=11 differentiators=8 inferred=7 attempts=1
+[structure-and-rewrite] attempt 1: stop_reason=tool_use output_tokens=4734/16000
+RUN 5: OK services=16 faqs=9 differentiators=7 inferred=9 attempts=1
+
+=== SUMMARY ===
+services: values=[15,15,15,15,16] min=15 max=16 range=1
+faqs: values=[6,3,8,11,9] min=3 max=11 range=8
+differentiators: values=[6,6,6,8,7] min=6 max=8 range=2
+inferredServices: values=[8,8,7,7,9] min=7 max=9 range=2
+failed runs: 0/5
+runs needing >1 internal attempt (shape-validation retry fired): 0/5
+
+$ RUNS=1 npx tsx --env-file=.env scripts/_tmp-temp-experiment.ts    (after adding temperature: 0)
+Fixture: 92 crawled -> 11 selected pages (same array reused for every run)
+[structure-and-rewrite] attempt 1/3 failed: 400 {"type":"error","error":{"type":"invalid_request_error","message":"`temperature` is deprecated for this model."},"request_id":"req_011Ce7RQqoVYyyMjafL1MJiE"}
+[structure-and-rewrite] attempt 2/3 failed: 400 {"type":"error","error":{"type":"invalid_request_error","message":"`temperature` is deprecated for this model."},"request_id":"req_011Ce7RQsZQvbr7rqC3KBgHh"}
+[structure-and-rewrite] attempt 3/3 failed: 400 {"type":"error","error":{"type":"invalid_request_error","message":"`temperature` is deprecated for this model."},"request_id":"req_011Ce7RQuiPfVqSwTxqNvZK7"}
+RUN 1: FAILED — 400 {"type":"error","error":{"type":"invalid_request_error","message":"`temperature` is deprecated for this model."},"request_id":"req_011Ce7RQuiPfVqSwTxqNvZK7"} attempts=0
+
+=== SUMMARY ===
+services: no successful runs
+faqs: no successful runs
+differentiators: no successful runs
+inferredServices: no successful runs
+failed runs: 1/1
+runs needing >1 internal attempt (shape-validation retry fired): 0/1
+
+$ git diff -- lib/content/structure-and-rewrite.ts
+(no output — fully reverted)
+
+$ npx tsc --noEmit
+(no output — exit 0)
+
+$ npm run lint
+(no output — exit 0)
+
+$ npx vitest run
+ Test Files  6 passed (6)
+      Tests  55 passed (55)
+```
+
+**Failures, retries and dead ends:**
+The temperature:0 attempt is itself the "failure" this entry exists to report — not a bug in my
+implementation, a hard platform constraint discovered by testing it directly rather than assuming
+either way. Did not attempt `temperature: 1.0` (the one backward-compatible value the SDK still
+accepts) as a substitute — it wouldn't answer the question, since 1.0 is almost certainly already
+the implicit behaviour when the parameter is omitted entirely (i.e., current/baseline settings), so
+an explicit `1.0` run would just be Set 1 again under a different label, not a genuine second
+condition.
+
+**Shortcuts taken:** none — the smoke-test-before-committing-to-five approach was deliberate (confirm
+the condition is even runnable before spending 5 calls'-worth of time and money finding out the hard
+way), not a corner cut on the measurement itself.
+
+**Deviations from the task spec:**
+Set 2 was run once (the smoke test), not five times, because the first result made the remaining four
+provably pointless — each would fail identically for the same request-validation reason, not for any
+reason a fifth attempt could reveal something the first didn't. Stated here rather than silently
+substituting a different value or omitting the attempt.
+
+**Not run / not verified:**
+- Whether `output_config.effort` (currently `"high"`) affects variance — untested, a different lever
+  from temperature, not asked for here, but plausibly the next thing to look at if the human wants to
+  keep pulling on this thread.
+- Whether the same magnitude of variance holds on other clients besides Princeton Dental — only one
+  client was used, per the task's own fixture choice.
+- Whether Anthropic's API exposes any other determinism-adjacent parameter for this model family
+  (e.g. a seed) — not investigated; out of scope for what was asked.
+
+**Confidence:** High on the measurement (real API calls, real output, real revert, all independently
+confirmed) and high on the "temperature is unavailable on this model" finding (three independent
+corroborating sources plus a direct empirical test). Medium on how the human should act on it — that
+depends on how much of the faqs/services/differentiators drift the eventual v2 pipeline can tolerate,
+which entry `0.1` already raised as an open design decision this entry doesn't resolve, just narrows
+by ruling out one candidate lever.
+
+**Next task:** awaiting human direction — this closes off the "is it temperature" question definitively
+(no), but the underlying `0.1` done-when question (what should count as an acceptable diff) is still
+open.
+---
+
+---
+### 0.1a — Fix the orderBy gap and add explicit tiebreaks to the four unstable sorts
+**Timestamp:** 2026-08-17
+**Git SHA at start:** 23d7b35
+**Status:** DONE-VERIFIED
+
+**What I did:**
+Decision 1 from the human's three-decision plan, treated as a defect fix independent of the
+replay design, per instruction. Two parts:
+
+1. **`scripts/check-extraction.ts:65`** — added an explicit `orderBy: [{ createdAt: "asc" }, { id:
+   "asc" }]` to the only `prisma.crawledPage.findMany` call in the codebase. `createdAt` reproduces
+   actual crawl order (pages are written to `CrawledPage` sequentially as the crawl visits them, per
+   `lib/crawl/crawler.ts`); `id` is a pure, meaningless-in-itself tiebreak for the same-millisecond
+   case, so the order is total regardless of timing. A one-line comment at the call site states this
+   and names every downstream file that depends on it, so the next person reading it doesn't mistake
+   the `orderBy` for decorative.
+
+2. **Explicit tiebreak on all four sorts identified in the prior investigation** — each now compares
+   the primary key first, and on an exact tie, a stable data field named in a one-line comment, not
+   array position:
+   - `lib/content/select-hero-image.ts:26-31` — ties (equal `fromHomepage`, equal area) now break on
+     `a.image.assetId.localeCompare(b.image.assetId)`.
+   - `lib/content/select-relevant-pages.ts:182-187` — ties (equal score) now break on
+     `a.page.url.localeCompare(b.page.url)`.
+   - `lib/content/extract-colors.ts:60-65` — ties (equal pixel count) now break on the bucket's own
+     `(r, g, b)` values, which differ by construction since they form the Map key — no extra
+     plumbing needed to carry a separate identity field.
+   - `lib/crawl/download-images.ts:89-93` (`pickBestLogoCandidate`) — ties (equal frequency) now
+     break on the candidate URL itself, `a[0].localeCompare(b[0])` — already present in the tuple,
+     no extra plumbing needed here either.
+
+None of these were behaving incorrectly on the evidence gathered so far (JS's sort has been
+spec-guaranteed stable since ES2019, and every traced input order was itself deterministic in a
+single live crawl) — this closes the *latent* gap the prior investigation found: each sort was
+depending on an unstated invariant (stable input order) rather than declaring its own tiebreak, which
+is exactly the failure class `kondo-v2-build-plan-r2.md` and the uupm audit both flag by name for the
+*next* thing being built. Fixing it now, before it's built on top of, rather than after.
+
+**Files created/modified:**
+```
+$ git diff --stat
+ lib/content/extract-colors.ts        |   8 +-
+ lib/content/select-hero-image.ts     |   5 +-
+ lib/content/select-relevant-pages.ts |   7 +-
+ lib/crawl/download-images.ts         |   4 +-
+ scripts/check-extraction.ts          | 153 ++++++-
+ 5 files changed, ... (docs/kondo-v2-execution.md's diff, this entry, omitted from this count —
+ it's this file writing itself)
+```
+
+**Verification command:**
+```
+npx tsc --noEmit
+npm run lint
+npx vitest run
+(throwaway script, deleted after use — three consecutive prisma.crawledPage.findMany calls
+against Princeton Dental with the new orderBy, comparing returned URL order)
+```
+
+**Output:**
+```
+$ npx tsc --noEmit
+(no output — exit 0)
+
+$ npm run lint
+> kondo@0.1.0 lint
+> eslint
+(no output — exit 0)
+
+$ npx vitest run
+ Test Files  6 passed (6)
+      Tests  55 passed (55)
+
+$ npx tsx --env-file=.env scripts/_tmp-orderby-check.ts   (deleted after this run)
+run1: 92 urls
+run2: 92 urls
+run3: 92 urls
+run1 === run2: true
+run1 === run3: true
+first 3 urls (run1): ["https://www.princetondental.com.au/","https://www.princetondental.com.au/dont-miss-out-use-your-health-fund-benefits-before-years-end/","https://www.princetondental.com.au/contact-us/"]
+last 3 urls (run1): ["https://www.princetondental.com.au/2025-november/","https://www.princetondental.com.au/2025-october/","https://www.princetondental.com.au/2025-september/"]
+EXIT: 0
+```
+
+Three consecutive queries against the same 92-row table, identical order every time, homepage first
+as expected (matches the crawl's own starting point). This is the direct, real-DB confirmation that
+the defect is actually fixed, not just that the code compiles.
+
+**Failures, retries and dead ends:** none.
+
+**Shortcuts taken:**
+Did not add new unit tests asserting the tiebreak behaviour itself (e.g. a synthetic two-candidate
+exact-tie case for `select-hero-image.ts`) — the existing suite (`select-relevant-pages.test.ts`,
+`render.test.ts`) still passes unchanged, confirming no regression on the non-tied cases those tests
+already cover, but none of them construct a genuine tie, so the new tiebreak branches themselves are
+exercised by the live-data verification above, not by an automated test. Flagging this rather than
+letting a clean `vitest run` imply more coverage than it has.
+
+**Deviations from the task spec:** none — all five locations named by the human were the ones fixed,
+no others touched.
+
+**Not run / not verified:**
+- Whether a *genuine* tie (two images with identical `fromHomepage` and identical pixel area, or two
+  pages with identical scores, or two colour buckets with identical pixel counts) has ever actually
+  occurred on a real client — the verification above proves the *query* order is now stable, not that
+  any of the four sorts have been observed hitting their new tiebreak branch on real data. That's a
+  narrower, harder-to-trigger thing to prove and wasn't asked for.
+- Unit-level tests for the tiebreak branches specifically (see Shortcuts taken).
+
+**Confidence:** High — every change is small, mechanical, and independently verified (typecheck,
+lint, full suite, plus a live repeated-query test proving the actual defect is closed). The one honest
+gap is that the four sort tiebreaks are verified by absence-of-regression, not by a constructed tie
+hitting the new branch.
+
+**Next task:** 0.1b (Decision 2 — instrument `coerceTextArray`, re-run the Princeton Dental 5-set,
+report the model-vs-coercion split for the faqs 3→11 spread). Awaiting go-ahead per instruction —
+stopping here.
+---
+
+---
+### 0.1b — Instrument coerceTextArray, isolate model variance from coercion loss
+**Timestamp:** 2026-08-17
+**Git SHA at start:** 23d7b35
+**Status:** DONE-VERIFIED
+
+**What I did:**
+Decision 2. Instrumented `coerceTextArray` (`lib/content/structure-and-rewrite.ts`) to report, per
+field, per call: raw item count, kept item count, and a reason for every dropped item (which required
+field was missing or non-string, or that the entry wasn't an object at all).
+
+**Kept scoped to the harness, not an env-var gate, per instruction to be deliberate about the r2 §8
+line.** Added an optional third parameter, `coercionReporter?: CoercionReporter`, to
+`structureAndRewriteContent` — threaded through `resolveStructuredContent` to every
+`coerceTextArray` call, each now passing its own field name. Production's only caller
+(`lib/content/run-analysis.ts`) does not pass one and was **not modified** — the instrumentation is
+structurally silent there, not silent-by-convention. `scripts/check-extraction.ts` (the harness) is
+likewise unmodified — this session's throwaway measurement script supplied the reporter directly;
+nothing about the committed harness script itself changed. The new types (`CoercionDrop`,
+`CoercionFieldReport`, `CoercionReporter`) are exported so a future harness change can use them without
+redefining the shape.
+
+Re-ran the same experiment as `0.1-TEMP-EXPERIMENT`: Princeton Dental, `selectRelevantPages` computed
+once and reused by reference across all 5 runs, current settings (no temperature — still unavailable
+on this model, confirmed again in `0.1-TEMP-EXPERIMENT`). Only difference: each run now supplies the
+reporter and the throwaway script aggregates every field's raw/kept/drops across the 5 runs, not just
+the three fields the first experiment happened to track.
+
+**Result table — 5 runs, Princeton Dental, identical fixture:**
+
+| Field | Raw counts (5 runs) | Kept counts (5 runs) | Total drops | Drop reasons |
+|---|---|---|---|---|
+| services | [16,16,16,17,16] | [16,16,16,17,16] | 0 | none |
+| testimonials | [0,0,0,0,0] | [0,0,0,0,0] | 0 | none |
+| stats | [4,4,4,4,4] | [4,4,4,4,4] | 0 | none |
+| **faqs** | **[11,11,9,11,11]** | **[11,11,9,11,11]** | **0** | **none** |
+| differentiators | [6,8,6,8,6] | [6,8,6,8,6] | 0 | none |
+| process | [0,0,0,0,0] | [0,0,0,0,0] | 0 | none |
+| serviceAreas | [1,1,1,1,1] | [1,1,1,1,1] | 0 | none |
+| hours | [5,5,5,5,5] | [5,5,5,5,5] | 0 | none |
+| offers | [2,2,2,2,2] | [2,2,2,2,2] | 0 | none |
+| credentials | [10,10,10,10,9] | [10,10,10,10,9] | 0 | none |
+
+**Raw and kept are identical on every field, every run. Zero drops across 50 field-observations
+(5 runs × 10 fields).**
+
+**The answer to the core question:** of the observed spread, **100% is the model returning different
+content, 0% is coercion silently absorbing malformed items** — in this batch. `raw === kept`
+everywhere means `coerceTextArray` never had anything to drop; every item the model wrote passed its
+required-field check every time. The faqs spread itself moved this run too (9, 11, 11, 11, 11 — range
+2, tighter than `0.1-TEMP-EXPERIMENT`'s 3–11 on a different batch of 5), which is itself more evidence
+this is ordinary sampling variance in what the model chooses to write, not a fixed mechanism: two
+different batches of 5 runs against the identical fixture produced two different ranges, which is
+exactly what you'd expect from genuine model-output variance and not what you'd expect from a
+deterministic coercion bug (a bug would tend to reproduce more consistently against identical input).
+
+**Five runs is enough to answer the question actually asked — it is not enough to claim the mechanism
+never fires.** Zero drops in 50 checks rules out coercion loss as a contributor to *this specific,
+measured* spread with high confidence. It does not prove `coerceTextArray` never drops anything —
+if the true drop rate is low (say, 1 in 50 or rarer), 5 runs could easily show zero by chance. Two
+concrete reasons to expect it's genuinely rare rather than just unlucky-to-miss here: `validateShape`
+already established the model reliably honours the *scalar* half of the same schema, and this run's
+`output_tokens` topped out at 5,086 of a 16,000 ceiling (see below) — nowhere near the truncation
+boundary where a response is most likely to end mid-array and produce a malformed final item. A
+client whose extraction runs closer to the ceiling, or a client with messier source content, is the
+more likely place to actually observe a drop. Worth re-running this same instrumentation against a
+larger, more varied client (Downseal Solutions or Propell Property, both 150 crawled pages, before
+truncation to the char budget) if the question resurfaces.
+
+**The follow-up question — "if drops are a meaningful share, which required field is most often
+missing" — does not apply.** There were no drops to categorize.
+
+**Files created/modified:**
+```
+$ git diff --stat -- lib/content/structure-and-rewrite.ts
+ lib/content/structure-and-rewrite.ts | 81 ++++++++++++++++++++++++++++--------
+ 1 file changed, 63 insertions(+), 18 deletions(-)
+```
+`scripts/_tmp-coercion-experiment.ts` was created and deleted within this entry, never committed.
+`lib/content/run-analysis.ts` and `scripts/check-extraction.ts` — **not modified**, confirmed by their
+absence from `git status --porcelain` below (both still show only the changes from earlier entries in
+this log, not this one).
+
+**Verification command:**
+```
+npx tsc --noEmit
+npm run lint
+npx vitest run
+RUNS=5 npx tsx --env-file=.env scripts/_tmp-coercion-experiment.ts   (deleted after use)
+```
+
+**Output:**
+```
+$ npx tsc --noEmit
+(no output — exit 0)
+
+$ npm run lint
+(no output — exit 0)
+
+$ npx vitest run
+ Test Files  6 passed (6)
+      Tests  55 passed (55)
+
+$ RUNS=5 npx tsx --env-file=.env scripts/_tmp-coercion-experiment.ts
+Fixture: 92 crawled -> 11 selected pages (same array reused for every run)
+[structure-and-rewrite] attempt 1: stop_reason=tool_use output_tokens=4857/16000
+RUN 1: services=16 faqs=11 differentiators=6 inferred=8
+[structure-and-rewrite] attempt 1: stop_reason=tool_use output_tokens=4919/16000
+RUN 2: services=16 faqs=11 differentiators=8 inferred=8
+[structure-and-rewrite] attempt 1: stop_reason=tool_use output_tokens=4418/16000
+RUN 3: services=16 faqs=9 differentiators=6 inferred=8
+[structure-and-rewrite] attempt 1: stop_reason=tool_use output_tokens=5086/16000
+RUN 4: services=17 faqs=11 differentiators=8 inferred=8
+[structure-and-rewrite] attempt 1: stop_reason=tool_use output_tokens=4805/16000
+RUN 5: services=16 faqs=11 differentiators=6 inferred=8
+
+=== SUMMARY (per field, across all runs) ===
+services: raw=[16,16,16,17,16] kept=[16,16,16,17,16] totalDrops=0 reasons=[none]
+testimonials: raw=[0,0,0,0,0] kept=[0,0,0,0,0] totalDrops=0 reasons=[none]
+stats: raw=[4,4,4,4,4] kept=[4,4,4,4,4] totalDrops=0 reasons=[none]
+faqs: raw=[11,11,9,11,11] kept=[11,11,9,11,11] totalDrops=0 reasons=[none]
+differentiators: raw=[6,8,6,8,6] kept=[6,8,6,8,6] totalDrops=0 reasons=[none]
+process: raw=[0,0,0,0,0] kept=[0,0,0,0,0] totalDrops=0 reasons=[none]
+serviceAreas: raw=[1,1,1,1,1] kept=[1,1,1,1,1] totalDrops=0 reasons=[none]
+hours: raw=[5,5,5,5,5] kept=[5,5,5,5,5] totalDrops=0 reasons=[none]
+offers: raw=[2,2,2,2,2] kept=[2,2,2,2,2] totalDrops=0 reasons=[none]
+credentials: raw=[10,10,10,10,9] kept=[10,10,10,10,9] totalDrops=0 reasons=[none]
+
+$ git status --porcelain
+ M docs/kondo-v2-execution.md
+ M lib/content/extract-colors.ts
+ M lib/content/select-hero-image.ts
+ M lib/content/select-relevant-pages.ts
+ M lib/content/structure-and-rewrite.ts
+ M lib/crawl/download-images.ts
+ M scripts/check-extraction.ts
+?? scripts/baselines/
+```
+
+**Failures, retries and dead ends:** none.
+
+**Shortcuts taken:**
+The instrumentation reports drop *reasons* at item granularity (`missing/non-string field: X`, or
+`entry is not an object`) but does not capture the *actual value* that failed the check — by design,
+consistent with the same r2 §8 discipline this entry cites for keeping it opt-in at all. If a drop is
+ever observed, the reason string names which field was the problem but not what the model wrote there;
+recovering that would need raw-response persistence (Decision 3, not built this pass).
+
+**Deviations from the task spec:** none — instrumented exactly the function named, reported exactly
+the fields requested, re-ran the exact same fixture/client as `0.1-TEMP-EXPERIMENT`.
+
+**Not run / not verified:**
+- Whether a larger or messier client (more pages, closer to the token ceiling) would show a non-zero
+  drop rate — flagged above as the more likely place to actually observe one, not tested this pass.
+- Whether the instrumentation's overhead (building a `drops` array and calling a reporter callback on
+  every array field, every attempt) is measurable — at these array sizes (single digits to low teens)
+  it's certainly negligible, but not benchmarked.
+
+**Confidence:** High on the measurement itself (real instrumentation, real API calls, real output,
+zero ambiguity in what raw/kept/drops mean). Medium-high on the generalization — confident this
+specific spread wasn't coercion loss; explicitly not claiming coercion loss never happens anywhere,
+for the reasons stated above.
+
+**Next task:** report to the human per instruction — Decision 3 (fixture curation) awaits go-ahead,
+not started this session.
+---
+
+---
+### 0.1c — Fixture half of persistence, replay mode wired, revised Task 0.1 done-when
+**Timestamp:** 2026-08-17
+**Git SHA at start:** 23d7b35
+**Status:** DONE-UNVERIFIED
+
+**Noted first, per instruction, since it can't be appended to the already-written `0.1b` entry
+(append-only — corrections and follow-on notes are new entries, not edits):** with temperature
+unavailable (`0.1-TEMP-EXPERIMENT`) and coercion loss ruled out as the driver of the observed spread
+(`0.1b`), this model's sampling variance on the extraction call is irreducible with anything available
+to us — there is no lever left to pull that would make two live calls agree. The same property will
+apply to the markup-generation call in Task `3.4`: **the validator in Task `3.5` is the control for
+that, not reproducibility.** Nothing in this build should be designed around an assumption that two
+live model calls, even on identical input, will ever agree — only that the validator can catch a bad
+one, and the fallback renderer (`3.6`) can survive one that fails outright.
+
+**What I did — the fixture half of Decision 3, scoped exactly as instructed (no debugging table this
+pass):**
+
+1. **Exported `replayStructuredContent`** (`lib/content/structure-and-rewrite.ts`) — the public entry
+   point for replay mode. It composes the exact same internal functions the live path uses
+   (`normalizeStringifiedJson` → `validateShape` → `resolveStructuredContent`), no network, no model
+   call. Returns `{ ok: true, value }` or `{ ok: false, reason }`, same discriminated-union shape the
+   v2 plan wants for `resolveDesignSystem` later — not a coincidence, just the right shape for "this
+   can fail and callers must handle it."
+2. **Added `onRawToolInput?: (raw, attempt) => void`** as a fourth, optional parameter to
+   `structureAndRewriteContent` — called once per attempt with the exact, unprocessed
+   `toolUse.input`, before `normalizeStringifiedJson` touches it. Same opt-in discipline as `0.1b`'s
+   `coercionReporter`: production's only caller (`run-analysis.ts`) doesn't pass one and wasn't
+   touched. This is what let this session's throwaway capture harness pull real raw responses out of
+   real live calls without adding any persistence to the production path.
+3. **Curated fixtures — three sourced from real runs, one honestly not sourced:**
+   - `empty-array-field.json` — real capture, Princeton Dental, `testimonials: []` and `process: []`
+     alongside a fully-populated `faqs`/`services`.
+   - `coercion-drop.json` — **synthetic**, clearly marked. Before hand-building anything, searched for
+     a natural one: ran the coercion-instrumented harness against Propell Property (3 runs), Downseal
+     Solutions (3 runs), and Allen Evans Family Lawyers (2 runs) — the three biggest/messiest other
+     clients in the dev database — on top of `0.1b`'s five Princeton Dental runs. **Zero drops across
+     all of it** — roughly 18 live calls, ~150+ field-observations, nothing. Per instruction,
+     hand-built one from the real `empty-array-field.json` capture by deleting `faqs[0].answer`,
+     clearly marked `"synthetic": true` with a `syntheticNote` stating exactly what was changed and
+     what wasn't.
+   - `near-token-ceiling-best-available.json` — real capture, but **honestly not near the ceiling**.
+     Princeton Dental's highest observed run this session was 4,809/16,000 (≈30%). Tried the same
+     three other clients hoping a bigger/messier site would push higher: Propell Property topped out
+     at 3,675, Downseal Solutions at 2,504, Allen Evans Family Lawyers at 2,565 — all *lower* than
+     Princeton, despite two of them having far more crawled pages (150 vs Princeton's 92). Output size
+     tracks how much real content a business has, not how many pages got crawled. Nothing in the
+     current dev database gets genuinely close to the ceiling. Included this fixture labelled exactly
+     that way rather than silently presenting 30% as "near," per instruction not to fabricate quietly.
+   - **`validateShape`-retry — not sourced, reported rather than fabricated.** Every live call made
+     while building these fixtures, and every one made across this entire log (`0.1-TEMP-EXPERIMENT`,
+     `0.1b`, this entry — roughly 30+ structuring calls in total this session), succeeded on attempt 1.
+     No fixture exists for this scenario. Did not attempt to construct one by hand — unlike a single
+     dropped field, faking a plausible two-attempt interaction (a malformed attempt 1, a
+     correction-note-influenced attempt 2) is a materially bigger act of invention, and the human's
+     instruction only pre-authorized a synthetic build for the coercion-drop case specifically.
+     Recorded as a visible `test.todo` in the test file (below) and in
+     `lib/content/fixtures/README.md`, not silently dropped from the count.
+4. **Wired replay mode as a real, permanent, CI-checked capability** — `lib/content/replay-fixture.test.ts`:
+   for each of the three sourced fixtures, replays it twice and asserts the results are `toEqual`
+   (byte-identical), plus one scenario-specific assertion per fixture (empty arrays really are empty;
+   the coercion-drop fixture really keeps 10 of 11 faqs and reports exactly 1 drop; the near-ceiling
+   fixture parses successfully despite its size). One `test.todo` for the unsourced retry scenario, so
+   the gap stays visible in every `vitest run` rather than just in this log entry.
+5. Every fixture also records `imageCandidateAssetIds: []` — all three were captured the same way
+   `scripts/check-extraction.ts` has always run extraction (no image download step), so none of them
+   actually exercise the image-index-matching logic the Q1 refinement flagged. The format supports it
+   (the field exists, `replayStructuredContent` accepts it); nothing currently populates it. Noted as a
+   known gap in the fixtures README rather than silently claimed as covered.
+
+**Revised Task `0.1` done-when — result, not a formal status change to the already-written `0.1`
+entry:** "replay mode reports zero diff across two consecutive runs on all four fixtures" is now
+**met on 3 of the 4 named scenarios**, and unmet on the 4th only because that fixture doesn't exist,
+not because replay produced a diff:
+
+```
+$ npx vitest run lib/content/replay-fixture.test.ts
+ Test Files  1 passed (1)
+      Tests  6 passed | 1 todo (7)
+```
+
+Every sourced fixture replayed twice, `toEqual`, zero diff, every time — confirming the determinism
+argument made when answering Q1/Q2 two turns ago (no `.sort()`, no iterated `Map`, no randomness
+anywhere in the parsing chain) wasn't just a code-reading claim, it holds under a real, repeated,
+executed test. The 4th scenario remains open, honestly, pending either a human decision to author a
+synthetic one or a future live call that happens to need a retry.
+
+**Files created/modified:**
+```
+$ git diff --stat -- lib/content/structure-and-rewrite.ts
+ lib/content/structure-and-rewrite.ts | 114 +++++++++++++++++++++++++++++------
+ 1 file changed, 96 insertions(+), 18 deletions(-)
+
+$ git status --porcelain
+ M docs/kondo-v2-execution.md
+ M lib/content/extract-colors.ts
+ M lib/content/select-hero-image.ts
+ M lib/content/select-relevant-pages.ts
+ M lib/content/structure-and-rewrite.ts
+ M lib/crawl/download-images.ts
+ M scripts/check-extraction.ts
+?? lib/content/fixtures/
+?? lib/content/replay-fixture.test.ts
+?? scripts/baselines/
+```
+New: `lib/content/fixtures/{README.md,empty-array-field.json,coercion-drop.json,
+near-token-ceiling-best-available.json}`, `lib/content/replay-fixture.test.ts`. Throwaway capture
+scripts (`scripts/_tmp-fixture-capture.ts`, `scripts/_tmp-captures-*.json`) were created and deleted
+within this entry, never committed. `lib/content/run-analysis.ts` and `scripts/check-extraction.ts`
+itself — **not modified** (the `check-extraction.ts` diff in `git status` is entirely `0.1a`'s
+`orderBy` fix from a prior entry, not this one).
+
+**Verification command:**
+```
+npx tsc --noEmit
+npm run lint
+npx vitest run lib/content/replay-fixture.test.ts
+npx vitest run                    (full suite)
+```
+
+**Output:**
+```
+$ npx tsc --noEmit
+(no output — exit 0)
+
+$ npm run lint
+(no output — exit 0)
+
+$ npx vitest run lib/content/replay-fixture.test.ts
+ Test Files  1 passed (1)
+      Tests  6 passed | 1 todo (7)
+
+$ npx vitest run
+ Test Files  7 passed (7)
+      Tests  61 passed | 1 todo (62)
+```
+
+Live-call search results (from this entry's throwaway capture harness, deleted after use):
+```
+Princeton Dental (cms7rxpku0001f0ffb0pd5wwe):     4,809 output tokens, 0 drops, 1 attempt
+Propell Property (cmsrt4zav000104jx71i8sc25):     3,675 / 3,623 / 3,369 output tokens, 0 drops, 1 attempt each
+Downseal Solutions (cmss93kr600077wffp4784v6s):   2,217 / 2,504 / 1,956 output tokens, 0 drops, 1 attempt each
+Allen Evans Family Lawyers (cmss6ow9t000104joap6i8dc8): 2,247 / 2,565 output tokens, 0 drops, 1 attempt each
+```
+
+**Failures, retries and dead ends:**
+Tried three different clients specifically hoping to naturally source the coercion-drop and
+near-ceiling fixtures before resorting to synthetic construction for the former and an honest label for
+the latter. Neither materialized. Not treating this as a failure of the session — it's the actual
+answer to "how often does this happen," which is itself useful information, reported rather than
+buried by quietly picking a client that would have made the search look more successful than it was.
+
+**Shortcuts taken:**
+`near-token-ceiling-best-available.json` and `empty-array-field.json` share the identical
+`rawResponse` — one real capture serving two documented purposes rather than two independent captures,
+disclosed in both files' `scenario` text and in the fixtures README, not hidden. No fixture exercises
+real image data (`imageCandidateAssetIds: []` everywhere) — disclosed as a known gap, not claimed as
+covered.
+
+**Deviations from the task spec:** the coercion-drop fixture required going beyond "curate four" into
+"three curated, one hand-built as explicitly pre-authorized, one left as a documented gap" — this was
+the outcome the instruction itself anticipated with its conditional wording, not an improvisation.
+
+**Not run / not verified:**
+- No fixture with real image data exists yet — the index-matching path Q1's refinement specifically
+  flagged is architecturally supported but not exercised by any current test.
+- Whether a genuinely near-ceiling response is achievable against *any* real prospect site, or only
+  against the six clients currently in this dev database — untested; would need a real crawl of a much
+  larger/messier live site, not available from cached data alone.
+- The `validateShape`-retry scenario remains fully unverified by design — no fixture, one `test.todo`.
+
+**Confidence:** High on everything actually built and run (replay mode is real, tested, and passing;
+the search for the two harder fixtures was genuine and its negative results are informative, not just
+absence of effort). Marked `DONE-UNVERIFIED` rather than `DONE-VERIFIED` for the entry as a whole
+because the task's own request — four curated fixtures — is only 3-of-4 delivered, by the nature of
+what was actually observable in live data, not because anything built is broken.
+
+**Next task:** awaiting human direction — whether the 4th fixture gap is accepted, whether to author a
+synthetic `validateShape`-retry fixture, and whether the debugging-table half of persistence (deferred
+from Decision 3) is still wanted, and when.
+---
+
+---
+### 0.1-CLOSEOUT — Task 0.1 marked DONE-VERIFIED, two observations recorded
+**Timestamp:** 2026-08-17
+**Git SHA at start:** 23d7b35
+**Status:** DONE-VERIFIED
+
+**Task `0.1` is closed out as `DONE-VERIFIED`, per the human's explicit decision.** This does not edit
+the original `0.1` entry (still `DONE-UNVERIFIED` as written, correctly — that was the true state at
+the time). The revised done-when — "replay mode reports zero diff across two consecutive runs" — is
+met on every fixture that exists (3 of 3 sourced fixtures, confirmed in `0.1c`'s
+`lib/content/replay-fixture.test.ts` run). The fourth named scenario
+(`validateShape`-retry) is an **absent input, not a replay failure**: replay mode was never asked to
+reproduce it and didn't fail to. It stays open as the `test.todo` already in that file and gets filled
+the first time a real `validateShape` retry actually occurs — not before, and not by construction.
+
+**Correcting two of my own imprecise figures before they calcify in the record.** The human's message
+restated numbers I had already put in the log myself (`0.1c`: "roughly 30+ structuring calls," and the
+`near-token-ceiling-best-available.json` fixture's "4,809" framed loosely as the session peak). Recounted
+both precisely rather than let a loose estimate get repeated into a formally-closed entry:
+
+- **Call count**: exactly **19** genuine model-executing structuring calls across the whole session, not
+  "~30" — `0.1-TEMP-EXPERIMENT` (5, baseline set), `0.1b` (5), `0.1c` (9: 1 Princeton Dental + 3 Propell
+  Property + 3 Downseal Solutions + 2 Allen Evans Family Lawyers). Plus 3 further API calls in the
+  `0.1-TEMP-EXPERIMENT` temperature:0 smoke test that were rejected by the API before any generation and
+  don't count as structuring attempts (no model output was ever produced). My "roughly 30+" in `0.1c` was
+  a careless overestimate, not a deliberate rounding — corrected here.
+- **Peak tokens**: the true session peak is **5,086/16,000** (≈31.8%), from `0.1b`'s RUN 4 against
+  Princeton Dental — not 4,809 as stated in `0.1c` and repeated back just now. 4,809 is real, but it's
+  only the highest run **for which a raw response was actually saved** (`0.1b` didn't persist raw
+  responses; the fixture-capture harness in `0.1c` did). The fixture's own claim — "highest-token real
+  response available *as a fixture*" — remains accurate; my prose describing it as "highest observed run
+  this session" was not, and is corrected here. The qualitative conclusion is unaffected either way: even
+  the true peak (5,086) is still under a third of the ceiling.
+
+**Observation 1 — the defensive machinery isn't exercising anything at this scale.** Across all 19
+genuine calls this session: **zero `validateShape` retries** (every single one succeeded on attempt 1 —
+tracked precisely via the `[structure-and-rewrite] attempt N: ...` log line, which fires on every
+attempt regardless of outcome, not just successful ones) and **zero `coerceTextArray` drops** on the 14
+calls where the coercion reporter was actually attached (`0.1b`'s 5 + `0.1c`'s 9 — the instrumentation
+didn't exist yet during `0.1-TEMP-EXPERIMENT`'s 5, so those 5 weren't separately measured for drops,
+though nothing in their output suggested any). Peak output was 5,086/16,000 tokens. **The retry loop, the
+correction-note re-prompt, and the coercion-leniency layer all exist to handle failure modes that have
+not fired once in 19 tries at this scale.** That's not evidence they're unnecessary — `validateShape`'s
+own comment history (quoted in the original full Kondo audit) describes a real failure this schema
+change once caused — but it is evidence the current book of clients doesn't exercise them, which matters
+for how much confidence to place in "it works" claims that are really "it hasn't needed to prove
+otherwise yet" claims.
+
+**Observation 2 — a known blind spot for Phase 3, flagged explicitly.** No client in the dev database
+(6 total: Princeton Dental, Propell Property, Downseal Solutions, Allen Evans Family Lawyers, BC
+Security, Off-risk Legal Templates) produced a response exceeding ≈32% of the token ceiling, despite
+`0.1c` deliberately trying the two largest-crawl clients (150 pages each) specifically hoping to find
+one. **There is therefore no fixture, and no real evidence at all, representing a large or messy client
+— which is exactly the shape of client Task `3.4`'s markup-generation call is most likely to strain
+against**, per the build plan's own §6.4 concern about output volume. This is not a gap this session can
+close — the dev database doesn't contain a client that would close it, and fabricating one to force
+coverage would be exactly the kind of quiet fabrication this whole log discipline exists to prevent.
+Flagging it now, ahead of Phase 3, rather than discovering it mid-build: **whoever scopes `3.4`'s testing
+should either source a genuinely large/messy real client first, or accept this as an unvalidated edge
+case going in.**
+
+**Debugging-table half of persistence — remains deferred, unchanged.** No action taken this entry. It
+carries a retention decision nobody has made, and nothing in this session's work created new pressure to
+build it — the fixture half (`0.1c`) fully served this session's actual needs (isolating variance
+sources, wiring a deterministic regression gate).
+
+**Files created/modified:** none — this entry records a decision and two observations; no code touched.
+
+**Verification command:**
+```
+(recount, not a new run — re-tallied every RUN line logged in 0.1-TEMP-EXPERIMENT, 0.1b, and 0.1c)
+```
+
+**Output:**
+```
+0.1-TEMP-EXPERIMENT: RUN 1-5 OK (baseline set) = 5 genuine calls
+                      RUN 1 FAILED x3 internal sub-attempts (temperature:0 smoke test,
+                      rejected pre-generation, not counted as structuring attempts)
+0.1b:                 RUN 1-5 OK, each attempts=1 = 5 genuine calls
+0.1c:                 Princeton Dental RUN 1 OK = 1
+                      Propell Property RUN 1-3 OK = 3
+                      Downseal Solutions RUN 1-3 OK = 3
+                      Allen Evans Family Lawyers RUN 1-2 OK = 2
+                      subtotal = 9 genuine calls
+TOTAL genuine structuring calls: 5 + 5 + 9 = 19
+TOTAL validateShape retries observed: 0
+TOTAL coerceTextArray drops observed (14 reporter-instrumented calls): 0
+PEAK output_tokens observed: 5,086/16,000 (0.1b, RUN 4) ≈ 31.8%
+```
+
+**Failures, retries and dead ends:** none new — the correction above is about arithmetic precision in
+prior entries' prose, not a new failed attempt.
+
+**Shortcuts taken:** none.
+
+**Deviations from the task spec:** none — recorded exactly the two observations requested, in the same
+entry, plus the precision correction which the human's own instruction implicitly invited by restating
+figures that turned out to need checking.
+
+**Not run / not verified:** nothing new this entry.
+
+**Confidence:** High — this entry is a recount of numbers already fully logged in prior entries plus a
+decision the human made explicitly; no new empirical claim is introduced.
+
+**Next task:** `0.2` (this session, immediately below).
+---
+
+---
+### 0.2 — Drop `'unsafe-inline'` from production CSP `script-src`
+**Timestamp:** 2026-08-17
+**Git SHA at start:** 23d7b35
+**Status:** BLOCKED
+
+**What I did:**
+Removed `'unsafe-inline'` from the production branch of `scriptSrc` in `next.config.ts:15` only (dev
+branch untouched, still carries both `'unsafe-inline'` and `'unsafe-eval'`). Ran `npm run build` (clean,
+exit 0), started the real production server (`npm start`), and verified against **two** pages, not one
+— specifically because the first one turned out to be an insufficient test and the second is what
+actually surfaced the problem:
+
+1. `curl -I http://localhost:3000/login` and `.../p/princeton-dental-f0f495` — both returned
+   `Content-Security-Policy: ... script-src 'self'; ...` with `'unsafe-inline'` genuinely absent from
+   the header. The header change itself worked exactly as intended.
+2. Loaded `/p/princeton-dental-f0f495` (a real, published concept — chosen because it's a substantial,
+   real, content-rich page and needs no login) in the actual browser: **zero console errors, zero CSP
+   violations, full content rendered.** This looked like a clean pass — but this route
+   (`app/p/[slug]/route.ts`) serves a static HTML string directly from a Route Handler with no React
+   hydration at all (confirmed in the original full Kondo audit), so it was never capable of exercising
+   the actual risk. A clean result here proves nothing about hydration.
+3. Loaded `/login` (a genuine Next.js App Router page with a client component,
+   `app/login/login-form.tsx`) in the browser: **hard failure.** Six distinct CSP violations in the
+   console, each naming a different inline script blocked (`Executing inline script violates the
+   following Content Security Policy directive 'script-src 'self''...`), and `read_page` returned an
+   **empty page** — hydration never completed, the login form never mounted.
+
+**Confirmed the cause concretely, not just cited Next.js folklore about it.** Pulled the raw HTML and
+counted `<script>` tags: 14 with `src=` (external, unaffected by removing `'unsafe-inline'`), **6
+without** — every one of them `self.__next_f.push(...)`, Next.js App Router's own internal mechanism for
+streaming React Server Component ("flight") data to the client for hydration. Six inline scripts, six
+CSP violations — an exact match, not a coincidence. This is Next.js's own architecture, not something in
+this app's code, and Next.js's documented answer to it is a per-request CSP **nonce** (middleware
+generates one, threads it into both the CSP header and Next's own script tags) — not something a static
+header string can express, and a meaningfully bigger change than deleting a token from that string.
+
+**Marked `BLOCKED` per explicit instruction, not worked around.** Reverted `next.config.ts` immediately
+— confirmed via `git diff -- next.config.ts` returning no output, byte-identical to the tracked version
+— rather than leave a change in place that blanks the entire authenticated app (every page under the
+`(app)` layout uses this same architecture; `/login` failing this way means the dashboard, client
+workspace, and every other real page would fail identically). Did not implement a nonce-based CSP —
+that's a distinct, larger task (middleware changes, per-request nonce plumbing, re-verifying against
+streaming/RSC, re-testing every page type) that the human's own instruction anticipated and asked to be
+raised rather than built unprompted.
+
+**One real verification gap, disclosed rather than silently skipped:** could not test an authenticated
+internal page (the dashboard, a client workspace page) — reaching one requires logging in, and I don't
+have credentials. Creating an account or entering a password to authenticate on the human's behalf is
+outside what I'm permitted to do, not merely inconvenient. The published-concept page and the login page
+were the two pages reachable without authentication, and between them they were sufficient to find and
+confirm the actual failure — but a dashboard-level page specifically was not tested, and per the
+architecture just found (same App Router client-component pattern as `/login`), it would almost
+certainly fail identically. Flagging this rather than asserting it as separately verified.
+
+**Files created/modified:**
+```
+$ git diff -- next.config.ts
+(no output — fully reverted, byte-identical to tracked version)
+```
+No other files touched. The production build artifacts (`.next/`) from the build step are gitignored,
+not part of the repo state.
+
+**Verification command:**
+```
+npm run build
+npm start                                          (background; stopped after verification)
+curl -I http://localhost:3000/login
+curl -I http://localhost:3000/p/princeton-dental-f0f495
+(browser: navigate + read_console_messages + read_page on both URLs)
+curl -s http://localhost:3000/login | grep -o '<script[^>]*>' | grep -c 'src='
+curl -s http://localhost:3000/login | grep -o '<script[^>]*>' | grep -vc 'src='
+git diff -- next.config.ts
+npx tsc --noEmit && npm run lint && npx vitest run
+```
+
+**Output:**
+```
+$ npm run build
+✓ Compiled successfully in 27.8s
+✓ Completed runAfterProductionCompile in 2.1s
+  Finished TypeScript in 19.4s ...
+✓ Generating static pages using 7 workers (4/4) in 1597ms
+(exit 0)
+
+$ npm start
+▲ Next.js 16.2.12
+- Local: http://localhost:3000
+✓ Ready in 608ms
+
+$ curl -sI http://localhost:3000/login
+Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://*.supabase.co; connect-src 'self' https://*.supabase.co; frame-ancestors 'none'
+(HTTP/1.1 200 OK — 'unsafe-inline' absent from script-src, confirmed)
+
+$ curl -sI http://localhost:3000/p/princeton-dental-f0f495
+Content-Security-Policy: default-src 'self'; script-src 'self'; ... (identical script-src, same result)
+(HTTP/1.1 200 OK)
+
+[browser] /p/princeton-dental-f0f495: read_console_messages -> "No console logs."
+          get_page_text -> full real page content (Princeton Dental landing page, confirmed rendered)
+
+[browser] /login: read_console_messages ->
+[error] Executing inline script violates the following Content Security Policy directive 'script-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-OBTN3RiyCV4Bq7dFqZ5a2pAXjnCcCYeTJMO2I/LYKeo='), or a nonce ('nonce-...') is required to enable inline execution. The action has been blocked.
+[error] Executing inline script violates the following Content Security Policy directive 'script-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-N4c0MBRMmTAPtWALbRvhQzLBdOAdps5JkxYDhiz6ngg='), or a nonce ('nonce-...') is required to enable inline execution. The action has been blocked.
+[error] Executing inline script violates the following Content Security Policy directive 'script-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-fLz5NfsTupcH1sU7Es5q+bHLGlZxMQhGUteqjquQxaQ='), or a nonce ('nonce-...') is required to enable inline execution. The action has been blocked.
+[error] Executing inline script violates the following Content Security Policy directive 'script-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-lxhDnbc+JW5RwiDmzNe/E4uZzX9gV+a8L4bZBBCo1D4='), or a nonce ('nonce-...') is required to enable inline execution. The action has been blocked.
+[error] Executing inline script violates the following Content Security Policy directive 'script-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-E7rC4mqDTMqvvA3OJF3uSPVwnekVy5o+uXPcIZzl1k4='), or a nonce ('nonce-...') is required to enable inline execution. The action has been blocked.
+[error] Executing inline script violates the following Content Security Policy directive 'script-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-9An2G4WRiAnQFQo32v71SHzX5FLlN6+6YkkDXHEv/yQ='), or a nonce ('nonce-...') is required to enable inline execution. The action has been blocked.
+[error] Uncaught (in promise) {stack: Error: Connection closed. ...}
+          read_page -> "(empty page)" — hydration never completed
+
+$ curl -s http://localhost:3000/login | grep -o '<script[^>]*>' | grep -c 'src='
+14
+$ curl -s http://localhost:3000/login | grep -o '<script[^>]*>' | grep -vc 'src='
+6
+(all 6 confirmed as self.__next_f.push(...) — Next.js App Router flight-data hydration scripts)
+
+$ git diff -- next.config.ts
+(no output — fully reverted)
+
+$ npx tsc --noEmit
+(no output — exit 0)
+$ npm run lint
+(no output — exit 0)
+$ npx vitest run
+ Test Files  7 passed (7)
+      Tests  61 passed | 1 todo (62)
+```
+
+**Failures, retries and dead ends:**
+The first verification page (`/p/[slug]`) passed clean and would have been a false "done" if I'd stopped
+there — it's architecturally incapable of surfacing this failure mode. Deliberately checked a second,
+genuinely hydrated page before concluding anything, which is what actually caught the problem. Worth
+recording as a specific lesson for whoever verifies a future nonce-based fix: **a static-HTML route
+proves nothing about CSP/hydration interaction; verification needs a page with real client components.**
+
+**Shortcuts taken:** none — did not attempt a nonce workaround, did not leave the broken config in place
+to "let the human see it," reverted immediately once the failure was confirmed and understood.
+
+**Deviations from the task spec:** could not verify against an authenticated dashboard/workspace page,
+per the credentials gap disclosed above — the task's own verify command didn't specify a particular
+page, and `/login` turned out to be sufficient to find the failure, but a fuller sweep across page types
+remains undone.
+
+**Not run / not verified:**
+- Any authenticated page under the `(app)` layout (dashboard, client workspace, template gallery,
+  concept view) — no credentials available. Given the architecture just confirmed (same client-component
+  pattern as `/login`), these would almost certainly fail identically, but that's an inference, not a
+  separate test.
+- Whether Next.js's documented nonce mechanism actually resolves this cleanly in practice for this app
+  specifically (Turbopack, streaming, the existing Sentry instrumentation) — not attempted, correctly
+  out of scope for this task per instruction.
+
+**Confidence:** High that the change as scoped (static string removal) does not work for this app, for
+the reason found (Next.js App Router's own flight-data hydration scripts), and that reverting was the
+right call rather than leaving a broken production config in place. Medium-low on how hard the honest
+fix (a nonce) would be to land cleanly — not investigated, deliberately, per instruction.
+
+**Next task:** awaiting human direction — likely either scope a nonce-based CSP as its own task, or
+accept the current `'unsafe-inline'` exposure as a known, documented risk for now and move on to a
+different Phase 0/1 task.
+---
+
+---
+### 0.2-CLEANUP-NOTE — the production server didn't actually stop when 0.2 said it did
+**Timestamp:** 2026-08-17
+**Git SHA at start:** 23d7b35
+**Status:** DONE-VERIFIED
+
+`0.2`'s entry states `npm start (background; stopped after verification)`, based on a `TaskStop` call
+that reported success. It was not actually true — checked afterward, out of habit rather than suspicion,
+and found the real `node.exe` process (PID 1440) still bound to port 3000 and still serving requests
+(`curl` returned `200`). `TaskStop` killed the `npm start` wrapper shell but not the detached `next
+start` child process it had spawned — a real gap between "the task manager says stopped" and "the port
+is actually free," worth knowing about for any future background server task on this machine, not just
+this one. Found the real process via `Get-NetTCPConnection -LocalPort 3000`, force-killed it directly,
+and confirmed with a fresh `curl` that the port is actually free now (connection refused, not a 200).
+
+Not editing `0.2`'s entry — recording the correction here instead, per the same append-only rule every
+other correction in this log has followed.
+
+**Verification command:**
+```
+Get-NetTCPConnection -LocalPort 3000 | Get-Process
+Stop-Process -Id 1440 -Force
+curl -s -o /dev/null -w "HTTP_CODE:%{http_code}" http://localhost:3000/login --max-time 2
+```
+
+**Output:**
+```
+Id ProcessName Path
+-- ----------- ----
+1440 node       C:\Program Files\nodejs\node.exe
+
+(Stop-Process run)
+
+$ curl -s -o /dev/null -w "HTTP_CODE:%{http_code}" http://localhost:3000/login --max-time 2
+HTTP_CODE:000   (connection refused — confirmed stopped)
+```
+
+**Failures, retries and dead ends:** the `TaskStop` call itself — reported success, wasn't actually
+complete. Not treating this as a `TaskStop` bug report, just recording that its success message doesn't
+guarantee the underlying process is gone on this platform, and that a curl/port check is the only thing
+that actually confirms it.
+
+**Shortcuts taken:** none.
+
+**Deviations from the task spec:** none — this is a correction to `0.2`'s reported evidence, not a new
+task.
+
+**Not run / not verified:** whether this same gap (wrapper stopped, child process survives) applies to
+other background tasks started this session — not audited; flagging the pattern, not claiming it's
+isolated to this one instance.
+
+**Confidence:** High — directly observed and directly fixed, verified by an independent tool (`curl`)
+rather than trusting the stop command's own report a second time.
+
+**Next task:** none — awaiting human direction on `0.2`'s substantive question (nonce-based CSP, or
+accept the current exposure).
+---
+
+---
+### 0.2-RECLASSIFY — 0.2 is not achievable as specified; superseded by Task 3.0
+**Timestamp:** 2026-08-17
+**Git SHA at start:** 23d7b35
+**Status:** DONE-VERIFIED
+
+**0.2 as specified — drop `'unsafe-inline'` from production CSP `script-src` via a static config
+change — is not achievable.** Confirmed directly in `0.2`'s own entry: Next.js's App Router injects
+inline `<script>self.__next_f.push(...)</script>` tags for its own React Server Component hydration
+("flight data") on every genuinely-hydrated page. Six such tags on `/login` alone, six matching CSP
+violations, hydration never completing. This is Next's own architecture, present on every page under
+the `(app)` layout, not something fixable by editing `next.config.ts` alone — the honest fix is a
+per-request nonce (Next's own documented mechanism for exactly this), which is a materially bigger
+change: middleware-generated nonce, threaded into Next's script tags, and the CSP header itself moved
+from a static string to something computed per response.
+
+**Reclassifying, not solving, per instruction.** The human's correction: `kondo-v2-build-plan-r2.md`
+§2.4 ("After this build the entire page is model-authored and served unauthenticated at `/p/[slug]`.
+One config line, cheapest risk reduction available") was wrong about *timing*, not about the risk
+itself. That framing describes the exposure **Task `3.4`** creates — a fully model-authored page served
+to an anonymous public visitor. It does not describe today's actual `/p/[slug]`. Verified what's
+actually there right now: the only model-authored content reaching that public route is the
+**experimental per-section editor**, and it requires an authenticated, active-client-scoped action —
+`editConceptSection` (`lib/actions/concepts.ts:66-73`) calls `requireUser()` and
+`requireActiveClient(clientId)` before anything touches a section's HTML. An anonymous visitor to
+`/p/[slug]` cannot trigger it. The nonce requirement is real and not optional — it's just not a Phase 0
+blocker, because the thing it protects against doesn't exist yet.
+
+**Superseded by new Task `3.0`, added to Part C at the top of Phase 3 — see the Part C edit immediately
+following this entry, made under the human's explicit, one-time exception to Part A5's "this section
+stays as written" rule.** `3.0`'s own entry states that exception explicitly, so a reader of Part C
+alone (without this log entry) still knows why it's there.
+
+**The untested-authenticated-page gap disclosed in `0.2`'s own entry carries forward to `3.0`.** `0.2`
+could not verify against a real dashboard/workspace page — no credentials available, and creating an
+account or authenticating on the human's behalf is outside what's permitted. `3.0`'s own done-when
+(below) now explicitly requires an authenticated dashboard page to hydrate clean, which will close this
+gap when `3.0` is actually built — it remains open until then.
+
+**Files created/modified:** none in application code. `prisma/schema.prisma` / `next.config.ts`
+untouched by this entry — the actual CSP work is deferred to `3.0`. Part C of this file is edited by the
+next change, under the explicit exception noted above.
+
+**Verification command:**
+```
+(re-read, not re-run — lib/actions/concepts.ts:66-73, and kondo-v2-build-plan-r2.md §2.4, both already
+established: concepts.ts fresh-read this entry, §2.4 quoted verbatim from the existing document)
+```
+
+**Output:**
+```
+lib/actions/concepts.ts:66-73:
+export async function editConceptSection(
+  clientId: string,
+  conceptId: string,
+  _prevState: SectionEditState,
+  formData: FormData
+): Promise<SectionEditState> {
+  const user = await requireUser();
+  await requireActiveClient(clientId);
+```
+
+**Failures, retries and dead ends:** none.
+
+**Shortcuts taken:** none.
+
+**Deviations from the task spec:** none — this is a reclassification per explicit instruction, not a
+task from Part C.
+
+**Not run / not verified:** whether every other current or future consumer of section-editing stays
+behind the same auth gate as `editConceptSection` — checked the one call site that exists today; if a
+second entry point to section editing is ever added, it would need the same check repeated, not assumed
+from this entry.
+
+**Confidence:** High — the authorization check cited is a direct, fresh read of the actual code, not
+inferred or remembered from an earlier pass.
+
+**Next task:** the Part C edit adding `3.0` (immediately following), then `PHASE-0-VERIFY`.
+---
+
+---
+### PHASE-0-VERIFY — fresh re-verification of every Phase 0 item, not a trust-the-log pass
+**Timestamp:** 2026-08-17
+**Git SHA at start:** 23d7b35
+**Status:** BLOCKED
+
+**Marked `BLOCKED`, not `DONE-VERIFIED`, for one specific reason stated plainly below (`0.3`) — not
+because the rest of the phase isn't genuinely verified.** Re-ran every task's verification directly
+against the current code and a fresh full `vitest`/`tsc`/`lint`/`build` pass, rather than citing prior
+log entries as sufficient. This is **not** the phase sign-off — that's explicitly the human's, per Part
+D's own rules, and no sign-off block appears below.
+
+**0.1 — `DONE-VERIFIED`, reconfirmed fresh.**
+```
+$ npx vitest run lib/content/replay-fixture.test.ts
+ Test Files  1 passed (1)
+      Tests  6 passed | 1 todo (7)
+```
+Identical to `0.1c`'s original result — replay mode is still deterministic on all 3 sourced fixtures,
+the `validateShape`-retry `test.todo` is still visibly open, not silently dropped.
+
+**0.2 — reclassified (see `0.2-RECLASSIFY`), not a Phase 0 blocker. Confirmed the revert actually
+held**, not just that it was logged as reverted:
+```
+$ grep -n "scriptSrc =" -A 2 next.config.ts
+14:const scriptSrc =
+15:  process.env.NODE_ENV === "production" ? "script-src 'self' 'unsafe-inline'" : "script-src 'self' 'unsafe-inline' 'unsafe-eval'";
+```
+Production still carries `'unsafe-inline'` — correct, expected, and unchanged since `0.2`'s revert.
+This is intentionally still true; it becomes false only when Task `3.0` ships.
+
+**0.3 — cannot be reconfirmed, and I don't find it answered anywhere in this log.** Stated plainly
+rather than assumed: `0.3` is *"Is the Railway worker running? Are `UPSTASH_REDIS_REST_URL` and
+`UPSTASH_REDIS_REST_TOKEN` set in production? Log the answers"* — explicitly a human task, about live
+production infrastructure I have no access to and cannot verify from code. Searching this entire log
+for a `0.3` entry or any recorded answer to either question turns up nothing. The human's prior message
+listed Phase 0 as complete with *"0.3 and 0.4 answered"* — `0.4` genuinely is (git-archaeology-based,
+reconfirmed fresh below); I can't find where `0.3` was. This may have been answered verbally or
+somewhere outside this document and simply not logged here yet, or the phase-complete framing may have
+been stated ahead of actually doing it. Either way, **the log has no `0.3` entry to point to, and this
+entry won't fabricate one.** Flagging this to the human directly rather than writing something
+plausible-sounding into a `DONE-VERIFIED`-adjacent entry.
+
+**0.4 — `DONE-VERIFIED`, reconfirmed fresh** (git history is immutable within this session, so an
+identical result was the correct outcome to check for, not just expect):
+```
+$ git log --oneline --all -- prisma/migrations/20260731120000_rebuild_content_pipeline
+5f35c60 Rebuild Kondo as a sales-asset generator, replacing the AI website engine
+
+$ git log --all --oneline --follow -- "*build-page.ts"
+(no output — still confirmed never existed)
+
+$ git show --diff-filter=D --name-only --format="" 5f35c60 | grep "generation/"
+lib/generation/adjective-translations.ts
+lib/generation/anti-defaults.ts
+lib/generation/brief-synthesis.ts
+lib/generation/design-direction.ts
+lib/generation/design-spec-types.ts
+lib/generation/generate.ts
+lib/generation/interpreted-brief-types.ts
+lib/generation/prompt.ts
+lib/generation/quality-floor.ts
+lib/generation/types.ts
+lib/generation/visual-read-types.ts
+lib/generation/visual-read.ts
+lib/generation/wp-theme-prompt.ts
+```
+
+**0.5 — `DONE-VERIFIED`, reconfirmed fresh:**
+```
+$ grep -n "detectedIndustry:" lib/content/structure-and-rewrite.ts prisma/schema.prisma
+lib/content/structure-and-rewrite.ts:127:  detectedIndustry: {
+lib/content/structure-and-rewrite.ts:392:  detectedIndustry: string;
+lib/content/structure-and-rewrite.ts:547:    detectedIndustry: raw.detectedIndustry as string,
+```
+Still a bare `type: "string"` tool-schema field, no `enum` — matches every sibling confidence field
+(`enum: CONFIDENCE_ENUM`) that *does* declare one, by contrast. Free text, unchanged.
+
+**Full fresh `vitest`/`tsc`/`lint`/`build` pass** (all four run just now, not quoted from any earlier
+entry):
+```
+$ npx vitest run
+ Test Files  7 passed (7)
+      Tests  61 passed | 1 todo (62)
+
+$ npx tsc --noEmit
+(no output — exit 0)
+
+$ npm run lint
+(no output — exit 0)
+
+$ npm run build
+✓ Compiled successfully in 18.6s
+✓ Completed runAfterProductionCompile in 2.3s
+  Finished TypeScript in 14.7s ...
+✓ Generating static pages using 7 workers (4/4) in 450ms
+(exit 0)
+```
+
+**Every shortcut and stub logged during this phase, collected into one list** (scanned every entry's
+"Shortcuts taken" section; "none" entries omitted, only real items listed):
+
+| Entry | Shortcut / stub |
+|---|---|
+| `0.4` | Did not read 8 of the 13 files deleted alongside the 4 named ones (`adjective-translations.ts`, `anti-defaults.ts`, `design-spec-types.ts`, `interpreted-brief-types.ts`, `quality-floor.ts`, `types.ts`, `visual-read-types.ts`, `wp-theme-prompt.ts`) in full — inferred their role from usage in the files that were read, not independently verified. |
+| `GITATTRIBUTES-01` | `.gitattributes` affects only future checkouts/hashing — no `git add --renormalize .` was run, so already-tracked files' actual stored line endings weren't audited or fixed. |
+| `0.1` (harness) | The baseline/diff comparison is a coarse count-level summary (array-field counts, `ctaLabel`, page counts), not a full free-text diff — a deliberate choice with stated rationale, not an oversight, but still a narrower check than "diff." |
+| `0.1a` | No new unit test constructs a genuine tie for any of the four fixed sorts — verified only by absence-of-regression on the existing suite plus a live repeated-query check of the `orderBy` fix specifically, not by exercising the new tiebreak branches directly. |
+| `0.1b` | Drop reasons record *which* required field was missing, not the actual malformed value that failed the check — by design, consistent with the same r2 §8 discipline that keeps the whole instrumentation opt-in. |
+| `0.1c` | `empty-array-field.json` and `near-token-ceiling-best-available.json` share one real capture rather than two independent ones (disclosed). No fixture includes real image data — `imageCandidateAssetIds: []` on all three, so the index-matching path is architecturally supported but untested. The `validateShape`-retry fixture is an outright, disclosed gap — `test.todo`, not fabricated. |
+| `0.2` | Verified against `/login` and a public `/p/[slug]` page only — no authenticated dashboard/workspace page was tested, for lack of credentials. Explicitly carried forward as part of Task `3.0`'s own done-when, not left implicit. |
+
+Nothing found across the phase that was stubbed, mocked, or hardcoded and left *undisclosed* — every
+item above was already flagged in its own entry at the time; this is a consolidation, not a discovery
+of anything new.
+
+**Files created/modified:** none — this entry re-runs verification commands and reads existing files;
+no application code touched.
+
+**Verification command:** all commands are pasted inline above, in the section they verify, rather than
+batched separately — each one is adjacent to the specific `0.x` claim it reconfirms.
+
+**Output:** see above, inline per task.
+
+**Failures, retries and dead ends:** the `0.3` search — checked this document for any entry or mention
+under that ID and found none. Not treating "I didn't find it" as "it doesn't exist somewhere," just as
+"it isn't in the one place this log would show it."
+
+**Shortcuts taken:** none in this entry itself — the table above is a report of shortcuts taken
+*during the phase*, not one taken while writing this entry.
+
+**Deviations from the task spec:** none, apart from `0.3` which is disclosed above as a discrepancy
+between the human's framing and what this log actually contains, not resolved unilaterally.
+
+**Not run / not verified:** `0.3`'s two questions (Railway worker status, Upstash env vars in
+production) — cannot be verified from code in this session under any circumstance, fresh or otherwise.
+
+**Confidence:** High on everything re-verified (`0.1`, `0.2`'s current state, `0.4`, `0.5`, the full
+build/test/lint pass) — every one produced identical, real, freshly-executed output. The `BLOCKED`
+status reflects `0.3` specifically, not doubt about the rest.
+
+**Next task:** `0.3`'s actual answer, from the human — then phase sign-off, which is the human's to
+write.
+---
+
+---
+### 0.3 — Production reality check
+**Timestamp:** 2026-08-17
+**Git SHA at start:** 23d7b35
+**Status:** DONE-VERIFIED
+
+**Human task, per Part C — answered by the human, not verified by me.** Production infrastructure
+(Railway, Vercel env vars) is not something this session has access to; recorded here on the human's
+authority, the same way `0.3` was always scoped to be answered, not something an agent could check from
+code. The distinction matters enough to state outright rather than let the entry template's usual
+"I verified this" tone imply something it isn't.
+
+**Answers:**
+- **Railway worker: running.** Deployed and actively processing jobs.
+- **Upstash: set.** Both `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` are present in the
+  production environment.
+
+**This closes two specific open items carried from the original Kondo audit (`docs/kondo-audit.md`),
+both explicitly marked unverifiable from code at the time:**
+- `docs/kondo-audit.md:267`: *"`UNVERIFIED — needs a run`: whether the Railway worker is actually
+  deployed and running continuously in production."* — and the confidence table entry at line 1596,
+  same claim, `Needs a run to confirm`. **Now confirmed: yes, running.**
+- `docs/kondo-audit.md:1024`: *"Whether Upstash env vars are actually set in production"* (and the
+  equivalent framing at line 681) — the audit's broader finding was that rate limiting and the daily
+  spend ceiling **fail open silently** if these are unset (`lib/security/rate-limit.ts:7-27`), with no
+  way to tell from code alone whether that fail-open path was actually live. **Now confirmed: no, it
+  isn't — the env vars are set, so the limiters are active, not silently bypassed.**
+
+**Does anything in the plan need revising? No — stated plainly, not just recorded, per instruction.**
+Both of the feared scenarios are false:
+- The worker is **not** stopped. Nothing about `ANALYZE_SITE` job processing, and nothing about Task
+  `3.7`'s planned second job type (`GENERATE_PAGE`), needs to be re-scoped around a dead consumer.
+  `3.7`'s own done-when ("a full two-phase run completes end to end") is testing against a queue that is
+  actually being drained in production, not a theoretical one.
+- Rate limiting is **not** inactive. `checkCrawlRateLimit`, `checkGlobalDailySpendCeiling`, and the
+  per-user concurrency cap (`lib/actions/analysis.ts:28-51`) are all genuinely enforcing in production
+  today, not silently no-op. This matters specifically because of the cost trajectory the v2 plan itself
+  states (`kondo-v2-build-plan-r2.md` §10: ~$0.30/run today, ~$0.43–0.48/run after Phase 3 adds markup
+  generation) — that per-run cost increase is landing on a spend ceiling that's actually active, not one
+  that only looks active in the code.
+
+**One thing this does *not* close, stated so it isn't mistaken for resolved by association:**
+`checkGenerationRateLimit` — the limiter meant to cover the section-edit AI path — remains **uncalled
+anywhere in the codebase**, confirmed fresh just now:
+```
+$ grep -rl "checkGenerationRateLimit" lib/
+lib/security/rate-limit.ts
+```
+Only its own definition. Upstash being configured makes the limiters that *are* wired in actually work;
+it does nothing for a limiter nobody calls. This was flagged in the original audit and again in
+`RECON-01` — still open, unaffected by today's answers, and worth remembering distinctly from the
+worker/ceiling questions this entry does resolve.
+
+**Files created/modified:** none — this entry records human-supplied information and one fresh grep;
+no application code touched.
+
+**Verification command:**
+```
+(human-supplied answer — not independently verified; the one command actually run is the
+checkGenerationRateLimit re-check below, which is a separate, adjacent fact, not a verification
+of the two headline answers)
+grep -rl "checkGenerationRateLimit" lib/
+```
+
+**Output:**
+```
+$ grep -rl "checkGenerationRateLimit" lib/
+lib/security/rate-limit.ts
+```
+
+**Failures, retries and dead ends:** none.
+
+**Shortcuts taken:** none.
+
+**Deviations from the task spec:** none.
+
+**Not run / not verified:** the two headline answers themselves — by design, this task cannot be
+verified from code, and wasn't. Everything else in this entry (the audit citations, the
+`checkGenerationRateLimit` re-check) was independently confirmed.
+
+**Confidence:** High that this entry accurately records what the human stated, and that the
+`checkGenerationRateLimit` gap is real and current (fresh grep). The two headline production facts
+themselves carry the human's confidence, not mine — I have no independent way to raise or lower it.
+
+**Next task:** `PHASE-0-VERIFY` follow-up (immediately below) — Phase 0 completeness, now that all five
+items have an answer.
+---
+
+---
+### PHASE-0-VERIFY — follow-up: Phase 0 completeness, re-checked
+**Timestamp:** 2026-08-17
+**Git SHA at start:** 23d7b35
+**Status:** DONE-VERIFIED
+
+**Follow-up to the original `PHASE-0-VERIFY` entry above — not an edit to it.** That entry was correctly
+marked `BLOCKED` at the time: four of five items were genuinely, freshly reconfirmed, and the fifth
+(`0.3`) had no answer anywhere in this log. `0.3` is now answered and logged directly above. Re-checking
+completeness with that gap closed, not re-running the fresh code verification a second time — nothing
+about the codebase has changed since the original `PHASE-0-VERIFY` ran it minutes ago, so re-executing
+`vitest`/`tsc`/`lint`/`build` again here would be theatre, not evidence. What changed is `0.3`, and
+that's what this entry checks.
+
+**Final state of all five Phase 0 items:**
+
+| Task | Status | Where |
+|---|---|---|
+| `0.1` — Extend the evaluation harness | `DONE-VERIFIED` | `0.1` (original) → `0.1a`/`0.1b`/`0.1c` (built out) → `0.1-CLOSEOUT` (human decision to close, revised done-when met on every fixture that exists) → reconfirmed fresh in the original `PHASE-0-VERIFY` |
+| `0.2` — Drop `'unsafe-inline'` from production CSP `script-src` | **Reclassified, not blocking** | `0.2` (`BLOCKED` — not achievable as a static config change) → `0.2-RECLASSIFY` (superseded by Task `3.0`, added to Part C under an explicit one-time exception, hard-gated ahead of Task `3.4`) |
+| `0.3` — Production reality check | `DONE-VERIFIED` | This entry's immediate predecessor, above — human-answered, both questions closed, no plan revision needed |
+| `0.4` — The July architecture question | `DONE-VERIFIED` | `0.4` (git archaeology) → reconfirmed fresh in the original `PHASE-0-VERIFY` |
+| `0.5` — Establish the `detectedIndustry` value domain | `DONE-VERIFIED` | `0.5` (original investigation) → reconfirmed fresh in the original `PHASE-0-VERIFY` |
+
+**Phase 0 is complete.** Every item Part C lists as a Phase 0 prerequisite has a real, evidenced
+answer: `0.1`, `0.4`, and `0.5` are `DONE-VERIFIED` on their own terms; `0.2` is not done but is no
+longer a blocker, because what it protects against doesn't exist until Task `3.4`, and the actual
+requirement survives as `3.0`, sequenced correctly ahead of `3.4` rather than dropped; `0.3` is now
+answered, on the record, with both feared failure modes (stopped worker, inactive rate limiting) ruled
+out explicitly rather than left as an assumption riding on "probably fine."
+
+**One thing this entry deliberately does not do:** write the phase sign-off. That block is explicitly
+the human's per Part D's own template and this session's standing instruction — this entry reports that
+the phase is ready for it, not that it's been given.
+
+**Files created/modified:** none.
+
+**Verification command:** none new — this entry is a completeness check against the log's own current
+state (everything above it), not a code re-run. See the original `PHASE-0-VERIFY` entry for the fresh
+`vitest`/`tsc`/`lint`/`build` pass and per-task re-verification this builds on.
+
+**Output:** the table above is the output — five rows, five real answers, no placeholders.
+
+**Failures, retries and dead ends:** none.
+
+**Shortcuts taken:** none.
+
+**Deviations from the task spec:** none.
+
+**Not run / not verified:** nothing new — everything this entry depends on was either verified fresh in
+the original `PHASE-0-VERIFY` (still valid, nothing changed since) or in `0.3` immediately above.
+
+**Confidence:** High — this is a synthesis of five already-independently-verified answers, not a new
+empirical claim.
+
+**Next task:** the human's phase sign-off, then Phase 1's prerequisites are clear to start.
+---
+
+---
+### PHASE 0 SIGN-OFF
+**Timestamp:** 2026-08-17
+**Signed by:** Noemi
+**Tasks verified:** 0.1 DONE-VERIFIED (replay-mode harness, revised done-when);
+0.3 DONE-VERIFIED (worker running, Upstash set); 0.4 DONE-VERIFIED (July
+architecture recovered from git); 0.5 DONE-VERIFIED (detectedIndustry is free text)
+
+**Outstanding issues accepted:**
+1. Task 0.2 not achievable as specified — Next App Router requires inline
+   hydration scripts. Superseded by Task 3.0 (nonce-based CSP), which must
+   complete before Task 3.4 ships. Authenticated-page CSP verification carried
+   forward to 3.0.
+2. validateShape-retry fixture unsourced — zero retries observed in 19 live
+   calls. Held open as a test.todo, to be filled on first real occurrence.
+3. No dev-database client exceeds ~32% of the token ceiling. No large/messy
+   fixture exists; flagged as a Phase 3 blind spot for markup generation.
+4. checkGenerationRateLimit remains uncalled. Separate from 0.3 and still open;
+   revisit before Task 3.4 adds a second costed call.
+5. Debugging-table half of raw-response persistence deferred. Fixture half built.
+6. Extraction-call sampling variance is irreducible — temperature rejected by
+   the model, coercion ruled out at zero drops in 50 field-observations. Same
+   property expected of the markup call; Task 3.5's validator is the control.
+
+**Approved to proceed to Phase 1:** YES
 ---
 
 ---
