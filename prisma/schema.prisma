@@ -63,6 +63,17 @@ model Client {
   concepts      Concept[]
 }
 
+// Before deleting or bulk-cleaning rows here for any reason (test data, stale crawl
+// generations, anything): ContentRecord.logoAssetId and ContentRecord.images
+// (ContentImage[]) reference specific rows here BY ID ONLY — ContentImage carries no URL of
+// its own, so the Review Extraction screen's ability to display an image depends on the
+// referenced Asset row still existing. This is true even for a client that has never
+// published anything, and a published Concept's own baked HTML (see the url comment below)
+// doesn't save you from the *other* consequences of deleting a referenced row. Task 1.7b
+// found this the hard way: Princeton Dental had a PUBLISHED Concept depending on exactly
+// this, one wholesale cleanup query away from a real regression. Check
+// ContentRecord.logoAssetId/images for the client first — scripts/lib/test-crawl-helpers.ts's
+// deleteUnreferencedTestAssets does this automatically for verification scripts.
 model Asset {
   id        String    @id @default(cuid())
   clientId  String
