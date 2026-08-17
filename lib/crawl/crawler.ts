@@ -18,13 +18,49 @@ const PAGE_TIMEOUT_MS = 20_000;
 // sites get anywhere close.
 const MAX_CUSTOM_PROPERTIES = 100;
 
-// A ranked survivor of the neutral filter below — count is how many matched elements shared
-// this exact colour, inMain is whether at least one of those elements sat inside <main>. Best
-// candidate first. An empty array is the honest result when nothing non-neutral was found,
-// not a sentinel to special-case.
+// Task 1.2b — excludes consent/cookie-banner elements from computed-style candidates. 1.2a
+// (docs/kondo-v2-execution.md) tested structural signals first — position:fixed, z-index,
+// shadow DOM, iframe boundary, script/stylesheet origin — against a real cookie banner
+// (Princeton Dental) and found none of them generalise: the banner wasn't in an iframe or
+// shadow DOM, was served from the site's own CMS-platform domain rather than a distinguishably
+// foreign one, and position:fixed also matches legitimate sticky headers. The signal that did
+// hold up is matching id/class/text vocabulary — the same approach ad-blockers' own
+// cookie-banner detector lists (e.g. EasyList Cookie List) already use. Deliberately kept small
+// and specific to consent banners, not a general widget-detection list — this will need
+// maintenance as new consent-management patterns appear; it is not a permanent fix.
+const CONSENT_BANNER_VOCABULARY = ["cookie", "consent", "gdpr"];
+
+// Task 1.2b — excludes buttons whose nearest <form> ancestor is a comment form or a known
+// form-plugin's own wrapper, not the page's primary action. 1.2a found Princeton Dental's
+// WordPress comment-submit button and Allen Evans' Gravity Forms submit button both won a
+// computed-styles field despite being incidental UI. Checked against the *form's own* id/class,
+// not "any button inside any <form>" — a real lead-capture form that is a site's actual primary
+// CTA should not be excluded just for being a <form>.
+const FORM_LANDMARK_VOCABULARY = ["comment", "gform", "wpforms", "wpcf7", "ninja-forms"];
+
+// A ranked survivor of the neutral and vocabulary filters below — count is how many matched
+// elements shared this exact colour, inMain is whether at least one of those elements sat
+// inside <main>. Best candidate first. An empty array is the honest result when nothing
+// non-neutral and non-excluded was found, not a sentinel to special-case.
 export type ColorCandidate = { color: string; count: number; inMain: boolean };
 
-type RawColorSample = { color: string; inMain: boolean };
+// context: lowercased id/class/text of the element plus up to 5 ancestors' id/class, for
+// CONSENT_BANNER_VOCABULARY matching. formLandmarkContext: lowercased id/class of the nearest
+// <form> ancestor specifically, empty string if none — for FORM_LANDMARK_VOCABULARY matching,
+// kept separate from context so a form's own wording can't accidentally trip the consent check
+// or vice versa.
+type RawColorSample = { color: string; inMain: boolean; context: string; formLandmarkContext: string };
+
+// Node-side, not inside page.evaluate — see the no-named-functions-in-evaluate note above
+// captureComputedStyles. Simple substring matching against the small, maintained vocabularies
+// above, not a general parser — see CONSENT_BANNER_VOCABULARY/FORM_LANDMARK_VOCABULARY for why.
+function isExcludedByVocabulary(sample: RawColorSample): boolean {
+  if (CONSENT_BANNER_VOCABULARY.some((word) => sample.context.includes(word))) return true;
+  if (sample.formLandmarkContext && FORM_LANDMARK_VOCABULARY.some((word) => sample.formLandmarkContext.includes(word))) {
+    return true;
+  }
+  return false;
+}
 
 function rgbToHsl(r: number, g: number, b: number): { h: number; s: number; l: number } {
   const rn = r / 255, gn = g / 255, bn = b / 255;
@@ -90,6 +126,7 @@ function parseComputedColor(value: string): { r: number; g: number; b: number; a
 function rankColorCandidates(samples: RawColorSample[]): ColorCandidate[] {
   const counts = new Map<string, { count: number; inMain: boolean }>();
   for (const sample of samples) {
+    if (isExcludedByVocabulary(sample)) continue;
     const rgb = parseComputedColor(sample.color);
     if (!rgb || isNearNeutralOrTransparent(rgb)) continue;
     const existing = counts.get(sample.color);
@@ -116,35 +153,69 @@ function rankColorCandidates(samples: RawColorSample[]): ColorCandidate[] {
 // degrades to `null` for the page rather than failing the crawl.
 //
 // The evaluate callback below only collects raw samples (button/link elements, their computed
-// colour, whether they're inside <main>) — parsing, neutral-filtering and frequency-ranking
-// happen afterward in rankColorCandidates, in ordinary Node-side TypeScript, not inside the
-// browser closure. Doing the ranking logic as real named functions was worth the one extra
-// round trip of plain data across the evaluate boundary, rather than fighting the
+// colour, whether they're inside <main>, and — as of 1.2b — the lexical context
+// isExcludedByVocabulary needs) — parsing, neutral-filtering, vocabulary-filtering and
+// frequency-ranking happen afterward in rankColorCandidates, in ordinary Node-side TypeScript,
+// not inside the browser closure. Doing that logic as real named functions was worth the one
+// extra round trip of plain data across the evaluate boundary, rather than fighting the
 // no-named-functions-inside-evaluate constraint (see the note below) for something this
 // involved.
 //
 // No named function declarations/consts inside the evaluate callback itself — see the
 // identical note in extract.ts: esbuild's name-preservation transform wraps them in a
 // __name() call that doesn't exist inside the browser context page.evaluate() serializes
-// this into.
+// this into. The ancestor walk below is a plain while loop with only value bindings, not a
+// helper function, for the same reason.
 export function captureComputedStyles(page: Page) {
   return page.evaluate((maxCustomProperties) => {
     const buttonEls = Array.from(
       document.querySelectorAll('button, a[class*="btn"], a[class*="button"], input[type="submit"], input[type="button"]')
     );
-    const buttonBackgroundSamples = buttonEls.map((el) => ({
-      color: getComputedStyle(el).backgroundColor,
-      inMain: !!el.closest("main"),
-    }));
-    const buttonBorderSamples = buttonEls.map((el) => ({
-      color: getComputedStyle(el).borderColor,
-      inMain: !!el.closest("main"),
-    }));
 
-    const linkSamples = Array.from(document.querySelectorAll("a")).map((el) => ({
-      color: getComputedStyle(el).color,
-      inMain: !!el.closest("main"),
-    }));
+    const buttonBackgroundSamples: { color: string; inMain: boolean; context: string; formLandmarkContext: string }[] = [];
+    const buttonBorderSamples: { color: string; inMain: boolean; context: string; formLandmarkContext: string }[] = [];
+    for (const el of buttonEls) {
+      const inMain = !!el.closest("main");
+      const ownText = (el.textContent || "").trim().slice(0, 60);
+      const ownIdClass = (el.id || "") + " " + (typeof el.className === "string" ? el.className : "");
+      let ancestorIdClass = "";
+      let formIdClass = "";
+      let cur: Element | null = el.parentElement;
+      let depth = 0;
+      while (cur && depth < 5) {
+        const idc = (cur.id || "") + " " + (typeof cur.className === "string" ? cur.className : "");
+        ancestorIdClass += " " + idc;
+        if (!formIdClass && cur.tagName === "FORM") formIdClass = idc;
+        cur = cur.parentElement;
+        depth++;
+      }
+      const context = (ownIdClass + " " + ownText + " " + ancestorIdClass).toLowerCase();
+      const formLandmarkContext = formIdClass.toLowerCase();
+
+      buttonBackgroundSamples.push({ color: getComputedStyle(el).backgroundColor, inMain, context, formLandmarkContext });
+      buttonBorderSamples.push({ color: getComputedStyle(el).borderColor, inMain, context, formLandmarkContext });
+    }
+
+    const linkSamples: { color: string; inMain: boolean; context: string; formLandmarkContext: string }[] = [];
+    for (const el of Array.from(document.querySelectorAll("a"))) {
+      const inMain = !!el.closest("main");
+      const ownText = (el.textContent || "").trim().slice(0, 60);
+      const ownIdClass = (el.id || "") + " " + (typeof el.className === "string" ? el.className : "");
+      let ancestorIdClass = "";
+      let formIdClass = "";
+      let cur: Element | null = el.parentElement;
+      let depth = 0;
+      while (cur && depth < 5) {
+        const idc = (cur.id || "") + " " + (typeof cur.className === "string" ? cur.className : "");
+        ancestorIdClass += " " + idc;
+        if (!formIdClass && cur.tagName === "FORM") formIdClass = idc;
+        cur = cur.parentElement;
+        depth++;
+      }
+      const context = (ownIdClass + " " + ownText + " " + ancestorIdClass).toLowerCase();
+      const formLandmarkContext = formIdClass.toLowerCase();
+      linkSamples.push({ color: getComputedStyle(el).color, inMain, context, formLandmarkContext });
+    }
 
     const navEl = document.querySelector("nav, header");
     const navBackground = navEl ? getComputedStyle(navEl).backgroundColor : null;

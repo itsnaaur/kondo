@@ -138,7 +138,10 @@ function rankComputedStylesSource(
       return Array.isArray(v) ? (v as ColorCandidate[]) : [];
     });
     const merged = mergeColorCandidates(perPage);
-    if (merged.length > 0) return { candidates: merged, field };
+    if (merged.length === 0) continue;
+    const [winner, runnerUp] = merged;
+    if (isWeakComputedStylesWinner(winner, runnerUp, pageCoverageOf(perPage, winner.color))) continue;
+    return { candidates: merged, field };
   }
   return null;
 }
@@ -150,9 +153,42 @@ function computedStylesConfidence(winner: number, runnerUp: number | null): Conf
     return "low"; // a single, unopposed occurrence is still weak evidence on its own
   }
   const ratio = winner / runnerUp;
-  if (ratio >= 3) return "high"; // e.g. Princeton Dental's real 13-to-1
+  if (ratio >= 3) return "high";
   if (ratio >= 1.5) return "medium";
   return "low"; // e.g. a close 4-to-3 race — a real result, not a confident one
+}
+
+// Task 1.2b. 1.2a found a real-count, real-margin winner can still be misleading: Princeton
+// Dental's post-exclusion primaryButtonBg winner (its real teal `.btn`) won 13-to-3 by count —
+// a "high" margin by computedStylesConfidence's own ratio test — but that 13 came from a
+// single page out of 92 (a promo banner repeated on the homepage), not a sitewide element.
+// Occurrence count alone can't distinguish "genuinely common across the site" from "repeated
+// many times on one page." Page coverage can. Below 10% of crawled pages is treated as a
+// page-specific design choice, not a persistent sitewide brand colour — checked against this
+// task's five real clients: BC Security/Propell Property/Allen Evans Family Lawyers' real
+// winners are all on 100% of pages, comfortably clear; Princeton Dental's post-exclusion
+// candidates (1/92 and 3/92) both fall well under it.
+const MIN_COMPUTED_STYLES_COVERAGE = 0.1;
+
+function pageCoverageOf(perPage: ColorCandidate[][], color: string): number {
+  if (perPage.length === 0) return 0;
+  const pagesWithColor = perPage.filter((page) => page.some((c) => c.color === color)).length;
+  return pagesWithColor / perPage.length;
+}
+
+// A winner this function rejects isn't wrong evidence, just evidence too thin to hand back as
+// a source's answer — the caller falls through to the next field, then the next source
+// (logo, then imagery), the same path a field that found literally nothing already takes.
+// Reuses computedStylesConfidence's own "low" cutoffs for the count/margin half of this check
+// rather than duplicating separate thresholds — anything that would have scored "low" now
+// abstains instead of being returned as a low-confidence computed-styles pick.
+function isWeakComputedStylesWinner(
+  winner: ColorCandidate,
+  runnerUp: ColorCandidate | undefined,
+  coverage: number
+): boolean {
+  if (coverage < MIN_COMPUTED_STYLES_COVERAGE) return true;
+  return computedStylesConfidence(winner.count, runnerUp?.count ?? null) === "low";
 }
 
 // --- source 2: logo (saturation ranked, not frequency ranked) -------------------------
