@@ -18,24 +18,123 @@ const PAGE_TIMEOUT_MS = 20_000;
 // sites get anywhere close.
 const MAX_CUSTOM_PROPERTIES = 100;
 
-// Captured in the same page visit extractPageData already uses — no second navigation. Every
-// field is independently nullable: a site with no visible button, no <nav>/<header>, or no
-// <h1> is a normal case, not a defect in this function. The whole call is wrapped by its
-// caller so a thrown evaluation (a detached frame, a weird page state) degrades to `null`
-// for the page rather than failing the crawl.
-//
-// No named function declarations/consts inside the evaluate callback — see the identical
-// note in extract.ts: esbuild's name-preservation transform wraps them in a __name() call
-// that doesn't exist inside the browser context page.evaluate() serializes this into.
-function captureComputedStyles(page: Page) {
-  return page.evaluate((maxCustomProperties) => {
-    const buttonEl = document.querySelector(
-      'button, a[class*="btn"], a[class*="button"], input[type="submit"], input[type="button"]'
-    );
-    const primaryButtonBg = buttonEl ? getComputedStyle(buttonEl).backgroundColor : null;
+// A ranked survivor of the neutral filter below — count is how many matched elements shared
+// this exact colour, inMain is whether at least one of those elements sat inside <main>. Best
+// candidate first. An empty array is the honest result when nothing non-neutral was found,
+// not a sentinel to special-case.
+export type ColorCandidate = { color: string; count: number; inMain: boolean };
 
-    const linkEl = document.querySelector("a");
-    const linkColor = linkEl ? getComputedStyle(linkEl).color : null;
+type RawColorSample = { color: string; inMain: boolean };
+
+function rgbToHsl(r: number, g: number, b: number): { h: number; s: number; l: number } {
+  const rn = r / 255, gn = g / 255, bn = b / 255;
+  const max = Math.max(rn, gn, bn), min = Math.min(rn, gn, bn);
+  const l = (max + min) / 2;
+  let h = 0, s = 0;
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    if (max === rn) h = ((gn - bn) / d + (gn < bn ? 6 : 0)) / 6;
+    else if (max === gn) h = ((bn - rn) / d + 2) / 6;
+    else h = ((rn - gn) / d + 4) / 6;
+  }
+  return { h: h * 360, s: s * 100, l: l * 100 };
+}
+
+// Deliberately NOT lib/content/extract-colors.ts's isNearNeutral (max > 235 || min < 20 ||
+// max - min < 12) — that was tried first, and rejected after testing against real data (see
+// 1.1b's log). Its min-channel<20 check flags a legitimate, highly-saturated dark colour like
+// rgb(2, 68, 112) — BC Security's actual brand navy, 96% saturated — as neutral, because ONE
+// channel (red) happens to be near zero. That's fine for extract-colors.ts's narrower job
+// (ranking the accent role among a logo's dominant pixel buckets, where this edge case is
+// rare); it silently zeroed out multiple real sites' correct answer here, where a brand
+// colour being a dark, punchy, one-channel-near-zero hue (navy, forest green, deep red) is
+// completely ordinary. HSL saturation/lightness is the correct test for "does this colour
+// carry a usable hue at all" — true near-white, true near-black, and true low-saturation
+// grey are the only things this should reject, regardless of which raw channel is small.
+function isNearNeutralOrTransparent(rgb: { r: number; g: number; b: number; a: number }): boolean {
+  if (rgb.a < 0.5) return true;
+  const { s, l } = rgbToHsl(rgb.r, rgb.g, rgb.b);
+  return l >= 97 || l <= 3 || s < 15;
+}
+
+function parseComputedColor(value: string): { r: number; g: number; b: number; a: number } | null {
+  const match = /^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*([\d.]+))?\s*\)$/.exec(value);
+  if (!match) return null;
+  return {
+    r: Number(match[1]),
+    g: Number(match[2]),
+    b: Number(match[3]),
+    a: match[4] !== undefined ? Number(match[4]) : 1,
+  };
+}
+
+// Filters near-neutral/transparent samples, then ranks the survivors by how often each exact
+// colour recurred — 1.1a found the real brand colour is consistently the most-repeated
+// non-neutral value across a page's buttons/links, not the first one in document order.
+// <main> is a soft tiebreak only, per the same investigation: Princeton Dental's real CTAs
+// are all outside <main> (the site has no <main> landmark at all), so treating "inside main"
+// as a hard requirement would have discarded the correct answer entirely, not just ranked it
+// lower. Final tiebreak is the colour string itself — explicit, not array-position-dependent,
+// same discipline as the sort fixes in 0.1a.
+function rankColorCandidates(samples: RawColorSample[]): ColorCandidate[] {
+  const counts = new Map<string, { count: number; inMain: boolean }>();
+  for (const sample of samples) {
+    const rgb = parseComputedColor(sample.color);
+    if (!rgb || isNearNeutralOrTransparent(rgb)) continue;
+    const existing = counts.get(sample.color);
+    if (existing) {
+      existing.count++;
+      existing.inMain = existing.inMain || sample.inMain;
+    } else {
+      counts.set(sample.color, { count: 1, inMain: sample.inMain });
+    }
+  }
+  return [...counts.entries()]
+    .map(([color, v]) => ({ color, count: v.count, inMain: v.inMain }))
+    .sort((a, b) => {
+      if (b.count !== a.count) return b.count - a.count;
+      if (a.inMain !== b.inMain) return a.inMain ? -1 : 1;
+      return a.color.localeCompare(b.color);
+    });
+}
+
+// Captured in the same page visit extractPageData already uses — no second navigation. Every
+// field is independently allowed to come back empty: a site with no visible button, no
+// <nav>/<header>, or no <h1> is a normal case, not a defect in this function. The whole call
+// is wrapped by its caller so a thrown evaluation (a detached frame, a weird page state)
+// degrades to `null` for the page rather than failing the crawl.
+//
+// The evaluate callback below only collects raw samples (button/link elements, their computed
+// colour, whether they're inside <main>) — parsing, neutral-filtering and frequency-ranking
+// happen afterward in rankColorCandidates, in ordinary Node-side TypeScript, not inside the
+// browser closure. Doing the ranking logic as real named functions was worth the one extra
+// round trip of plain data across the evaluate boundary, rather than fighting the
+// no-named-functions-inside-evaluate constraint (see the note below) for something this
+// involved.
+//
+// No named function declarations/consts inside the evaluate callback itself — see the
+// identical note in extract.ts: esbuild's name-preservation transform wraps them in a
+// __name() call that doesn't exist inside the browser context page.evaluate() serializes
+// this into.
+export function captureComputedStyles(page: Page) {
+  return page.evaluate((maxCustomProperties) => {
+    const buttonEls = Array.from(
+      document.querySelectorAll('button, a[class*="btn"], a[class*="button"], input[type="submit"], input[type="button"]')
+    );
+    const buttonBackgroundSamples = buttonEls.map((el) => ({
+      color: getComputedStyle(el).backgroundColor,
+      inMain: !!el.closest("main"),
+    }));
+    const buttonBorderSamples = buttonEls.map((el) => ({
+      color: getComputedStyle(el).borderColor,
+      inMain: !!el.closest("main"),
+    }));
+
+    const linkSamples = Array.from(document.querySelectorAll("a")).map((el) => ({
+      color: getComputedStyle(el).color,
+      inMain: !!el.closest("main"),
+    }));
 
     const navEl = document.querySelector("nav, header");
     const navBackground = navEl ? getComputedStyle(navEl).backgroundColor : null;
@@ -52,8 +151,15 @@ function captureComputedStyles(page: Page) {
       if (value) customProperties[prop] = value;
     }
 
-    return { primaryButtonBg, linkColor, navBackground, h1Color, customProperties };
-  }, MAX_CUSTOM_PROPERTIES);
+    return { buttonBackgroundSamples, buttonBorderSamples, linkSamples, navBackground, h1Color, customProperties };
+  }, MAX_CUSTOM_PROPERTIES).then((raw) => ({
+    primaryButtonBg: rankColorCandidates(raw.buttonBackgroundSamples),
+    buttonBorderColor: rankColorCandidates(raw.buttonBorderSamples),
+    linkColor: rankColorCandidates(raw.linkSamples),
+    navBackground: raw.navBackground,
+    h1Color: raw.h1Color,
+    customProperties: raw.customProperties,
+  }));
 }
 
 export async function crawlClientSite(

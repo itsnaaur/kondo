@@ -107,10 +107,19 @@ model CrawledPage {
   createdAt   DateTime @default(now())
 
   // Captured in the same Playwright page visit that produces title/textContent — see
-  // lib/crawl/crawler.ts. Null when the capture itself failed or nothing on the page
-  // matched (a site with no visible button is normal, not an error). Shape:
-  // { primaryButtonBg, linkColor, navBackground, h1Color, customProperties } — every
-  // field independently nullable, not an all-or-nothing object.
+  // lib/crawl/crawler.ts. Null when the capture itself failed (a thrown evaluation);
+  // individual fields inside it are independently allowed to come back empty, not an
+  // all-or-nothing object. Shape (as of 1.1b — see docs/kondo-v2-execution.md):
+  // {
+  //   primaryButtonBg: ColorCandidate[],    // ranked, filtered non-neutral, best first, [] if none
+  //   buttonBorderColor: ColorCandidate[],  // same treatment, kept distinct — see 1.1b's Downseal finding
+  //   linkColor: ColorCandidate[],          // same treatment
+  //   navBackground: string | null,         // unchanged from 1.1 — single first-match value
+  //   h1Color: string | null,               // unchanged from 1.1 — single first-match value
+  //   customProperties: Record<string, string>,
+  // }
+  // ColorCandidate = { color: string; count: number; inMain: boolean } — see
+  // lib/crawl/crawler.ts's rankColorCandidates for how count/inMain are computed and ranked.
   computedStyles Json?
 }
 
