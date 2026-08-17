@@ -8042,6 +8042,240 @@ Test count 89 → 170.
 ---
 
 ---
+### 3.0 — Nonce-based CSP
+**Timestamp:** 2026-08-18
+**Git SHA at start:** d199850
+**Status:** DONE-VERIFIED, with one disclosed, unresolved verification gap (authenticated pages —
+see below, not treated as a blocker per the task's own framing of that gap as pre-existing and
+carried forward, not newly created here).
+
+**What I did, matching the task's own scope list:**
+- `proxy.ts`: generates a per-request nonce (`Buffer.from(crypto.randomUUID()).toString("base64")`,
+  Next's own documented pattern, fetched and followed directly rather than reconstructed from
+  memory — see below), builds the CSP string with `'nonce-{value}' 'strict-dynamic'` in
+  `script-src` (`'unsafe-eval'` appended only when `NODE_ENV === "development"`), sets it on both
+  the outgoing request's headers (so Next's SSR can read it via `headers()`) and the actual
+  response headers (what the browser enforces).
+- `lib/supabase/middleware.ts`: `updateSession` now takes a second `requestHeaders: Headers`
+  parameter and forwards it in both its `NextResponse.next({request})` call sites — needed because
+  Next only auto-applies a nonce to its own flight-data hydration scripts when it can read the
+  nonce back off the *request* object during rendering, not just the response; without this change,
+  `updateSession`'s own internal response construction would have silently forwarded the
+  unmodified original request and the nonce would never have reached SSR at all.
+- `next.config.ts`: `Content-Security-Policy` removed from the general `SECURITY_HEADERS` list
+  (which still carries HSTS/`X-Content-Type-Options`/`X-Frame-Options`/`Referrer-Policy` — none of
+  those need a nonce, moving them would have been scope creep). A new, separate, static
+  `/p/:path*`-scoped CSP rule takes its place — see below for why and what it looks like.
+- `app/login/page.tsx`: `export const dynamic = "force-dynamic"` — a real, necessary addition this
+  task's own investigation found, not anticipated in the task's own bullet list, detailed below.
+
+**Confirmed Next's exact documented mechanism before implementing it, not from memory.** Fetched
+`nextjs.org/docs/app/guides/content-security-policy` directly (dated 2026-03-20, v16.3.1 — this
+app runs 16.2.12, close enough to trust) rather than reconstruct the nonce-threading pattern from
+recollection, given how easy this specific mechanism is to get subtly wrong (request-header vs
+response-header nonce placement, `'strict-dynamic'`, the dynamic-rendering requirement). The
+fetched doc's own example file is literally named `proxy.ts` — confirming this app's existing
+file name already matches Next's own current convention, not a local naming quirk.
+
+**A real, necessary change the task's own bullet list didn't anticipate, found by checking rather
+than assumed unnecessary: `/login` needed `force-dynamic` too.** Next's docs are explicit that a
+nonce-based CSP requires every page it applies to be dynamically rendered — a statically
+prerendered page is built once, with no per-request nonce to inject, so its baked-in (or absent)
+nonce can never match the fresh one middleware generates for any given real request. Checked `npm
+run build`'s route summary *before* touching `app/login/page.tsx`: `/login` was marked `○` Static
+— the only real page besides the built-in `/_not-found` still statically prerendered. `(app)/
+layout.tsx` and `app/mfa/page.tsx` already carry `force-dynamic` (pre-existing, from before this
+task); `/login` didn't, and needed the identical fix for the identical reason. Confirmed post-fix
+in a fresh build: `/login` now reads `ƒ` (Dynamic). This is not the "unanticipated change" the
+task's own `BLOCKED` escape hatch was written for — it's a natural, in-scope consequence of
+"thread it to Next's script tags" once actually checked, not a surprise requiring the task to stop.
+
+**`/p/[slug]`'s CSP under the new scheme, stated directly, per the task's own explicit ask.** It
+gets a **static**, **nonce-less** CSP rule, added directly in `next.config.ts`, scoped to
+`/p/:path*` only — because `proxy.ts`'s matcher excludes `/p/` entirely (pre-existing, unchanged
+by this task) and the route never passes through it, so it can never receive a nonce from there.
+Confirmed by re-reading `app/p/[slug]/route.ts` directly: it doesn't set its own CSP at all today
+(its "no CSP sandbox" comment refers to a different, older iframe-sandboxing concern, not "no CSP
+whatsoever" — it was inheriting the *old* global static policy from `next.config.ts`'s blanket
+`/:path*` rule the whole time, confirmed by checking, not assumed from the comment's wording
+alone). Its new rule keeps `script-src 'self'` with **no** `'unsafe-inline'` and no nonce — safe
+and correct because this route has zero inline `<script>` tags to accommodate, confirmed by
+grepping every file in `lib/templates/` for `` `<script` `` (the only match is a test asserting
+XSS input gets escaped, not a real template feature). This makes `/p/[slug]`'s policy *stricter*
+than the main app's pre-`3.0` policy ever was, not weaker. `style-src` keeps `'unsafe-inline'`
+there, unchanged — every template's CSS ships as a literal `<style>` block plus inline `style=""`
+attributes baked directly into the HTML (`lib/templates/shell.ts`), and there's no per-request
+nonce available on a route middleware never touches to gate it with instead.
+
+**Scope boundary stated directly, not left implicit: `style-src` is untouched everywhere, on
+purpose.** The task's own constraint list scopes this to `script-src` specifically ("Production
+`script-src` carries the nonce and no `'unsafe-inline'`"). `style-src 'unsafe-inline'` remains on
+both the main app's nonce-based policy and `/p/[slug]`'s static one — removing it is a materially
+different, larger piece of work (a style nonce threaded the same way, or moving every inline style
+out) that the task didn't ask for.
+
+**Verified on a page that actually hydrates, not just a clean `curl -I` — the exact 0.2 near-miss
+named in the task's own constraints, deliberately not repeated.** `npm run build` → `npm start`
+(real production server) → `/login`:
+```
+$ curl -sI http://localhost:3000/login
+HTTP/1.1 200 OK
+Strict-Transport-Security: max-age=63072000; includeSubDomains; preload
+X-Content-Type-Options: nosniff
+X-Frame-Options: DENY
+Referrer-Policy: strict-origin-when-cross-origin
+content-security-policy: default-src 'self'; script-src 'self' 'nonce-Nzc4ZmVjMGEtODY3My00OTdmLWJjYzItZWFiNzEyMWM5NDU2' 'strict-dynamic'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://*.supabase.co; connect-src 'self' https://*.supabase.co; frame-ancestors 'none'
+link: </_next/static/media/...woff2>; rel=preload; as="font"; crossorigin=""; nonce="Nzc4ZmVjMGEtODY3My00OTdmLWJjYzItZWFiNzEyMWM5NDU2"; type="font/woff2", ...
+```
+The `link:` font-preload header carrying the **same** nonce as the CSP header, unprompted, is real
+evidence Next itself parsed the CSP header and is threading the nonce through its own internal
+mechanisms — not something this task's code set directly, so its presence confirms the pipeline is
+actually wired end to end, not just that the header string looks right. A second `curl` moments
+later returned a **different** nonce (`MDg1MjgzMTI...` vs `Nzc4ZmVjMGE...`) — genuinely
+per-request, not a value that happened to get cached. `unsafe-inline` is confirmed absent from
+`script-src` in both.
+
+**Then the actual browser check** — `/login`, real production server:
+```
+[browser] read_console_messages (onlyErrors: true) -> "No console logs."
+[browser] read_page ->
+  textbox "Email" [ref_1] type="email" placeholder="Email"
+  textbox "Password" [ref_2] type="password" placeholder="Password"
+  button "Sign in" [ref_3] type="submit"
+```
+Zero CSP violations, and — the specific thing `0.2` found broken — the form is **genuinely
+hydrated**: real, typed, interactive elements, not the "(empty page)" `0.2`'s own test returned
+under the old static-string approach. Screenshot unavailable this session (the same Browser-pane
+display issue from `2.3`'s own entry, retried once, same failure) — console-error and
+`read_page`-interactivity evidence is direct and sufficient here regardless, since `0.2`'s actual
+failure mode (hydration never completing) is exactly what `read_page` returning real form elements
+disproves.
+
+**Redirect branch confirmed too, not just the "everything's fine" path.** An unauthenticated
+request to a real protected route:
+```
+$ curl -sI http://localhost:3000/clients/new
+HTTP/1.1 307 Temporary Redirect
+content-security-policy: default-src 'self'; script-src 'self' 'nonce-ODY0ZjlkYjAtNGRjNS00OTA4LThmZjYtNzhmYTI0NTMzMjAx' 'strict-dynamic'; ...
+location: /login?next=%2Fclients%2Fnew
+```
+The redirect response itself carries a full, fresh, nonced CSP — confirming `response.headers.set`
+in `proxy.ts` covers every branch `updateSession` can return, not only the "continue" case.
+
+**Dev mode confirmed too** (`npm run dev`, same `/login`):
+```
+content-security-policy: ...script-src 'self' 'nonce-...' 'strict-dynamic' 'unsafe-eval'; ...
+```
+`'unsafe-eval'` present in dev, exactly the constraint asked for, verified rather than assumed from
+reading the `isDev` branch in isolation.
+
+**The authenticated-page gap carries forward from `0.2`, unresolved, stated plainly rather than
+treated as closed by architecture alone.** Still no credentials — creating an account or entering
+a password on the human's behalf is outside what's permitted, same boundary `0.2` hit. **Not
+tested directly.** What *is* confirmed, and stated as inference rather than substituted for a real
+test: `(app)/layout.tsx` (covering every route under it — the dashboard, client workspace,
+templates, trash) already carries `force-dynamic` from before this task, `proxy.ts`'s matcher
+already includes every one of those routes (only `/p/` and static assets are excluded), and the
+redirect-branch check above confirms the exact code path an unauthenticated hit on one of them
+takes carries a correct, fresh CSP. The remaining, genuinely untested step is what happens *after*
+successful authentication — the human's own message says they'll verify that half directly.
+
+**Files created/modified:**
+```
+$ git status --porcelain
+ M app/login/page.tsx
+ M lib/supabase/middleware.ts
+ M next.config.ts
+ M proxy.ts
+```
+
+**Verification command:**
+```
+npx tsc --noEmit && npm run lint && npx vitest run
+npm run build
+npm start                                          (background; stopped after, port-checked)
+curl -sI http://localhost:3000/login
+curl -sI http://localhost:3000/login                (second call, confirming nonce rotates)
+curl -sI http://localhost:3000/p/princeton-dental-f0f495
+curl -sI http://localhost:3000/clients/new
+(browser: navigate to /login, read_console_messages, read_page)
+npm run dev                                        (background; stopped after, port-checked)
+curl -sI http://localhost:3000/login                (dev-mode CSP check)
+```
+
+**Output:**
+```
+$ npx tsc --noEmit
+(exit 0)
+$ npm run lint
+(exit 0)
+$ npx vitest run
+ Test Files  11 passed (11)
+      Tests  170 passed | 1 todo (171)
+
+$ npm run build
+Route (app)
+┌ ƒ /
+├ ○ /_not-found
+├ ƒ /api/...  (x2)
+├ ƒ /clients/[id] (x4 routes)
+├ ○ /icon.png
+├ ƒ /login                                          <- was ○ Static before this task's fix
+├ ƒ /mfa
+├ ƒ /p/[slug]
+└ ƒ /trash
+(exit 0)
+```
+(full curl/browser output pasted inline above, in the section each verifies)
+
+**Failures, retries and dead ends:** `npm start` failed on the first attempt —
+`EADDRINUSE: address already in use :::3000`, a stray `node.exe` (PID 26592) left over from
+earlier in this session. Checked which process actually held the port before killing it
+(`Get-Process -Id`), confirmed it was a Next server process, not something else, force-killed it,
+and confirmed with a `curl --max-time 2` (connection refused) that the port was genuinely free
+before retrying — applying `0.2-CLEANUP-NOTE`'s own lesson directly (a stop command's reported
+success doesn't guarantee the port is actually free; only an independent check does) rather than
+re-learning it. Every server started in this task (the production run, the dev run) was verified
+stopped the same way afterward, not just assumed stopped because a background task ID exists.
+
+**Shortcuts taken:** none. `strict-dynamic` was added even though the task's constraint list didn't
+name it explicitly — it's Next's own documented pairing for nonce-based CSP specifically because
+of how their chunk-loading architecture works, not an independent addition; omitting it would have
+been the actual deviation from "follow Next's real mechanism," not including it.
+
+**Deviations from the task spec:** none in what was built. `app/login/page.tsx`'s `force-dynamic`
+addition is a real, disclosed *finding* beyond the task's own anticipated file list (`proxy.ts`/
+middleware, `next.config.ts`, "wherever the CSP header is currently assembled") — not a deviation
+from instruction, since `app/login/page.tsx` genuinely is "wherever the CSP header['s effect]
+is currently [not] assembled correctly," and the task's own framing explicitly welcomed exactly
+this kind of finding over working around it.
+
+**Not run / not verified:**
+- Any real authenticated page post-login — disclosed at length above, not newly discovered here,
+  carried forward from `0.2` exactly as the task's own text anticipated.
+- `/_not-found` (Next's built-in 404 handler) remains statically rendered — no custom
+  `app/not-found.tsx` exists in this app to add `force-dynamic` to, and Next's default 404 handler
+  isn't a file this task can straightforwardly edit the same way. If it renders the same
+  flight-data hydration scripts a real page does, it would violate CSP the same way `/login` did
+  before this fix. Low-priority (an internal tool's error page, not a user-facing flow, and not
+  one of the task's own named verification targets) but genuinely unverified, not silently assumed
+  fine.
+- Whether every third-party integration this app might load (Sentry's own client-side pieces, if
+  any inject inline scripts) is compatible with the new nonce policy — Sentry wasn't specifically
+  exercised in this task's verification; no CSP violation surfaced in the checks that were run, but
+  those checks didn't specifically target Sentry's own instrumentation.
+
+**Confidence:** High on everything checked directly — the exact mechanism was fetched from Next's
+current docs rather than recalled, and every claim above (nonce rotation, `strict-dynamic`,
+`unsafe-eval` in dev only, `/p/[slug]`'s stricter policy, the redirect branch, `/login`'s
+hydration) is backed by a real command run in this task, not inferred. Medium on the
+authenticated-page path specifically — architecturally identical to what was tested, but that is
+an inference, stated as one, not a substitute for the human's own planned verification.
+
+**Next task:** not specified — awaiting direction.
+---
+
+---
 
 # PART E — For the human reviewing this log
 
