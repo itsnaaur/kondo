@@ -8508,6 +8508,171 @@ own historical run.
 **Next task:** not specified — awaiting direction.
 ---
 
+### 3.2 — `resolve-design-system.ts` with a discriminated union
+**Timestamp:** 2026-08-18
+**Git SHA at start:** 483b0df
+**Status:** DONE-VERIFIED — `tsc --noEmit` clean, `lint` clean, full suite 13 files / 195 tests
+passing (184 → 195, exactly the 11 new tests added, no existing test touched). The done-when's own
+test (a deliberately unmatched business resolving `ok: false`) passes, and a second test proves the
+compiler itself — not just the runtime branch — rejects reading `.system` off an unnarrowed result.
+
+**What I did:** Two new files, both untouched by any prior task. `lib/design/classify-vertical.ts`
+— a small, hand-written keyword→vertical table (10 verticals) over `detectedIndustry: string |
+null` (confirmed free text by execution-log Task `0.5`), checked top-to-bottom, first match wins,
+substring/case-insensitive matching. Explicitly **not** the 192-row `ui-reasoning.csv` re-key —
+build plan §3.3 defers that deliberately and this file doesn't touch it. The 10 verticals are the
+three doomed templates' own `TemplateMeta.industries[]` word-lists (`ledger`/`showcase`/`atlas`
+`meta.ts`, all deleted in `3.8`) merged and deduplicated — real existing vocabulary, not invented,
+though still a starter list with no real pattern library yet to validate it against (same
+disclosed-gap shape as `3.1`'s own hypothetical pattern profiles).
+
+`lib/design/resolve-design-system.ts` composes exactly the four modules named in the task
+instruction — `buildPalette` (`1.5`), `resolveTypography` (`2.2`), `resolveTemplateTokens`/
+`resolveStyleBundle` (`2.3`/`2.4`), `scorePatternEligibility` (`3.1`) — plus the new vertical
+classifier, into:
+```ts
+export type ResolveDesignSystemResult =
+  | { ok: true; system: DesignSystem }
+  | { ok: false; reason: "no-vertical-match"; partial: NeutralSystem };
+```
+`DesignSystem` (the `ok: true` branch) carries `vertical`, `palette`, `typography`, `tokens`,
+`styleBundle`, and `patternEligibility`. `NeutralSystem` (the `ok: false` branch) carries every one
+of those *except* `vertical` and `patternEligibility` — both genuinely depend on a known vertical,
+so a caller with an unmatched business still gets a real, competent, neutral palette/typography/
+tokens/bundle, not nothing. `palette`/`typography`/`tokens`/`styleBundle` are resolved
+unconditionally, before the vertical check, since none of the four actually depend on knowing the
+vertical — only `classifyVertical`'s own result decides which branch of the union gets returned.
+
+Build plan §6.1 also names "anti-patterns from the canonical enum" as part of design-system
+resolution. Out of scope here, stated directly: it wasn't one of the four modules this task was
+told to compose, and no prior task has authored that canonical enum for this file to consume — not
+a silent omission.
+
+**The two things stated rather than assumed, per instruction:**
+
+1. **Do `2.5`'s goldens extend to cover this file? No — not by adding to
+`resolve-tokens.test.ts`.** That file's own header comment (written at `2.5` time) anticipated
+exactly that extension, but its stated scope is narrower than what this file actually composes
+(typography + bundle selection only — nothing about palette, pattern eligibility, or vertical
+classification/the `ok`/`reason`/`partial` union), and folding four more concerns into a file that
+explicitly scopes itself to two would break that file's own stated purpose. New file instead:
+`resolve-design-system.test.ts`, scoped to what this task actually built. `resolve-tokens.test.ts`
+itself is untouched — its own 39 golden tests still pass unchanged, confirmed in the same run.
+
+2. **How does the resolver get `moodSignals`/`positioningTier` without a real `5.4` producer? It
+doesn't invent a substitute source.** An optional `classification?: {moodSignals?, positioningTier?}`
+input field, defaulting to `{ moodSignals: [], positioningTier: "mainstream" }` — the exact same
+default `resolveTemplateTokens` (`2.4`) already established one level down, threaded through
+unchanged rather than re-decided here. This resolver never fabricates a mood signal or reads one
+from anywhere `5.4` doesn't yet write to; a caller with nothing to pass gets the same neutral
+default every other pre-`5.4` caller already gets, and a caller with real `5.4` data (once it
+exists) passes it through this same field with no signature change required.
+
+**The done-when test, pasted verbatim (`lib/design/resolve-design-system.test.ts`):**
+```ts
+describe("resolveDesignSystem — the done-when: a deliberately unmatched business returns ok: false, and the type system forces callers to handle it", () => {
+  it("a business whose detectedIndustry matches nothing in classify-vertical.ts's table resolves ok: false, reason 'no-vertical-match'", () => {
+    const result = resolveDesignSystem({ ...BASE_INPUT, detectedIndustry: "artisanal candle subscription box curation" });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected ok: false");
+    expect(result.reason).toBe("no-vertical-match");
+    // The partial system is still real, not a stub — same buildPalette/resolveTypography/
+    // resolveTemplateTokens/resolveStyleBundle calls a successful resolution would have made.
+    expect(result.partial.palette.derivedFrom).toBe("brand");
+    expect(result.partial.typography.pairingId).toBeTypeOf("number");
+    expect(result.partial.tokens.fontBody).toContain("Inter");
+    expect(result.partial.styleBundle.id).toBe("crisp-formal");
+  });
+
+  it("the type system rejects reading .system off an unnarrowed result — proves the union, not just the runtime branch", () => {
+    const result = resolveDesignSystem({ ...BASE_INPUT, detectedIndustry: "artisanal candle subscription box curation" });
+    // @ts-expect-error — `system` does not exist on the `{ ok: false }` branch of the union, and
+    // TypeScript cannot know which branch `result` is without an `if (result.ok)` narrowing
+    // first. If this line ever stops erroring, the discriminated union has been weakened
+    // (e.g. `system` made optional on both branches instead of branch-exclusive) and this
+    // test's own compile step (tsc --noEmit) will fail.
+    const _unreachable = result.system;
+    void _unreachable;
+  });
+  ...
+});
+```
+The second test is the one that actually proves "the type system forces callers to handle it," not
+just the runtime one: `tsc --noEmit` passing cleanly with that `@ts-expect-error` line present
+confirms TypeScript really does reject unnarrowed `.system` access — if the union were weakened
+(e.g. `system` made optional on both branches instead of exclusive to `ok: true`), the directive
+would become an *unused* `@ts-expect-error` and `tsc --noEmit` would fail on that alone.
+
+**Real routing checked, not just structural:** a family law firm with `heroGrade: 0` and
+`heroImage: true` required resolves `ok: true` (vertical correctly classified as `legal`) with
+`patternEligibility.status: "not-suited"` — the same Allen Evans/BC Security routing `3.1`
+established, now demonstrated composed end-to-end through the discriminated union rather than
+`scorePatternEligibility` called in isolation.
+
+**Real bug in my own test caught before it shipped, not the resolver's:** a tie-break test
+originally used `"combined law and accounting firm"` as its detectedIndustry, expecting `"legal"` to
+win by table order over `"financial-professional-services"`. It didn't — `"law and accounting
+firm"` doesn't actually contain the substring `"law firm"` (there's an intervening `"and
+accounting"`), so only the `"accounting"` keyword matched and the test failed with `"expected
+'financial-professional-services' to be 'legal'"`. Caught by running the suite, not assumed correct
+because it read plausibly. Fixed by changing the test phrase to `"combined legal and accounting
+firm"`, which genuinely contains both keywords as real substrings — not by loosening the keyword
+table to make the old phrase pass, which would have been tuning the code to fit a wrong test rather
+than fixing the wrong test.
+
+**Files created:**
+```
+$ git status --porcelain
+?? lib/design/classify-vertical.ts
+?? lib/design/resolve-design-system.test.ts
+?? lib/design/resolve-design-system.ts
+```
+No existing file modified — unlike `3.1`, this task needed no transitional adapter anywhere, since
+nothing pre-existing consumes this new module yet.
+
+**Verification command and output:**
+```
+$ npx tsc --noEmit
+(exit 0, no output)
+$ npm run lint
+(exit 0, no output)
+$ npx vitest run
+ Test Files  13 passed (13)
+      Tests  195 passed | 1 todo (196)
+```
+
+**Failures, retries and dead ends:** the tie-break test-phrase bug described above — a real failure
+caught by actually running the suite, fixed in the test, not the code.
+
+**Shortcuts taken:** none disclosed beyond the two "stated rather than assumed" items above, which
+are scope decisions, not shortcuts.
+
+**Deviations from the task spec:** none. Both new files exactly as named; the discriminated union
+matches build plan §5.5's own shape exactly; both "state, don't assume" questions answered directly
+rather than silently resolved one way.
+
+**Not run / not verified:**
+- No real caller wires this resolver in yet — nothing in the app currently calls
+  `resolveDesignSystem`. That wiring is later Phase 3 work, not this task's scope (the task's own
+  done-when is the type-level guarantee and the unmatched-path test, not integration).
+- The 10-vertical list's coverage against real prospect `detectedIndustry` text beyond the five
+  known real clients and this task's own hand-picked test phrases — no systematic sweep of a larger
+  sample was run, consistent with this being explicitly named a "small," starter list rather than a
+  validated taxonomy.
+- Real classification-object input from a real `5.4` producer — doesn't exist yet, so the
+  `classification` field has only been exercised with hand-written test values, never real model
+  output.
+
+**Confidence:** High on the discriminated union itself and the null-first-class guarantee — both
+the runtime behavior and the compile-time enforcement are directly tested, not inferred. High on the
+four composed pieces individually, since each is `2.5`'s or `3.1`'s own already-verified logic,
+unchanged, just wired together. Medium on the 10-vertical list's real-world coverage, since it's
+explicitly a starter list checked by hand against a small number of phrases, not validated against
+any real pattern library (none exists) or a larger real-industry sample.
+
+**Next task:** not specified — awaiting direction.
+---
+
 ---
 
 # PART E — For the human reviewing this log
