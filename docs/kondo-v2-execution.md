@@ -4238,6 +4238,130 @@ stop after."
 ---
 
 ---
+### 1.2c — a weak-winner gate should end the source, not advance the field chain
+**Timestamp:** 2026-08-17
+**Git SHA at start:** c0df356
+**Status:** DONE-VERIFIED — matches the expected outcome exactly; none of the three working clients
+changed.
+
+**What I did:** one change, in `lib/content/rank-brand-color-sources.ts`'s `rankComputedStylesSource`.
+`1.2b`'s field loop treated "this field's winner was weak" the same as "this field found nothing" —
+both hit `continue` and fell through to the next field (`primaryButtonBg` → `buttonBorderColor` →
+`linkColor`). Per the diagnosis: those are different verdicts. An **empty** field (no non-neutral,
+non-excluded candidate survived at all) means that signal doesn't exist on this site — trying the next,
+less-specific field is the right move, and is `buttonBorderColor`'s actual original purpose from `1.1b`
+(a real button with a genuinely absent fill but a real border — the Downseal case). A **weak** field
+(real candidates, rejected by `isWeakComputedStylesWinner`'s coverage/margin gate) means computed
+styles as a whole don't carry a coherent signal — the correct move is to end the source and hand off to
+the next *source* (logo, then imagery), not keep trying progressively weaker, less specific fields
+until one happens to be generous enough to pass. Changed the weak-winner branch from `continue` to
+`return null`; left the empty-field branch's `continue` exactly as it was — that part was already
+correct, per the instruction's own framing of item 2.
+
+**The diff is small and precisely targeted — the fix the diagnosis called for, nothing broader:**
+```
+-    if (isWeakComputedStylesWinner(winner, runnerUp, pageCoverageOf(perPage, winner.color))) continue;
++    if (isWeakComputedStylesWinner(winner, runnerUp, pageCoverageOf(perPage, winner.color))) {
++      return null;
++    }
+```
+No new exclusion list, no new vocabulary, no change to `isWeakComputedStylesWinner`,
+`pageCoverageOf`, or `computedStylesConfidence` — exactly matching the instruction that this is a fix
+to the chain's control flow, not a fourth pattern-matching rule.
+
+**On `linkColor` (item 3): already correctly scoped, no change needed, checked rather than assumed.**
+`linkColor` was never a tiebreak in this code — it's the third field in the same loop, reached only
+after both `primaryButtonBg` and `buttonBorderColor` return empty (`merged.length === 0`), same as
+`buttonBorderColor` reaching only after `primaryButtonBg` is empty. Since the loop's single `continue`/
+`return null` branch point now applies uniformly to every field in the loop, `linkColor` already gets
+"the same treatment" the instruction asked for — it required no separate code path, just confirming the
+existing loop structure already applies the fixed logic to all three fields, not only the first two.
+
+**Full five-client re-run, real `rankBrandColorSources()`, same fresh clean data `1.2b` already
+verified (no re-crawl needed — this is a ranking-logic change only, not a capture change), real
+logo/imagery buffers from Supabase Storage (largest `IMAGE` asset per client, per `1.2b`'s corrected
+method):**
+
+| Client | Chosen hex | Source | Margin | Confidence | Changed from `1.2b`? |
+|---|---|---|---|---|---|
+| Princeton Dental | `#002000` | **logo** | saturation 100% vs 100% (tie) | low | **Yes — now abstains from computed styles, exactly as expected** |
+| BC Security | `#024470` | computed-styles (`primaryButtonBg`) | 34, sole survivor | high | **No — identical** |
+| Downseal Solutions | `#606040` | imagery | saturation 20%, sole survivor | low | **No — identical** |
+| Propell Property | `#0e1e39` | computed-styles (`primaryButtonBg`) | 344, sole survivor | high | **No — identical** |
+| Allen Evans Family Lawyers | `#54c9ea` | computed-styles (`primaryButtonBg`) | 216 vs 2 | high | **No — identical** |
+
+**Princeton's new result is exactly `1.2b`'s own simulated comparison, not a fresh coincidence.**
+`1.2b` had already run a throwaway "what if computed-styles fully abstained" simulation for Princeton
+and gotten `hex: "#002000", source: "logo", confidence: "low", 100% vs 100%` — flagged there as "the
+outcome the task expected... but not what the implemented code actually produces." `1.2c`'s real,
+non-simulated result matches that number exactly, which is a real cross-check, not just a plausible
+value: the ranking logic now reaches the code path `1.2b` had to simulate around.
+
+**None of the three working clients changed — verified directly, not assumed from the diff's small
+size.** BC Security, Propell Property, and Allen Evans Family Lawyers all resolve on `primaryButtonBg`
+as their first field, with real, non-weak winners (sole survivors or a wide margin) — none of them ever
+reach the `isWeakComputedStylesWinner` branch this task modified, so the code path they execute is
+byte-for-byte the same before and after this change. Confirmed by re-running the actual function against
+the actual data, not inferred from reading the diff. Per the instruction's own condition ("if any of the
+three working clients changes behaviour, stop and report — that would mean the chain was load-bearing
+in a way I haven't accounted for"): none did, so there is nothing further to report on that count.
+
+**Files created/modified:**
+```
+$ git status --porcelain
+ M lib/content/rank-brand-color-sources.ts
+```
+No schema change, no migration, no change to `lib/crawl/crawler.ts` — this task is entirely a ranking
+control-flow fix, no new capture data needed.
+
+**Verification command:**
+```
+npx tsc --noEmit && npm run lint && npx vitest run
+(throwaway script, deleted after use: run the real rankBrandColorSources against all 5 clients' already
+clean, already-verified computedStyles data from 1.2b, plus real logo/imagery Asset buffers, largest
+IMAGE asset per client)
+```
+
+**Output:**
+```
+$ npx tsc --noEmit
+(no output — exit 0)
+$ npm run lint
+(no output — exit 0)
+$ npx vitest run
+ Test Files  7 passed (7)
+      Tests  61 passed | 1 todo (62)
+```
+Per-client results are quoted in full in the table above.
+
+**Failures, retries and dead ends:** none — the fix worked as diagnosed on the first attempt, verified
+against real data before being reported as done.
+
+**Shortcuts taken:** none.
+
+**Deviations from the task spec:** none — implemented exactly the described chain fix, made no
+change beyond it, and the measured outcome matches the stated expectation exactly (Princeton abstains
+via logo; the three working clients are unchanged).
+
+**Not run / not verified:**
+- Whether `#002000` (Princeton's logo-tier pick) is itself a meaningful brand colour or a bucketing
+  artifact of anti-aliased edge pixels on a small transparent-background logo PNG — not investigated;
+  it's now the real, live output of the real code path, not a simulation, but its own correctness as a
+  colour choice is outside this task's scope (which was the chain's control flow, not the logo tier's
+  ranking quality).
+- Whether a similar "field/source conflation" pattern exists anywhere else in this pipeline
+  (`normalize-brand-colors.ts`, still untouched all task) — not looked for, out of scope.
+
+**Confidence:** High — the fix is a two-line, precisely targeted change matching the diagnosis exactly;
+every claim above is backed by a real run of the real function against real data, and the specific
+cross-check against `1.2b`'s own simulated number (`#002000`, 100% vs 100%, matching exactly) is
+strong, not incidental, evidence that the fix reaches the intended code path for the intended reason.
+
+**Next task:** awaiting the human's direction. Not started this session, per "one task, log it, stop
+after."
+---
+
+---
 
 # PART E — For the human reviewing this log
 
