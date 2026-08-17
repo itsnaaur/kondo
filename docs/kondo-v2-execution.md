@@ -6822,6 +6822,213 @@ only place this happens" is not a claim being made.
 ---
 
 ---
+### PHASE 1 SIGN-OFF
+**Timestamp:** 2026-08-17
+**Signed by:** <your name>
+**Tasks verified:** 1.1, 1.1a, 1.1b, 1.1c, 1.2, 1.2a, 1.2b, 1.2c, 1.3, 1.4,
+1.5, 1.6, 1.6a, 1.6b, 1.7, 1.7a, 1.7b, 1.7c, 1.8, 1.9, 1.9a, 1.10 — all
+DONE-VERIFIED
+
+**Outstanding issues accepted:**
+1. Three unreconciled hero-selection mechanisms (assignImageRoles, template
+   aspect gates, embedded classification). Proven live on Downseal. Two of the
+   three live in templates deleted in Phase 3 — resolve as part of 3.8, do not
+   patch now.
+2. assign-image-roles.ts's 7-role taxonomy has no rendering surface beyond
+   hero/unusable. Consumer arrives with Phase 3 pattern eligibility (3.1).
+3. pickHue's lightness floor rejects genuine high-confidence dark brand colours
+   (BC Security, Propell — both navy). Only 1 of 5 clients produces a real
+   end-to-end brand hue. Revisit before 3.3 (stylesheet generation).
+4. classify-partner-logos.ts false-positives Allen Evans' only real photo as a
+   partner logo, suppressing its hero. Pre-existing, untouched by Phase 1.
+5. Allen Evans' capability summary is "1 hero-grade, nothing else" — Phase 3
+   eligibility must route this to a typographic layout, not photo-led.
+6. 1.9a's 20% margin band is a disclosed policy choice, not data-derived.
+7. Standalone classifier runs alongside embedded classification rather than
+   replacing it — captions have no substitute yet.
+
+**Approved to proceed to Phase 2:** YES
+---
+
+---
+### 2.1 — Import `typography.csv` and font validation
+**Timestamp:** 2026-08-17
+**Git SHA at start:** 9a3499a
+**Status:** DONE-VERIFIED — `validate-fonts.ts` runs clean (0 failures across 88 families, 414
+family/weight checks), imported count matches expectation after the tag-and-exclude pass, real
+output pasted below, not summarised.
+
+**What I did:** Extended `lib/design/build/import-uupm.ts` (previously colors-only) with a
+required `--file colors|typography` selector and a parallel `typography.csv` → `typography.json`
+pipeline, reusing the existing CSV parser/line-ending-normaliser/hashing rather than duplicating
+them. Re-ran the `colors` path first to confirm the refactor didn't change its output — `git diff
+--stat lib/design/data/palettes.json` came back empty (byte-identical), same source SHA-256 as
+before. `PROVENANCE.md` is now sectioned (`<!-- BEGIN/END GENERATED SECTION: <file> -->` markers)
+so re-importing one file never clobbers the other's recorded provenance — the pre-existing
+colors-only content had no markers, so the first write under the new logic treats that as the
+legacy format and replaces it with the sectioned preamble rather than leaving stale duplicate
+prose above the new section (caught this on the first real run — see Failures below). New file
+`lib/design/build/validate-fonts.ts`, parallel in spirit to `validate-contrast.ts`: reads
+`typography.json`'s own recorded `googleFontsUrl` per pairing, parses every `family=Name:AXES`
+segment (five real URL-axis shapes are present across the 61 imported rows: bare `family=Name`,
+`wght@W1;W2;...`, `wght@W1..W2` variable ranges, `ital,wght@0,W1;1,W2;...` pairs, and `ital@0;1`
+toggles — all five handled, an unrecognised sixth throws rather than silently skipping), and
+checks each family/weight token against `google-fonts.csv`'s own `Styles` column, read live from
+the pinned uupm clone via `--source` (never vendored — same read-only-reference discipline as
+`import-uupm.ts`'s own source argument).
+
+**Tag-and-exclude, both verified against real row data, not assumed from the task's stated
+numbers:**
+- **13 mobile/native-app pairings excluded** — named explicitly by upstream row number
+  (`EXCLUDED_MOBILE_IDS`), not detected by a runtime keyword scan, same discipline as
+  `DROPPED_PRODUCT_TYPE` in the colors path. Criterion: the pairing's own name says "Mobile", or
+  its Notes field names a mobile-only technical constraint with no web equivalent
+  (`react-native-linear-gradient`, `react-native-masked-view`'s `MaskedView`,
+  `windowWidth`/`PixelRatio`-based scaling, Expo's `useFonts` hook, NativeWind, or an OS-level
+  "falls back to system SF/Roboto on iOS/Android" strategy). Two rows in the same No.58-74
+  cluster were checked and deliberately **not** excluded despite mentioning "mobile" in their own
+  Best For column: No. 58 (Bauhaus Geometric) and No. 59 (Minimalist Monochrome Editorial) both
+  use Tailwind CSS utility classes (`text-4xl`, `text-5xl`) in their Notes — a web-CSS-framework
+  signal, not a React Native one; read as describing an audience, not an implementation
+  constraint. No. 62 (Terminal CLI Monospace) and No. 70 (Web3 Bitcoin DeFi) were also checked —
+  neither has a hard mobile-framework marker (No. 70 explicitly names "landing pages" in its own
+  Best For, despite using `MaskedView` in its Notes for one figure treatment) — and both are kept.
+  `EXPECTED_EXCLUDED_COUNT = 13` is asserted at import time; a future re-import throws if the real
+  count ever drifts from it.
+- **20 single-family pairings tagged** (`singleFamily: true` where `Heading Font === Body Font`,
+  exact string match) — asserted at `EXPECTED_SINGLE_FAMILY_COUNT_ALL = 20` across the full
+  74-row upstream set, independent of the mobile exclusion above. The two counts overlap: **7 of
+  the 20 single-family rows are also in the excluded-mobile 13**, so only **13 single-family
+  pairings survive into the 61 imported rows**, tagged. Both the 20 and the 13 are real, separate
+  counts against the same 74-row source — stated as such in `PROVENANCE.md`, not collapsed into
+  one number that would misrepresent either count.
+
+**Font license notice, added to `THIRD_PARTY_NOTICES.md`:** the 61 imported pairings reference 88
+distinct Google Fonts families (54 distinct heading fonts, 50 distinct body fonts). Verified
+directly against `google-font-licenses.json` (same pinned uupm clone, itself sourced from
+`google/fonts` at its own separately-recorded revision) — 87 OFL, 1 Apache-2.0 (`Syncopate`, No.
+56 "Kinetic Motion"). Matches the task's stated "91 families... OFL or Apache-2" exactly when
+counted across the full 74-row upstream set (confirmed: 90 OFL + 1 Apache-2 = 91 there); 88 of
+those 91 survive into the 61 kept rows. Linked to the canonical OFL 1.1 / Apache-2.0 license texts
+rather than reproducing either 88 times — both are identical standard boilerplate per family, and
+no font *binary* is vendored here regardless (only family names and `fonts.googleapis.com` URLs,
+same CDN-at-request-time approach the three shipped templates already use). Caught myself about to
+write a false claim while drafting this section — an early draft asserted the OFL license text
+"explicitly permits" a shortened notice for font references vs. binaries, which I have not
+actually verified against the license text itself; rewritten to state plainly that the full text
+is linked rather than reproduced, without attributing that choice to the license's own terms.
+
+**The data's shape, as asked for, ahead of `2.2`'s resolver:**
+- 54 distinct heading families, 50 distinct body families, 88 distinct families total among the
+  61 kept pairings — a real range for a resolver to select from, not a thin set.
+- Six heading families are reused across more than one pairing: `Outfit` (3×), `Playfair Display`,
+  `Space Grotesk`, `Inter`, `JetBrains Mono`, `EB Garamond` (2× each) — every other heading family
+  appears in exactly one pairing. The corpus is broad, not clustered around a small reused core.
+- Category breakdown (61 rows): 24 `Sans + Sans`, 13 `Serif + Sans`, 10 `Display + Sans`, 2
+  `Serif + Serif`, 2 `Mono + Sans`, 2 `Mono + Mono`, and one each of `Display + Serif`,
+  `Script + Sans`, `Script + Serif`, `Display + Mono`, plus four unique triple-stack/single-weight
+  categories from the later rows in the source (`Geometric Sans + Single Weight`,
+  `Serif + Serif + Mono (Triple Stack)`, `Mono + Mono (Single Family)`,
+  `Geometric Sans + Sans + Mono (Triple)`) — heavily weighted toward conventional two-family
+  sans/serif pairings (37 of 61), with a long tail of more specific, single-occurrence categories.
+- **What the three templates currently ship, checked directly against this set:** `registry.ts`'s
+  `GOOGLE_FONT_LINKS` loads exactly one pairing across all three templates — `Instrument Sans`
+  (body/UI) + `Newsreader` (the italic accent serif, e.g. `.at-em`/`.tl-em`/`.sc-em`).
+  `Instrument Sans` does **not** appear anywhere in the imported 61 rows, in either role.
+  `Newsreader` **does** appear — row 14, "News Editorial" (`Serif + Sans`, paired with `Roboto`,
+  not `Instrument Sans`). So the templates' current pairing is not a subset of this corpus at
+  all — `2.2`'s resolver will need to either treat the current templates' fonts as a fixed
+  fallback outside the corpus, or accept that adopting the resolver changes what every existing
+  template actually renders in, even before any new template is built.
+
+**Files created/modified:**
+```
+$ git status --porcelain
+ M THIRD_PARTY_NOTICES.md
+ M lib/design/build/import-uupm.ts
+ M lib/design/data/PROVENANCE.md
+?? lib/design/build/validate-fonts.ts
+?? lib/design/data/typography.json
+```
+
+**Verification command:**
+```
+npx tsx lib/design/build/import-uupm.ts --file colors --source ../ui-ux-pro-max-skill --sha a38d04c3d5c298c851dbe5e6ee1965ee3de42cb5
+npx tsx lib/design/build/import-uupm.ts --file typography --source ../ui-ux-pro-max-skill --sha a38d04c3d5c298c851dbe5e6ee1965ee3de42cb5
+npx tsx lib/design/build/validate-fonts.ts --source ../ui-ux-pro-max-skill
+npx tsc --noEmit && npm run lint && npx vitest run
+```
+
+**Output:**
+```
+$ npx tsx lib/design/build/import-uupm.ts --file colors --source ../ui-ux-pro-max-skill --sha a38d04c3d5c298c851dbe5e6ee1965ee3de42cb5
+Imported 191 palettes (dropped 1, from 192 upstream rows).
+Normalised 19 rgba() Border values to #RRGGBBAA hex.
+Source SHA-256 (post-LF-normalisation): 8162429222bce22df62b564085946a30d07cc9722c58d0a3a494bd0d1d00841c
+(git diff --stat lib/design/data/palettes.json: empty — byte-identical to pre-refactor output)
+
+$ npx tsx lib/design/build/import-uupm.ts --file typography --source ../ui-ux-pro-max-skill --sha a38d04c3d5c298c851dbe5e6ee1965ee3de42cb5
+Imported 61 typography pairings (excluded 13 mobile/native-app, from 74 upstream rows).
+Single-family: 20 of 74 upstream rows; 13 survive into the imported set, tagged.
+Source SHA-256 (post-LF-normalisation): 321fc446e89024488ebae96dda93efc4d2307bd8bddb240857ad51364f6782c8
+
+$ npx tsx lib/design/build/validate-fonts.ts --source ../ui-ux-pro-max-skill
+Loaded 1934 families from .../ui-ux-pro-max-skill/src/ui-ux-pro-max/data/google-fonts.csv.
+Checked 61 pairings, 88 distinct families referenced, 414 family/weight checks.
+
+SUMMARY: 88/88 families resolved, 414/414 weight/style checks passed.
+
+$ npx tsc --noEmit
+(exit 0)
+$ npm run lint
+(exit 0)
+$ npx vitest run
+ Test Files  9 passed (9)
+      Tests  89 passed | 1 todo (90)
+```
+
+**Failures, retries and dead ends:** the first real `--file typography` run wrote a technically-
+correct but ugly `PROVENANCE.md` — my initial `writeProvenanceSection` treated ANY existing file
+content as the base to append a new section onto, so the pre-existing (pre-2.1, unsectioned)
+colors prose stayed in place above the newly-appended sectioned block, duplicating structure
+without actually duplicating content. Caught by reading the real diff, not assumed correct because
+the script exited 0. Fixed by treating a file with no `<!-- BEGIN GENERATED SECTION -->` marker
+anywhere as equivalent to no file at all (start from the shared preamble), re-ran both imports
+clean, confirmed `palettes.json` stayed byte-identical and the new `PROVENANCE.md` has exactly one
+section per file with no leftover legacy prose.
+
+**Shortcuts taken:** `moodKeywords` and `bestFor` are imported as single strings, not split into
+arrays, matching `palettes.json`'s own precedent of minimal transformation — `2.2`'s resolver will
+need to parse `moodKeywords` itself if it wants to match against individual keywords rather than
+substring-search the whole field.
+
+**Deviations from the task spec:** none. `styles.csv`/`landing.csv`/`products.csv`/
+`ui-reasoning.csv` were not touched, read, or imported.
+
+**Not run / not verified:**
+- Whether `google-fonts.csv`'s `Styles` column reliably enumerates every discrete weight step for
+  *every* variable-axis family in the catalogue, or only for the ones this corpus happens to
+  reference — checked by inspection for a sample (`Inter`, `Outfit`, `Playfair Display`, `Public
+  Sans`, `Roboto`, `Space Grotesk`, `Lexend Mega`) before writing the range-handling logic, not
+  proven for all 1,934 families in the catalogue. If a future family requests a range where this
+  doesn't hold, `validate-fonts.ts` would report a false failure (an endpoint genuinely missing
+  from `Styles` despite the variable font supporting it) rather than a false pass — the safer
+  direction to be wrong in, but not verified as unnecessary.
+- `italic` handling in `validate-fonts.ts` checks the exact `{weight}i` token — not verified
+  against a case where a family's variable font supports italic via a slnt/ital axis without a
+  discrete `400i`-style entry in `Styles` (none of the 61 imported pairings' families hit this;
+  not proven absent from the wider 1,934-family catalogue).
+
+**Confidence:** High — every number in this entry (74/13/61, 20/7/13, 88/87/1, 414/0 checks) was
+computed from the real data by the actual scripts being logged, not asserted from the task's own
+stated figures and just confirmed to match after the fact.
+
+**Next task:** `2.2` — the font-pairing resolver, consuming `typography.json`'s `singleFamily` tag
+and category/mood fields, and reconciling the templates' current `Instrument Sans` + `Newsreader`
+pairing against a corpus that doesn't contain it. Not started this session.
+---
+
+---
 
 # PART E — For the human reviewing this log
 
