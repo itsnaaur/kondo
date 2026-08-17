@@ -121,6 +121,32 @@ model Asset {
   // }
   metrics Json?
 
+  // Vision classification from lib/content/classify-images.ts (Task 1.8), cached by
+  // contentHash — "classified once, ever" (not once per client): a lookup by contentHash
+  // alone, across every client's Asset rows, so the same stock/theme image downloaded for
+  // two different clients is classified once and reused, not billed twice. Null for assets
+  // that predate this column, that haven't been classified yet, or that have no
+  // contentHash at all (manually-uploaded replacements — see contentHash's own comment
+  // above — can never hit this cache and are classified fresh every time they're needed).
+  // No dedicated index on contentHash alone yet — the existing [clientId, contentHash]
+  // index doesn't cover a global lookup; acceptable at current data volume, worth adding if
+  // this cache lookup ever shows up as a real cost. Shape (as of 1.8 — see
+  // lib/content/classify-images.ts's ImageClassification type for the authoritative
+  // definition):
+  // {
+  //   subject: "person"|"people"|"product"|"interior"|"exterior"|"equipment"|"abstract"|
+  //            "graphic"|"screenshot"|"map"|"icon",
+  //   isHeadshot: boolean, peopleCount: number,
+  //   shotQuality: "professional"|"competent"|"amateur",
+  //   hasBurnedInText: boolean, hasWatermark: boolean,
+  //   focalPoint: { x: number; y: number },              // normalised, 0-1 both axes
+  //   clearSpace: "none"|"left"|"right"|"top"|"bottom"|"centre",
+  //   heroSuitable: { suitable: boolean; reason: string },
+  //   caption: string | null,                            // doubles as alt text
+  //   confidence: "low"|"medium"|"high",
+  // }
+  classification Json?
+
   contentRecordLogoFor ContentRecord? @relation("ContentRecordLogo")
 
   @@index([clientId, contentHash])
