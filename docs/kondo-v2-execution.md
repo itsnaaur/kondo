@@ -5818,6 +5818,153 @@ signal. Not started this session.
 ---
 
 ---
+### 1.7c — the stale-generation pattern, the Asset reference risk, and updated carry-forwards
+**Timestamp:** 2026-08-17
+**Git SHA at start:** aab5b4e
+**Status:** DONE-VERIFIED — documentation plus one small, deliberately narrow pair of helpers, no
+further analysis, per instruction.
+
+**1. The stale-generation pattern, named as a mechanism, both occurrences, and why one fix doesn't
+cover both.**
+
+**Mechanism:** this session repeatedly calls production functions (`crawlClientSite`,
+`downloadCrawlImages`) directly from throwaway verification scripts, for testing and investigation —
+outside `lib/content/run-analysis.ts`'s own real, single-call-per-analysis lifecycle, and without
+that lifecycle's own cleanup step. Two tables have now accumulated stale rows from exactly this, for
+two related but distinct reasons:
+
+- **`CrawledPage` (`Task 1.2`):** production's own correct behaviour is delete-then-crawl (`run-
+  analysis.ts` calls `prisma.crawledPage.deleteMany` before every `crawlClientSite`). A script that
+  calls `crawlClientSite` directly, skipping that delete, accumulates rows production itself would
+  never leave behind — a straightforward gap between the test path and the real path.
+- **`Asset` (`Task 1.7b`):** production's own correct behaviour is the *opposite* — Asset rows are
+  deliberately **append-only**, never deleted, because a published `Concept`'s HTML has Asset URLs
+  baked in permanently. A script calling `downloadCrawlImages` directly does the *same* thing
+  production does (no bug, no gap) — the accumulation comes from running that same correct code path
+  far more often, in quick succession, than a real client's actual analysis/re-analysis cadence would
+  ever produce, with no cleanup between runs because production never needs one.
+
+**Why one fix doesn't cover both, and what each needed instead:** a single generic
+`deleteThenCrawl`-style helper is exactly right for `CrawledPage` — safe, mirrors production, zero
+risk, since nothing references those rows once an analysis completes. The same shape of helper would
+be actively dangerous for `Asset` — a blind delete-before-crawl there is precisely the wholesale wipe
+`1.7b` nearly ran before checking `ContentRecord`/`Concept` state first and finding Princeton Dental's
+published concept depending on it. **Built two helpers, not one, in `scripts/lib/test-crawl-
+helpers.ts`:**
+- `deleteThenCrawl(clientId, siteUrl)` — unconditional `CrawledPage` delete, then `crawlClientSite`.
+- `deleteUnreferencedTestAssets(clientId)` — deletes only `Asset` rows the client's *current*
+  `ContentRecord` (`logoAssetId`/`images`) doesn't reference, exactly the check-first pattern `1.7b`
+  had to do by hand. Returns `{ preserved, deleted }` so a caller can see what happened, not just
+  trust it silently worked.
+
+**Smoke-tested for real, not just typechecked — and the real result is disclosed, not glossed
+over.** Ran `deleteUnreferencedTestAssets` against Princeton Dental and BC Security (both already
+cleaned in `1.7b`) to confirm it behaves correctly on a second pass:
+```
+Princeton Dental: { preserved: 11, deleted: 10 }
+BC Security: { preserved: 11, deleted: 10 }
+```
+**The `deleted: 10` for each is a real, disclosed side effect of this test, not a bug.** The 10
+per-client candidate images `1.7b`'s own clean re-crawl downloaded were never referenced by
+`ContentRecord` (no real content-analysis/structuring run has happened since — only `crawlClientSite`
++ `downloadCrawlImages` were called directly), so this second, genuinely correct pass identified them
+as unreferenced and deleted them, exactly as designed. This removes 20 rows that contributed to
+`1.7b`'s "72 assets, labelled by file type" distribution table (not the 41-asset ground-truth-labelled
+subset, which drew only from `ContentRecord`-referenced assets and is unaffected) — `1.7b`'s own
+reported numbers are unchanged as a historical record of what was computed; the live database simply
+no longer holds those specific 20 rows. Not re-downloaded to "restore" them — a fresh crawl would
+produce a similar but not identical set, and nothing in this task needs the database to match `1.7b`'s
+snapshot exactly.
+
+**2. Schema comment — added where the next person will actually see it, before running a delete, not
+after.** `prisma/schema.prisma`, directly above `model Asset`:
+```prisma
+// Before deleting or bulk-cleaning rows here for any reason (test data, stale crawl
+// generations, anything): ContentRecord.logoAssetId and ContentRecord.images
+// (ContentImage[]) reference specific rows here BY ID ONLY — ContentImage carries no URL of
+// its own, so the Review Extraction screen's ability to display an image depends on the
+// referenced Asset row still existing. This is true even for a client that has never
+// published anything, and a published Concept's own baked HTML (see the url comment below)
+// doesn't save you from the *other* consequences of deleting a referenced row. Task 1.7b
+// found this the hard way: Princeton Dental had a PUBLISHED Concept depending on exactly
+// this, one wholesale cleanup query away from a real regression. Check
+// ContentRecord.logoAssetId/images for the client first — scripts/lib/test-crawl-helpers.ts's
+// deleteUnreferencedTestAssets does this automatically for verification scripts.
+```
+No migration — a schema comment isn't part of the generated SQL; `npx prisma migrate status`
+confirmed the database is still up to date (one transient connection error on the first attempt,
+succeeded cleanly on retry, not treated as a real problem).
+
+**3. Updated Phase 1 carry-forward — for whoever picks up `1.9`, stated plainly, not just implied by
+`1.7b`'s own prose.** `1.9`'s role-assignment threshold work **must not carry forward a
+single-colour-entropy-threshold plan** — `1.7b` tested this against real ground truth and found
+entropy's own best-possible split accuracy (85%, 3.03-wide overlap band) meaningfully weaker than
+`min(width, height)` (98%) or `hasAlpha` (90%) on the same 41-asset sample. **`min(width, height)` and
+`hasAlpha` are the stronger signals found so far.** Whether `1.9` uses one of those as the primary
+metric-based signal, a combination (untested beyond the two simple AND/OR combinations `1.7b` tried,
+neither of which beat `min(width,height)` alone), or leans on `1.8`'s vision classification directly
+for this specific question instead of a metrics-only rule — **`1.8`'s vision output may make the
+metrics-only version of this question moot entirely**, since it would supply the same photo/graphic
+distinction directly, more reliably, for every image, not just the 41 with existing ground truth.
+None of this is decided here — flagging it as the live state of the question, not resolving it.
+
+**Files created/modified:**
+```
+$ git status --porcelain
+ M prisma/schema.prisma
+?? scripts/lib/
+```
+`scripts/lib/test-crawl-helpers.ts` is new; no other file touched.
+
+**Verification command:**
+```
+npx tsc --noEmit && npm run lint && npx vitest run
+npx prisma migrate status
+(real invocation, not just typechecked: deleteUnreferencedTestAssets against Princeton Dental and
+BC Security, output pasted above)
+```
+
+**Output:**
+```
+$ npx tsc --noEmit
+(exit 0)
+$ npm run lint
+(exit 0)
+$ npx vitest run
+ Test Files  9 passed (9)
+      Tests  89 passed | 1 todo (90)
+$ npx prisma migrate status
+Database schema is up to date!
+```
+
+**Failures, retries and dead ends:** `npx prisma migrate status`'s first run hit a transient `P1001`
+connection error; retried immediately and it succeeded cleanly — not treated as a real signal, but
+not silently omitted either.
+
+**Shortcuts taken:** none. The smoke test used the real function against real data specifically to
+avoid the "typechecks but was never actually run" gap this session has flagged elsewhere as a real
+risk.
+
+**Deviations from the task spec:** none — both items delivered (the note plus a helper decision for
+each table, not a single generic one; the schema comment), plus the carry-forward update, no new
+analysis performed.
+
+**Not run / not verified:**
+- `deleteThenCrawl` was written but not separately smoke-tested this task — its logic
+  (`deleteMany` + `crawlClientSite`) is unchanged from what every prior task's throwaway scripts
+  already did manually and successfully many times over; not re-verified here as its own step.
+- Whether other tables besides `CrawledPage`/`Asset` could accumulate the same way from direct test
+  calls — not surveyed; flagged as a pattern to watch for, not confirmed absent elsewhere.
+
+**Confidence:** High — the mechanism explanation is grounded directly in what `run-analysis.ts` and
+the `Asset`/`ContentImage` types actually do (re-read, not assumed from memory), and the helper's
+behaviour was confirmed against real data, including the honest disclosure of its real side effect.
+
+**Next task:** awaiting the human's direction — `1.8` (vision call) per the standing plan. Not started
+this session.
+---
+
+---
 
 # PART E — For the human reviewing this log
 
