@@ -5614,6 +5614,210 @@ started this session.
 ---
 
 ---
+### 1.7b — clean data and honest discriminator analysis
+**Timestamp:** 2026-08-17
+**Git SHA at start:** 1e3a263
+**Status:** DONE-VERIFIED — no code changes (this task is data cleanup + analysis only, confirmed by
+`git status --porcelain` returning nothing). **Conclusion: colour entropy alone does not separate
+icons from photographs. No threshold picked, per instruction.**
+
+**1. Clearing stale Asset generations — same contamination, a real complication found first, handled
+safely, not glossed over.** Querying Princeton Dental and BC Security's Asset counts (136 and 66)
+before touching anything found the same accumulation pattern `1.2` fixed for `CrawledPage` — this
+session's own repeated ad hoc `downloadCrawlImages` test runs across earlier tasks, never cleaned up
+between runs. **Recurring on a second table is worth naming as a pattern, not an incident**: both
+`CrawledPage` and `Asset` share the same root cause — this session testing production code paths
+directly and repeatedly, outside the single-call-per-analysis lifecycle production actually uses —
+and any future task that calls a downloading/crawling function directly for verification purposes
+should expect the same accumulation unless it explicitly cleans up first or after.
+
+**Before deleting anything, checked what actually depends on these rows — a real complication `1.2`'s
+`CrawledPage` cleanup never had.** `CrawledPage` rows are genuinely ephemeral (nothing references them
+after an analysis completes). `Asset` rows are not: both clients have a live `ContentRecord`
+(`reviewedAt: null` — not yet approved, but real) whose `logoAssetId` and `images` (`ContentImage[]`)
+reference specific `Asset` ids **by id only** — `ContentImage` carries no URL of its own (confirmed by
+reading its type definition), so the Review Extraction screen's ability to display these images
+depends on the referenced `Asset` rows still existing. **Princeton Dental has 13 Concepts, one of them
+PUBLISHED; BC Security has 4 draft Concepts.** A wholesale `deleteMany` would have nulled
+`logoAssetId` (via the schema's own `onDelete: SetNull`) and left `ContentRecord.images` pointing at
+rows that no longer exist — not fatal to the already-published Concept's own baked HTML (per the
+`Asset` model's own comment, that HTML has the Storage URL hardcoded, not a live reference), but a
+real regression to the Review screen and to any future re-analysis's understanding of "what's the
+current logo," for the sake of a task that only actually needed cleaner data for a metrics analysis.
+
+**Resolved by preserving, not skipping the cleanup**: queried each client's current
+`logoAssetId`/`images` assetIds first, then deleted only the `Asset` rows *not* in that referenced
+set — the genuinely stale/orphaned rows accumulated by this session's own testing, not anything a
+human reviewer or a published page currently depends on. Then deleted `CrawledPage` rows and ran a
+real, clean `crawlClientSite` + `downloadCrawlImages` for both, exactly matching production's own
+delete-then-crawl pattern for the crawl side.
+
+```
+Princeton Dental: Assets before: 136. Referenced (preserved): 11. Deleted as stale/orphaned: 125.
+  Crawled 92 pages, truncated=false. downloadCrawlImages: logo=yes, candidates=10.
+  Assets after clean re-crawl: 21.
+BC Security: Assets before: 66. Referenced (preserved): 11. Deleted as stale/orphaned: 55.
+  Crawled 16 pages, truncated=false. downloadCrawlImages: logo=yes, candidates=10.
+  Assets after clean re-crawl: 21.
+```
+21 = 11 preserved + 10 new candidates, for both — the fresh crawl's *logo* content-hash-matched one of
+the 11 preserved rows in both cases (the live site's logo hasn't changed), correctly reusing that row
+rather than creating a duplicate; all 10 fresh candidate selections were genuinely different images
+from the 11 preserved ones (expected — the preserved set is what an earlier real analysis's page
+selection/AI classification chose as hero/gallery-worthy from a *different* candidate pool than this
+run's plain top-N-per-page gathering). The 10 preserved-but-not-touched-by-this-crawl assets per client
+(the real hero/gallery/partner-logo images from each client's actual prior analysis) still had no
+`metrics` — backfilled them too (fetched their existing Storage bytes, ran the real
+`computeImageMetrics`, same `pagePosition: null, crossPageFrequency: 0` convention as `1.7a`'s
+`existingLogo` case), since these are exactly the assets with real, human/AI-reviewed ground truth
+(see below) — leaving them out would have thrown away the most valuable data in the whole task.
+
+**2. Combined entropy distribution, all 5 clients on clean data, labelled by actual file type — 72
+assets total:**
+
+| MIME type | n | min | max | mean |
+|---|---:|---:|---:|---:|
+| `image/jpeg` | 30 | 2.12 | 5.41 | 4.02 |
+| `image/png` | 29 | 1.38 | 5.27 | 2.58 |
+| `image/svg+xml` | 3 | 1.59 | 3.19 | 2.31 |
+| `image/webp` | 10 | 0.00 | 3.11 | 1.68 |
+
+**File type alone doesn't separate either.** `image/png`'s own range (1.38–5.27) spans nearly the
+entire combined distribution by itself — BC Security's `site-image-5.png`/`site-image-6.png`/
+`site-image-10.png`, all real vision-classified `abstract` graphics, score 4.42–5.27, squarely inside
+JPEG's own "photo" range. `image/webp`'s low end (`0.00`, twice) turned out to be two literal 6×167px
+Downseal spacer/divider images — real assets, real near-zero entropy, not a computation error (single
+solid-colour pixel columns have exactly one histogram bucket).
+
+**3. Discriminating power — tested against real ground truth, not assumed.** Every asset referenced by
+a `ContentRecord` carries either a real vision-model `subject` classification (`people`/`place`/`work`/
+`product` = a genuine photo of the business; `abstract` = explicitly *not* one — icons, logos,
+decorative graphics, per `structure-and-rewrite.ts`'s own prompt text, quoted directly: *"anything
+that is NOT a real photograph of the business"*) or a `logo`/`partner-logo` role (never sent through
+vision classification at all, but structurally never a photo either way). This is real classification
+output from actual prior runs of this pipeline, not a label invented for this task. **41 of the 72
+assets carry this ground truth — 21 real photos, 20 graphics.**
+
+| Metric | Photo range | Graphic range | Overlap width | Best-possible split accuracy* |
+|---|---|---|---:|---:|
+| `colorEntropy` | [2.24, 5.41] | [1.00, 5.27] | 3.03 | **85%** |
+| `bytesPerPixel` | [0.020, 1.003] | [0.027, 0.846] | 0.82 | 59% |
+| `width` | [980, 2500] | [200, 2363] | 1383 | 88% |
+| `height` | [500, 2000] | [47, 1024] | 524 | **98%** |
+| `min(width, height)` | [500, 1667] | [47, 1024] | 524 | **98%** |
+| `hasAlpha` (categorical) | 1/21 have alpha | 17/20 have alpha | — | 90% |
+
+\*Best achievable accuracy at the single best-separating split point in this 41-asset sample —
+computed purely to characterise each metric's discriminating power, explicitly **not** a chosen
+production threshold (see below).
+
+**Colour entropy — the metric `1.7` flagged as having the least obvious threshold — turns out to be
+one of the *weaker* discriminators, not a strong one with an unknown cutoff.** Its overlap band (3.03
+wide, out of the two groups' combined ~4.4-wide range) means roughly a third of the value range is
+genuinely ambiguous between real photos and real graphics — this is not "the right threshold hasn't
+been found yet," it's "no single entropy threshold cleanly separates these two real, human/AI-labelled
+groups in this sample." `bytesPerPixel` is close to useless alone (59%, barely better than the ~51%
+a majority-class guess would get on a 21/20 split). **`height`/`min(width,height)` and `hasAlpha` are
+both substantially stronger** — dimension in particular is near-ceiling for this sample.
+
+**Tested whether a combination beats the best single metric — it didn't, in this sample specifically,
+reported honestly rather than oversold:**
+```
+alpha alone (predict photo = !hasAlpha):            90.2%
+minDim alone (>=454.5 => photo):                    97.6%
+entropy alone (>2.559 => photo):                     85.4%
+combo: !hasAlpha AND minDim>=454.5 => photo:         97.6%  (no improvement over minDim alone)
+combo: !hasAlpha OR minDim>=454.5 => photo:          90.2%  (no improvement over alpha alone)
+```
+A simple AND/OR of the two strongest signals doesn't beat `minDim` alone here — `minDim` is already
+near the sample's ceiling, so there's little room for a simple combination to add. This doesn't rule
+out a smarter combination doing better on a larger sample; it means the two tried here specifically
+don't, and that's reported as the real (if slightly anticlimactic) result rather than reached for a
+more flattering combination.
+
+**The conclusion, stated plainly as instructed:** colour entropy alone does not separate icons from
+photographs — `1.7`'s reported "clean gap" was a 20-asset, two-client artefact, and this task's own
+41-asset, five-client, real-ground-truth sample confirms it directly (BC Security's `2.40`/`3.07`/
+`3.88`, all real product photos, land inside the band `1.7` reported as empty). **Dimension (`height`
+or `min(width,height)`) is the strongest single discriminator found, with `hasAlpha` a close second —
+whoever runs `1.9` should not carry a single-entropy-threshold plan forward.** Whether `1.9` uses
+dimension as the primary signal, a combination, or leans on `1.8`'s vision classification directly for
+this specific question are all legitimate directions this task's own instruction named — not decided
+here.
+
+**Files created/modified:** none — `git status --porcelain` returns nothing. Real database writes did
+happen (the Princeton Dental/BC Security asset cleanup and re-crawl, and metrics backfills across all
+5 clients), disclosed in full above, not a code change.
+
+**Verification command:**
+```
+(throwaway script, deleted after use: query each client's ContentRecord for referenced asset ids,
+delete Asset rows not in that set, delete CrawledPage rows, real crawlClientSite +
+selectRelevantPages + downloadCrawlImages for Princeton Dental and BC Security)
+(throwaway script, deleted after use: backfill metrics for any asset across all 5 clients still
+missing them — the preserved-but-not-recrawled referenced assets — fetch existing Storage bytes,
+compute, persist)
+(throwaway script, deleted after use: combined entropy-by-file-type distribution; ground-truth
+labelling from ContentRecord.images subject/role; per-metric photo-vs-graphic range/overlap/
+best-possible-split-accuracy; full per-asset table)
+(throwaway script, deleted after use: single-metric vs. combination accuracy comparison)
+npx tsc --noEmit && npm run lint && npx vitest run — confirms this task's DB-only work left the
+repo's own code and tests untouched
+```
+
+**Output:** every table and number above is real, reproduced in full — the 72-asset distribution, the
+41-asset ground-truth-labelled subset (all 41 rows were printed and reviewed, not sampled), the
+per-metric discriminating-power table, and the combination-accuracy comparison.
+```
+$ npx tsc --noEmit
+(exit 0)
+$ npm run lint
+(exit 0)
+$ npx vitest run
+ Test Files  9 passed (9)
+      Tests  89 passed | 1 todo (90)
+```
+
+**Failures, retries and dead ends:** none in execution. The near-miss that mattered was almost
+proceeding with a wholesale `Asset` deletion before checking what referenced those rows — caught by
+querying `ContentRecord`/`Concept` state first, per instruction to investigate before deleting
+unfamiliar or unexplained state.
+
+**Shortcuts taken:** the ground-truth label for `logo`/`partner-logo`-role assets uses the role itself
+(never sent through vision classification, structurally not a photo) rather than a `subject` value,
+since none exists for that role — disclosed as `"logo-role"` in the raw output and folded into the
+`GRAPHIC_SUBJECTS` set with a comment explaining why, not silently treated as equivalent to a real
+`abstract` classification.
+
+**Deviations from the task spec:** none — cleared stale generations (safely), re-crawled cleanly,
+reported the full combined distribution by file type, tested entropy and other metrics' discriminating
+power honestly, tested a combination, did not pick a threshold.
+
+**Not run / not verified:**
+- Whether a non-trivial combination (a small decision tree, weighted score, more than two features)
+  would beat `minDim` alone — only two simple AND/OR combinations were tried; a genuinely different
+  combination might still do better. Flagged as untested, not ruled out.
+- Whether this 41-asset ground-truth sample itself has selection bias — every labelled asset went
+  through *some* prior real analysis's page/candidate selection, which might itself favour certain
+  image shapes over others in ways that could inflate dimension's apparent discriminating power. Not
+  investigated; a real limitation to keep in mind alongside the sample-size caveat `1.7a` already
+  raised.
+- The other 31 of 72 metrics-bearing assets (with no `ContentRecord` reference at all, so no ground
+  truth) — included in the file-type distribution, excluded from the discriminator analysis, not
+  otherwise investigated.
+
+**Confidence:** High on every reported number — the ground truth is real vision-classification output
+from actual prior pipeline runs, not invented for this task, and every distribution/accuracy figure
+was computed directly from the database, not estimated. Medium-low on whether these exact discriminating-
+power numbers (98% for dimension, 85% for entropy) would hold on a meaningfully larger sample — flagged
+above as a real, unresolved limitation, consistent with `1.7a`'s own sample-size caveat.
+
+**Next task:** awaiting the human's direction — `1.8` (vision call) is next per the task's own framing;
+whoever picks up `1.9` should read this entry's conclusion before assuming entropy is the primary
+signal. Not started this session.
+---
+
+---
 
 # PART E — For the human reviewing this log
 
