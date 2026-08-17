@@ -25,7 +25,10 @@ export function selectHeroAssetId(candidates: HeroCandidate[]): string | null {
 
   eligible.sort((a, b) => {
     if (a.fromHomepage !== b.fromHomepage) return a.fromHomepage ? -1 : 1;
-    return b.image.widthPx * b.image.heightPx - a.image.widthPx * a.image.heightPx;
+    const areaDiff = b.image.widthPx * b.image.heightPx - a.image.widthPx * a.image.heightPx;
+    // Tiebreak on assetId — two images tied on fromHomepage and area need a stable,
+    // content-independent order, not whatever order they happened to arrive in.
+    return areaDiff !== 0 ? areaDiff : a.image.assetId.localeCompare(b.image.assetId);
   });
 
   return eligible[0].image.assetId;

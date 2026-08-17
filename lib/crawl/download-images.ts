@@ -87,7 +87,9 @@ function pickBestLogoCandidate(pages: PageExtraction[]): string | null {
     if (p.logoCandidate) counts.set(p.logoCandidate, (counts.get(p.logoCandidate) ?? 0) + 1);
   }
   if (counts.size > 0) {
-    return [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+    // Tiebreak on the candidate URL itself — two logo candidates appearing equally
+    // often need a stable order, not whichever the Map happened to iterate first.
+    return [...counts.entries()].sort((a, b) => (b[1] - a[1]) || a[0].localeCompare(b[0]))[0][0];
   }
   return pages[0]?.favicon ?? pages[0]?.ogImage ?? null;
 }

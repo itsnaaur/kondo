@@ -179,7 +179,12 @@ export function selectRelevantPages(
       const bonused = score <= 0 && linkedFromAnchor.has(normalizeForCompare(page.url)) ? score + LINKED_FROM_INDEX_BONUS : score;
       return { page, score: bonused - slugWordCount(page.url) * SLUG_WORD_PENALTY };
     })
-    .sort((a, b) => b.score - a.score);
+    .sort((a, b) => {
+      const scoreDiff = b.score - a.score;
+      // Tiebreak on url — two pages scoring identically need a stable order that
+      // doesn't depend on crawl/query order, since the score alone can't break the tie.
+      return scoreDiff !== 0 ? scoreDiff : a.page.url.localeCompare(b.page.url);
+    });
 
   const cappedAnchors = [homepage, ...anchors].map((page) =>
     page.text.length > MAX_ANCHOR_PAGE_CHARS ? { ...page, text: page.text.slice(0, MAX_ANCHOR_PAGE_CHARS) } : page

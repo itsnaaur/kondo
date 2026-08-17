@@ -57,7 +57,13 @@ export async function extractDominantColors(buffer: Buffer): Promise<ContentColo
       else counts.set(key, { r, g, b, count: 1 });
     }
 
-    const sorted = [...counts.values()].sort((a, b) => b.count - a.count);
+    const sorted = [...counts.values()].sort((a, b) => {
+      const countDiff = b.count - a.count;
+      // Tiebreak on the bucket's own r/g/b — two colour buckets with equal pixel
+      // counts need a stable order; r/g/b differ by construction since they form the
+      // map key, so this can never itself be a further tie.
+      return countDiff !== 0 ? countDiff : (a.r - b.r) || (a.g - b.g) || (a.b - b.b);
+    });
     if (sorted.length === 0) return DEFAULT_NEUTRAL_PALETTE;
 
     const roles: ContentColor["role"][] = ["primary", "secondary", "accent"];
