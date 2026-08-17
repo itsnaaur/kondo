@@ -4840,6 +4840,45 @@ running the code, not by reasoning alone.
 ---
 
 ---
+### 1.5-CARRY-FORWARD — `pickHue` has no notion of source confidence, for Task 1.10
+**Timestamp:** 2026-08-17
+**Git SHA at start:** 0d27f09
+**Status:** NOTE — no code change, nothing to verify by command; flagging for a future task.
+
+**Restating `1.5`'s own closing gap more sharply, at the human's request, and pointing it at the
+task that actually owns it.** `Task 1.2` built `rankBrandColorSources()`, which returns a real
+`confidence` field (`"high" | "medium" | "low"`) alongside its chosen hex — that field exists
+specifically to distinguish "a well-evidenced sitewide brand colour" from "the best of a weak
+field." **Nothing downstream reads it.** `buildPalette`'s `pickHue` (`lib/content/
+normalize-brand-colors.ts`) only ever sees a bare `{ hex: string }[]` — no confidence, no source,
+no margin — and filters purely on the colour's own HSL values (`s < 25`, `l < 26 || l > 82`).
+
+`1.5`'s own entry showed this catches Princeton Dental's `#002000` specifically, because it's
+*also* near-black (`l ≈ 6.3%`) — but that's incidental. **A low-confidence value with real
+saturation and ordinary lightness would pass `pickHue`'s filter untouched, indistinguishable from a
+high-confidence, well-evidenced brand colour**, and every downstream role (`accent`, `secondary`,
+`ring`, `destructive`'s pairing, everything Task `1.5` added) would derive from it exactly as
+confidently as if it were the good case.
+
+**This is `Task 1.10`'s problem, not a loose end to patch into `1.5`/`1.6`.** `1.10` (per the build
+plan, wherever it lands in Part C) is where `rankBrandColorSources`, `buildPalette`, and the rest of
+the design-resolution chain actually get wired together end to end — that's the natural, and only
+correct, place to decide what `pickHue` should *do* with a `confidence: "low"` input (refuse it and
+fall back? widen the fallback's own quality bar? surface it to the human reviewer instead of
+silently proceeding?). Deciding that now, disconnected from the actual wiring, would be exactly the
+kind of premature, undiscussed change this session has consistently avoided.
+
+**Files created/modified:** none.
+
+**Confidence:** High that the gap is real (traced directly in `1.5`'s own verification: `pickHue`'s
+filter is HSL-only, confirmed by reading the function). Not a claim about what the right fix is —
+that's undecided, deliberately.
+
+**Next task:** `1.6` — Contrast validation gate against the corpus, unrelated to this note, begun
+immediately after.
+---
+
+---
 
 # PART E — For the human reviewing this log
 
