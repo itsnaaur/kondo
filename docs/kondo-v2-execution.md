@@ -4507,6 +4507,207 @@ the human's direction.
 ---
 
 ---
+### 1.4 — Import `colors.csv` as a validation corpus
+**Timestamp:** 2026-08-17
+**Git SHA at start:** 098cbe2
+**Status:** DONE-VERIFIED
+
+**What I did:** four new files, exactly as scoped.
+- `lib/design/build/import-uupm.ts` — a standalone, hand-invoked import script (`npx tsx
+  lib/design/build/import-uupm.ts --source <path> --sha <commit-sha>`). Reads `colors.csv`,
+  normalises CRLF→LF before anything else touches the content (parsing and the recorded SHA-256
+  both run on the normalised string), parses it with a small direct RFC4180 field parser (not a
+  general CSV library — the only quoted fields in the whole file are the 19 `Border` rows, quoted
+  because their `rgba(...)` values contain commas; confirmed no other column ever needs quoting
+  by grepping the source file for embedded `"` outside those 19 rows), drops the one named row,
+  normalises the 19 `rgba()` borders, and writes `palettes.json` + `PROVENANCE.md`.
+- `lib/design/data/palettes.json` — the generated corpus, **191 elements, confirmed by `jq
+  'length'` below**.
+- `lib/design/data/PROVENANCE.md` — SHA, import date, source-file SHA-256, row counts,
+  normalisation notes, re-import instructions.
+- `THIRD_PARTY_NOTICES.md` at the repo root — the real MIT text, byte-diffed against the source
+  repo's own `LICENSE` file (identical modulo the source's CRLF line endings), pinned SHA, and
+  exactly what was taken.
+
+**Read-only confirmed before touching anything, pasted as instructed:**
+```
+$ git -C "C:\Users\acer\Documents\project room\JRNY-Digital\ui-ux-pro-max-skill" status --porcelain
+(no output)
+$ git -C "C:\Users\acer\Documents\project room\JRNY-Digital\ui-ux-pro-max-skill" rev-parse HEAD
+a38d04c3d5c298c851dbe5e6ee1965ee3de42cb5
+```
+Matches the pinned SHA given in the task exactly — the clone is already sitting at the commit
+this import is supposed to vendor from, not something I had to check out. Re-confirmed clean
+**after** the import ran too (pasted again below), since the import script only ever opens the
+source file for reading (`readFileSync`) — never writes into the clone.
+
+**Canonical source file identified from the audit, not guessed** — five files named `colors.csv`
+exist in the clone (`cli/assets/data/`, `.claude/skills/.../data/`,
+`cli/assets/skills/.../data/logo/`, `.claude/skills/design/data/logo/`, and
+`src/ui-ux-pro-max/data/`). The audit (`docs/uupm-port-audit.md`, throughout §2.2 and its column
+breakdown) is unambiguous that `src/ui-ux-pro-max/data/colors.csv` — 192 rows, 19 columns — is the
+one the whole import plan is scoped against; used that path, not one of the others.
+
+**The dropped row, confirmed by direct lookup before writing the drop logic, not assumed from the
+audit's prose alone:**
+```
+$ grep -n "Spatial Computing" src/ui-ux-pro-max/data/colors.csv
+90:89,Spatial Computing OS / App,#FFFFFF,#0F172A,#E5E5E5,#0F172A,#FFFFFF,#0F172A,#888888,#000000,#999999,#000000,#E5E7EB,#5F6673,#CCCCCC,#FF3B30,#000000,#000000,Glass white + system blue
+```
+Row `No. 89`, `Background=#888888` / `Foreground=#000000` — the pairing the audit's AA-failure
+finding refers to. The import script drops by exact `Product Type` string match
+(`"Spatial Computing OS / App"`) and **hard-fails if it finds zero or more than one matching row**,
+rather than silently importing a different count than the plan anticipated on a future re-import
+where upstream might rename or duplicate the row.
+
+**The 19 `rgba()` borders — confirmed identical before deciding how to normalise them, not
+assumed:**
+```
+$ grep -n "rgba(" src/ui-ux-pro-max/data/colors.csv | wc -l
+19
+```
+All 19 are the exact same literal value, `rgba(255,255,255,0.08)`, on 19 different dark-background
+rows. Normalised to 8-digit hex, `#RRGGBBAA` (CSS Color 4 channel order) — `0.08 × 255 = 20.4`,
+rounds to `20 = 0x14`, giving `#FFFFFF14` — rather than dropping the alpha to land on plain
+`#FFFFFF`, since a deliberately subtle translucent border on a dark palette is a real, intentional
+design choice in the source data, not noise to discard. Every other column was already
+consistently `#RRGGBBXX`/`#RRGGBB` (grepped for any lowercase hex character across the whole file —
+none found), so this is the only normalisation the Border column, or any column, needed.
+
+**Line-ending normalisation, and why it's checked twice, not once:** the source `colors.csv` is
+CRLF on disk (confirmed: `xxd` shows `0d0a` at every line end; the audit's own byte-format table
+independently corroborates this — `CRLF(193)`). The import script normalises CRLF→LF *before*
+either parsing or hashing, so the recorded source SHA-256 doesn't depend on which line-ending
+convention a given checkout happens to have (a real risk per the task's own instruction — "the
+digest differs per checkout" otherwise). Separately, after writing the four output files, checked
+their own line endings byte-by-byte (not by a text-mode `grep`, which gave a false-positive CRLF
+count on this Windows shell — corrected by reading raw bytes in Node instead): all four are pure
+LF, `CRLF=0, loneCR=0` — satisfying this repo's own `.gitattributes` (`* text=auto eol=lf`, from
+`GITATTRIBUTES-01`) without needing git to do any conversion on checkout.
+
+**The header-in-JSON tension, surfaced rather than silently resolved either way.** The task asks
+for two things that cannot both be literally true of the same file: (a) "put a header in the
+generated JSON stating it is generated... corrections belong in a sibling `overrides.json`", and
+(b) `jq 'length' lib/design/data/palettes.json` must return exactly `191`. JSON has no comment
+syntax, and there is no way to add a header *inside* `palettes.json` without either turning it into
+an object (breaking `jq 'length'`, which would then count keys, not palettes) or adding an extra
+array element (making the length `192`, not `191`). Resolved by keeping `palettes.json` a bare
+191-element array — satisfying the literal, stated done-when — and putting the exact same warning,
+verbatim in spirit, at the top of both `PROVENANCE.md` (which sits in the same directory and *is*
+this task's designated home for generated-file documentation) and `import-uupm.ts`'s own header
+comment (so anyone opening the generator to "fix" the JSON sees it there too). Flagging this
+explicitly rather than picking a resolution silently, in case a wrapped-object shape
+(`{ palettes: [...] }`) with a real header field was actually intended and the done-when command
+would need to change to `jq '.palettes | length'` instead.
+
+**Files created/modified:**
+```
+$ git -C "...\ui-ux-pro-max-skill" status --porcelain
+(no output — still clean, confirmed again after the import ran)
+$ git status --porcelain
+?? THIRD_PARTY_NOTICES.md
+?? lib/design/build/
+?? lib/design/data/
+```
+
+**Verification command (the task's stated done-when), output pasted verbatim:**
+```
+$ jq 'length' lib/design/data/palettes.json
+191
+```
+(`jq` was not installed in this environment; installed via `winget install jqlang.jq` for this
+verification specifically, rather than approximating the check with a different tool — the task
+asked for `jq`'s own output.)
+
+```
+$ cat lib/design/data/PROVENANCE.md
+# Provenance — lib/design/data/palettes.json
+
+**GENERATED FILE. Do not hand-edit `palettes.json`.** It is fully overwritten every time
+`lib/design/build/import-uupm.ts` runs — a hand edit survives only until the next re-import,
+which silently discards it. Corrections belong in a sibling `lib/design/data/overrides.json`
+(not created by this import — wire it in at the point something actually needs correcting),
+merged at build time by whatever reads `palettes.json`. This is the same warning
+`import-uupm.ts`'s own header comment carries — repeated here because JSON has no comment
+syntax, so it can't live inside `palettes.json` itself without breaking `jq 'length'` on what
+must stay a plain 191-element array.
+
+## Source
+
+- Repository: https://github.com/nextlevelbuilder/ui-ux-pro-max-skill
+- Pinned commit SHA: `a38d04c3d5c298c851dbe5e6ee1965ee3de42cb5`
+- Import date: 2026-08-17
+- File imported: `src/ui-ux-pro-max/data/colors.csv`
+- Source file SHA-256 (after CRLF→LF normalisation ...): `8162429222bce22df62b564085946a30d07cc9722c58d0a3a494bd0d1d00841c`
+- License: MIT — see /THIRD_PARTY_NOTICES.md at the repo root.
+
+## Row counts
+
+| File | Upstream rows | Imported rows | Dropped |
+|---|---:|---:|---|
+| `colors.csv` | 192 | 191 | 1 — `Spatial Computing OS / App` (No. 89), the single WCAG AA body-text failure the audit found (Background/Foreground contrast) |
+
+## Normalisation applied
+...
+```
+(full file is 46 lines; reproduced in full above except the one truncated sentence, marked `...`,
+which is unchanged boilerplate about why the hash is post-normalisation — see the real file for
+the exact wording.)
+
+**Additional verification, beyond the stated done-when, before calling this task done:**
+```
+$ jq '[.[] | select(.productType == "Spatial Computing OS / App")]' lib/design/data/palettes.json
+[]
+$ jq '[.[] | select(.id == 89)]' lib/design/data/palettes.json
+[]
+$ jq '[.[] | select(.border | test("rgba"))] | length' lib/design/data/palettes.json
+0
+$ jq '[.[] | select(.border | test("^#[0-9A-F]{8}$"))] | length' lib/design/data/palettes.json
+19
+$ npx tsc --noEmit && npm run lint && npx vitest run
+(all exit 0; 8 test files, 71 passed, 1 pre-existing todo — no regressions, no new tests added by
+this task since there's nothing here yet to unit-test beyond the import script's own one-shot
+output, which is verified directly above)
+```
+
+**Failures, retries and dead ends:**
+1. `jq` wasn't installed in this shell — installed via `winget`, then invoked by its full path
+   until a shell restart would pick up the updated `PATH`. Not worked around by approximating with
+   a different tool, since the task specifically wanted `jq`'s own output pasted.
+2. A first line-ending check used `grep -c $'\r'` in this Windows Bash environment and reported
+   thousands of false-positive CRLF matches on files independently confirmed (via raw byte
+   inspection in Node, and via `xxd`) to be pure LF. Not trusted at face value — re-checked with a
+   byte-level method before concluding the files were actually fine, rather than either believing
+   the false positive or silently discarding a check that disagreed with what I expected.
+
+**Shortcuts taken:** none in the import logic itself. The CSV parser is intentionally narrow
+(handles exactly this file's quoting pattern, not a general CSV grammar) — disclosed as a
+deliberate scope choice in the script's own comment, not a limitation discovered after the fact.
+
+**Deviations from the task spec:** the header-in-JSON tension above — resolved by keeping the
+literal done-when intact and relocating the header text rather than breaking `jq 'length' == 191`
+to satisfy the letter of the header instruction. Flagged explicitly, not silently chosen.
+
+**Not run / not verified:**
+- `overrides.json` was not created — the task's file list didn't include it, and creating an empty
+  placeholder for a mechanism nothing yet reads felt like scope creep beyond what was asked;
+  referenced in both `PROVENANCE.md` and the script's header as the future correction path.
+- `validate-contrast.ts`/`validate-fonts.ts` (build plan §3.4's re-import gate) were not built —
+  out of this task's stated file list; noted in `PROVENANCE.md`'s own re-import instructions as a
+  real gap for whoever re-imports next.
+- No consumer reads `palettes.json` yet — nothing to integration-test beyond the file's own shape
+  and content, which is verified directly above.
+
+**Confidence:** High — every number in this entry (`191`, `192`, `19`, the dropped row's exact
+identity, the SHA-256, the byte-level line-ending check) is real command output, not restated from
+the build plan or the audit without re-checking against the actual source file.
+
+**Next task:** awaiting the human's direction — in particular, whether the header-in-JSON tension's
+resolution is acceptable as-is, or whether `palettes.json` should instead be a wrapped object (which
+would change the done-when command itself). Not started this session.
+---
+
+---
 
 # PART E — For the human reviewing this log
 
