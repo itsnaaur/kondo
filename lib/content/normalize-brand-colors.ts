@@ -13,6 +13,8 @@
  * palette is always well-formed.
  */
 
+import { pickOnColor } from "@/lib/design/contrast";
+
 export type Palette = {
   accent: string; // primary action colour
   accentInk: string; // text colour that sits on accent
@@ -25,9 +27,35 @@ export type Palette = {
   line: string; // hairline rules
   paper: string;
   derivedFrom: "brand" | "fallback";
+  // Task 1.5 — four roles from the uupm audit's role invariants (191 real palettes,
+  // docs/uupm-port-audit.md §8.4), not four new independent design decisions:
+  secondary: string; // a tint of accent — the audit found Secondary is the same hue as
+  // Primary in the source data (median 4° hue delta — noise around "same hue" in
+  // hand-picked palettes, not a deliberate offset), differing mainly in lightness.
+  ring: string; // focus ring — the audit found Ring equals Primary in 161/192 (84%) of
+  // source palettes, the clear majority pattern, so ring is exactly accent, not derived
+  // separately.
+  destructive: string; // error/destructive action colour — see DESTRUCTIVE below.
+  onDestructive: string; // text/icon colour on destructive — via pickOnColor (Task 1.3).
 };
 
 const FALLBACK_HUE = 222; // a designed slate-indigo, used when nothing extracted is usable
+
+// Task 1.5. The uupm audit's controlled vocabulary for Destructive is only 3 hex values
+// across 192 source palettes (docs/uupm-port-audit.md §2.2) — that's a designed constant in
+// every one of those design systems, not a value derived from the brand hue (an error red
+// stays legible and recognisable as "error" regardless of what colour the brand is). Fixed
+// here for the same reason. #DC2626 (Tailwind red-600) is the actual majority choice in the
+// imported corpus — 172 of 191 rows (90%), paired with #FFFFFF onDestructive 172/172 times
+// — not picked from taste; see lib/design/data/palettes.json.
+const DESTRUCTIVE = "#dc2626";
+
+// How much lighter, in HSL lightness points, secondary sits above accent. The uupm audit
+// found Secondary is a tint of Primary — same hue, differing mainly in lightness — with a
+// median lightness delta of +9 points and secondary lighter than primary in 87% of the 191
+// imported palettes (computed directly from lib/design/data/palettes.json, not estimated).
+// Saturation delta was negligible (median +2.2) and isn't varied separately here.
+const SECONDARY_LIGHTNESS_DELTA = 9;
 
 function hexToHsl(hex: string): { h: number; s: number; l: number } | null {
   const m = /^#?([a-f\d]{6})$/i.exec(hex.trim());
@@ -121,6 +149,15 @@ export function buildPalette(brandColors: { hex: string }[]): Palette {
   const onWhite = contrast(luminance(hue, accentS, accentL), 1);
   const accentInk = onWhite >= 4.5 ? "#ffffff" : darkInk;
 
+  // Task 1.5 — secondary is a tint of accent (same hue/saturation, lighter), per the audit's
+  // Secondary-is-a-tint-of-Primary finding. Clamped so an already-light accentL (the
+  // yellowish branch starts at 32, everything else at 41, though the AA-contrast loop above
+  // can push accentL as low as 24) can't push secondary past white.
+  const secondary = hsl(hue, accentS, Math.min(accentL + SECONDARY_LIGHTNESS_DELTA, 92));
+  // Task 1.5 — ring equals accent, the audit's majority (161/192) Ring-equals-Primary pattern.
+  const ring = hsl(hue, accentS, accentL);
+  const onDestructive = pickOnColor(DESTRUCTIVE);
+
   return {
     accent: hsl(hue, accentS, accentL),
     accentInk,
@@ -133,5 +170,9 @@ export function buildPalette(brandColors: { hex: string }[]): Palette {
     line: hsl(hue, 14, 88),
     paper: "#ffffff",
     derivedFrom: source,
+    secondary,
+    ring,
+    destructive: DESTRUCTIVE,
+    onDestructive,
   };
 }
