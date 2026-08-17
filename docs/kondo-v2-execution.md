@@ -5269,6 +5269,187 @@ clean at 191/191. Not started this session.
 ---
 
 ---
+### 1.7 — Deterministic image pass
+**Timestamp:** 2026-08-17
+**Git SHA at start:** ebefbea
+**Status:** DONE-VERIFIED — metrics computed for every downloaded asset on two real clients (the
+done-when asked for one; a second was run for a materially richer colour-entropy distribution, see
+below). **Migration question asked, not assumed** — see the end of this entry.
+
+**What I did:** new file `lib/content/image-metrics.ts`, exporting `computeImageMetrics(buffer,
+context)`. No model call anywhere in it — every field is either read directly from `sharp`'s
+metadata, computed from `sharp`'s own pixel buffer, or supplied by the caller from page context it
+already has. Wired into `lib/crawl/download-images.ts`: `downloadCrawlImages` now computes metrics
+for the logo and every candidate as part of its normal flow (a real consumer on every crawl, not a
+standalone unused module).
+
+**Metrics, and how each is computed:**
+- **dimensions / aspect ratio / orientation** — `sharp(buffer).metadata()`'s `width`/`height`
+  directly; `orientation` is a plain landscape/portrait/square comparison, no new logic.
+- **file size** — `buffer.length`, already known before any image decoding.
+- **bytes-per-pixel** — `fileSizeBytes / (width × height)`, a compression-quality *proxy*, not a
+  quality score (documented in the type itself: a photo and a flat-colour graphic at identical
+  "quality" legitimately differ here, so this is one signal among several for 1.9, not a verdict).
+- **alpha channel present** — `sharp`'s own `metadata().hasAlpha`, not reimplemented.
+- **colour entropy** — Shannon entropy (bits) over the *same* quantized pixel histogram
+  `bucketImageColors` already produces for logo ranking — no second pixel pass.
+- **saturation-filtered dominant colours** — the bucketed histogram filtered through
+  `isNearNeutralHsl` (the exact 1.1b-corrected check, `l>=90||l<=3||s<15`), ranked by saturation
+  descending, explicit tiebreak on r/g/b (same discipline as 0.1a/1.1b/1.2), top 5, each with its
+  share of sampled pixels.
+- **page position** — index of this image within its source page's own `<img>` order (0-based),
+  captured by `download-images.ts`'s existing candidate-gathering loop (it already iterates
+  `page.images`; this task just kept the index instead of discarding it). `null` for the logo — it's
+  resolved from `logoCandidate`/`favicon`/`ogImage`, not a position in any page's `images` list.
+- **cross-page frequency** — for a candidate, count of distinct crawled pages (`allPages`, every
+  page, not just the content-analysis subset) whose `images` array contains this exact source URL.
+  For a newly-picked logo, the same idea against `logoCandidate` specifically (mirroring
+  `pickBestLogoCandidate`'s own counting). For a *reused* logo (an existing `Asset` re-fetched from
+  Storage — see below), **0, disclosed as a real limitation, not silently guessed**: `Asset.url` by
+  that point is our own Storage URL, not the site's original crawl-time URL, so there is nothing in
+  the current crawl's page data to match it against.
+
+**Constraint 2 — reuse, not reimplementation, checked by what got exported, not just intent.**
+`lib/content/rank-brand-color-sources.ts` already had `rgbToHsl`, `isNearNeutralHsl`, and
+`bucketImageColors` as private functions (`sharp` usage plus the 1.1b-corrected neutrality check).
+Exported all three — `git diff` on that file is additions of the word `export` and one type alias
+(`PixelBucket`) plus explanatory comments, no logic changed — and imported them into
+`image-metrics.ts`, rather than writing a third copy of either. This particular file was already the
+lib/content-side canonical copy of the corrected HSL check (per its own `1.1b`-era comment explaining
+why it duplicated `crawler.ts`'s private version instead of reaching into `lib/crawl`) — a second
+`lib/content` consumer importing it doesn't cross that same boundary.
+
+**Real run, two clients — the done-when asked for one:**
+
+**Allen Evans Family Lawyers** (33 pages, real crawl, real `downloadCrawlImages` call — logo +
+9 candidates, all 10 metrics-computed):
+
+| Asset | Dimensions | Orientation | Size | B/px | Alpha | Entropy | Page pos | Cross-page freq |
+|---|---|---|---:|---:|---|---:|---:|---:|
+| logo-from-crawl.png | 500×85 | landscape | 6,296 B | 0.148 | yes | 2.11 | — | 0 *(reused asset, see above)* |
+| site-image-2.jpg | 612×408 | landscape | 28,579 B | 0.114 | no | 2.87 | 3 | 1 |
+| site-image-3.png | 90×90 | square | 2,930 B | 0.362 | yes | 2.02 | 4 | 1 |
+| site-image-4.png | 90×90 | square | 2,975 B | 0.367 | yes | 2.09 | 5 | 1 |
+| site-image-5.png | 92×92 | square | 1,129 B | 0.133 | yes | 2.35 | 6 | 1 |
+| site-image-6.png | 90×90 | square | 2,730 B | 0.337 | yes | 2.29 | 7 | 1 |
+| site-image-7.png | 90×90 | square | 2,235 B | 0.276 | yes | 2.24 | 8 | 1 |
+| site-image-8.jpg | 160×150 | landscape | 9,143 B | 0.381 | no | 2.65 | 10 | 1 |
+| site-image-9.png | 200×69 | landscape | 3,790 B | 0.275 | yes | 1.71 | 11 | 1 |
+| site-image-10.jpg | 300×161 | landscape | 17,437 B | 0.361 | no | 2.12 | 12 | 1 |
+
+Entropy: `2.11, 2.87, 2.02, 2.09, 2.35, 2.29, 2.24, 2.65, 1.71, 2.12` — min 1.71, max 2.87, mean 2.25.
+**Notably narrow — this client's selected candidates turned out to be almost entirely small
+90×90-ish icons, not real photography, so this one client's distribution alone would be a weak basis
+for anything.** Ran a second client for exactly this reason, not as scope creep beyond the done-when
+but because a distribution this narrow doesn't serve what the task itself asked the entry to state
+plainly.
+
+**Propell Property** (150 pages, truncated at the crawl cap, real crawl — logo + 9 candidates):
+
+| Asset | Dimensions | Orientation | Size | B/px | Alpha | Entropy | Page pos | Cross-page freq |
+|---|---|---|---:|---:|---|---:|---:|---:|
+| logo-from-crawl.svg | 1024×300 | landscape | 43,806 B | 0.143 | yes | 2.17 | — | 0 |
+| site-image-2.svg | 1024×1024 | square | 137,940 B | 0.132 | yes | 3.19 | 1 | 150 |
+| site-image-3.jpg | 1920×1200 | landscape | 227,620 B | 0.099 | no | **5.34** | 2 | 2 |
+| site-image-4.svg | 1024×300 | landscape | 36,857 B | 0.120 | yes | **1.59** | 3 | 150 |
+| site-image-5.jpg | 1920×960 | landscape | 130,594 B | 0.071 | no | 4.27 | 2 | 1 |
+| site-image-6.jpg | 1064×1200 | portrait | 213,811 B | 0.167 | no | 4.53 | 3 | 1 |
+| site-image-7.jpg | 1600×2000 | portrait | 63,874 B | 0.020 | no | 4.45 | 2 | 16 |
+| site-image-8.jpg | 1600×2000 | portrait | 77,306 B | 0.024 | no | 4.40 | 3 | 15 |
+| site-image-9.jpg | 1600×2000 | portrait | 95,041 B | 0.030 | no | 4.80 | 4 | 3 |
+| site-image-10.jpg | 1600×2000 | portrait | 104,336 B | 0.033 | no | 4.87 | 5 | 3 |
+
+Entropy: `2.17, 3.19, 5.34, 1.59, 4.27, 4.53, 4.45, 4.40, 4.80, 4.87` — min 1.59, max 5.34, mean 3.96.
+
+**The distribution worth stating plainly, as instructed — real, not a guessed cutoff:** across the
+20 assets from both clients, **every SVG (3 of 3: the logo and two decorative site graphics) scored
+between 1.59 and 3.19; every real photographic JPEG (7 of 7 on Propell) scored between 4.27 and
+5.34 — a clean, non-overlapping gap between roughly 3.2 and 4.3 in this sample.** Allen Evans'
+PNG icons (2 of 2 formats aside, all small square graphics) sit in a third, lower band, 1.71–2.87,
+closer to the SVGs than the photos. This is consistent with the metric's own premise — flat
+graphics/icons have few distinct colour buckets regardless of file format, real photography has
+many — but it's a 20-asset, 2-client sample, not a validated threshold. **Not picking a cutoff here,
+per instruction — 1.9's role assignment is where that choice belongs, made from this kind of data,
+not guessed in this entry.**
+
+**Constraint 3 — the schema question, asked, not assumed or migrated past.** Metrics are **not**
+persisted anywhere in this task — `downloadCrawlImages` computes them and attaches them to its
+in-memory return value (`DownloadedCandidate`/`DownloadedLogo` now carry a `metrics: ImageMetrics`
+field), but nothing writes them to the database. The natural fit is a new nullable `metrics Json?`
+column on `Asset`, the same pattern as `CrawledPage.computedStyles Json?` from Task `1.1` — Asset
+has no existing generic/JSON column metrics could reuse instead. **Not run.** Per the standing rule
+("ask before running any database migration, every time") and this task's own explicit instruction,
+asking in the chat reply accompanying this entry rather than deciding unilaterally.
+
+**Files created/modified:**
+```
+$ git status --porcelain
+ M lib/content/rank-brand-color-sources.ts
+ M lib/crawl/download-images.ts
+?? lib/content/image-metrics.ts
+```
+No schema/migration file — none run, per above.
+
+**Verification command:**
+```
+npx tsc --noEmit && npm run lint && npx vitest run
+(real run against Allen Evans Family Lawyers: prisma.crawledPage.deleteMany, crawlClientSite,
+selectRelevantPages, downloadCrawlImages — same orchestration run-analysis.ts itself uses — metrics
+printed for every returned asset)
+(same real run against Propell Property, for a richer entropy distribution)
+```
+
+**Output:**
+```
+$ npx tsc --noEmit
+(exit 0)
+$ npm run lint
+(exit 0)
+$ npx vitest run
+ Test Files  9 passed (9)
+      Tests  89 passed | 1 todo (90)
+```
+Full metrics tables for both real clients are reproduced above, not summarised further; every
+number in them is real command output.
+
+**Failures, retries and dead ends:**
+1. First attempt to run the second (Propell) verification backgrounded it with a bare shell `&`
+   inside one `Bash` call, then tried to `wait` on it from a *separate* `Bash` call — the tool's own
+   shell state doesn't persist across calls, so the `wait` found nothing and the output file was
+   empty. Re-ran using the harness's own `run_in_background` parameter on the actual command instead
+   of a manual `&`, which completed and notified correctly.
+
+**Shortcuts taken:** none in the metrics themselves. Reused `bucketImageColors`'s existing 24×24
+resize/32-step quantization exactly as-is (no new sampling parameters invented) — consistent with
+"reuse, don't reimplement," not a shortcut on rigor.
+
+**Deviations from the task spec:** ran a second real client beyond the stated done-when (one client)
+— disclosed above as a deliberate choice to get a distribution worth stating plainly, not scope
+creep performed silently.
+
+**Not run / not verified:**
+- Whether `bytesPerPixel`/`colorEntropy`/other metrics correlate with anything beyond this 20-asset
+  sample — no attempt to validate against a larger set; that's exactly the kind of validation 1.9's
+  threshold-setting would need before trusting a cutoff.
+- SVG-specific rasterisation behaviour — `sharp` rasterises SVGs at its own default density before
+  bucketing/entropy runs; not investigated whether a different density would change the
+  entropy numbers materially. Both real SVGs in this run scored low regardless, consistent with them
+  being simple, flat-colour graphics, not evidence the metric is insensitive to rasterisation choices
+  in general.
+- Whether a `metrics Json?` migration should happen now or wait for `1.9`/`1.10` to need it for
+  real — genuinely asking, not deciding.
+
+**Confidence:** High on every computed number — real `sharp` output and real bucketed histograms
+against two real, freshly-crawled clients, not synthetic test data. Medium on whether 20 assets is
+enough to trust the entropy gap described above as a general pattern rather than a two-client
+coincidence — stated as an observation, not a validated rule.
+
+**Next task:** awaiting the human's answer on the `metrics Json?` migration, and direction on `1.8`
+(the vision call) / `1.9` (role assignment, including the entropy threshold). Not started this
+session.
+---
+
+---
 
 # PART E — For the human reviewing this log
 
