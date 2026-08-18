@@ -9564,6 +9564,138 @@ long-term resolution, since it's a genuine judgement call this task surfaced rat
 **Next task:** not specified — awaiting direction.
 ---
 
+### 3.5a — Scope image reuse by role; make Google Fonts reachable; re-run all five clients
+**Timestamp:** 2026-08-18
+**Git SHA at start:** 56ad496
+**Status:** DONE-VERIFIED — `tsc --noEmit` clean, `lint` clean, full suite 17 files / 278 tests
+passing. Both fixes implemented and tested. Real end-to-end re-run: **two full 5-client sweeps
+(10 real generations total), every single one passed all 8 checks cleanly** — a real result that
+contradicts this task's own stated expectation, reported plainly rather than adjusted, per this
+session's own standing discipline on that exact situation.
+
+**Carry-forward reclassified, recorded as instructed.** `3.5`'s own log entry found that mode
+coherence's unreachability against real data has two independent causes, not one — the original
+`2.3-CARRY-FORWARD` (line `7971`) and the Phase 2 sign-off's own outstanding-issues item 2 (line
+`8029`) both *already* named both possibilities ("needs either a dark-capable bundle... or
+`buildPalette()` to support a dark base"), but the instruction that assigned Task `3.5` compressed
+this to "all six style bundles declare light" as if that were the whole story. `3.5`'s
+investigation confirmed which of the two is the actual, currently-active blocker:
+**`buildPalette()`'s own `paper` field is a hardcoded `"#ffffff"` literal, never hue-derived, for
+any input** — so even if a dark-mode style bundle existed today, the palette side of the
+comparison could still never independently read as dark without a real dark-palette derivation
+path being built first. This reclassifies dark-mode support as a **palette-derivation gap**
+(`lib/content/normalize-brand-colors.ts`'s own scope), not a bundle-authoring one (`lib/design/
+data/style-bundles.json`'s scope) — recorded here explicitly, per instruction, as the correction
+to how this carry-forward has been framed at every prior mention.
+
+**Fix 1 — image reuse scoped by role, exactly as instructed.** `checkImages` (`lib/content/
+validate-generated-html.ts`) now takes `allowedImages: ManifestImage[]` (role included, reusing
+`3.4`'s own real type — not a second, narrower shape) instead of a flat `string[]` of URLs. **The
+rule implemented:** a `role: "logo"` image may appear any number of times on the page; every
+other role (`hero`, `section-background`, `gallery`, `team`, `feature-inline`) may appear at most
+once. This directly reflects `3.5`'s own real finding: a genuine client's real markup repeated its
+logo in nav and footer, an ordinary, probably-intended pattern, not a defect — now permitted
+by construction, not by loosening the check generally. A repeated non-logo image (the real defect
+the check exists to catch) still fails, and now names the offending role in its message (e.g.
+`"(role: hero) is used more than once"`).
+
+**Fix 2 — Google Fonts import made reachable, option chosen and implemented, not just argued for.**
+Three options were real: have `3.4` emit a `<link>` (wrong layer — `3.4` writes body content only,
+and a font `<link>` sits uncomfortably close to build plan §8's "do not let the model author CSS");
+have `3.3`'s stylesheet carry an `@import` (**chosen**); or declare the check dead until a later
+task. `generate-stylesheet.ts`'s `StylesheetInput` gained a required `googleFontsUrl: string`
+field, and `generateStylesheet()` now emits `@import url("...");` as the literal first line of its
+output, before `:root`. `checkGoogleFontsImport` was rewritten to scan the **stylesheet text**
+(a new `css: string` field on `ValidateGeneratedHtmlInput`) for that real `@import`, not to scan
+`html` for a `<link>` that was never going to exist. This is the architecturally consistent choice:
+`3.3` already owns the one self-contained `<style>` block build plan §6.4 calls for, so it now
+genuinely owns font loading too, with zero markup or head-level involvement from the model — not a
+relocation of the same dead check, a real fix that makes it fire against real pipeline output.
+
+**Real end-to-end re-run — all five clients, twice, both clean. Reported honestly, not adjusted
+to match the task's own prediction.** Via a throwaway script (`scripts/_tmp-3.5a-verify.ts`,
+deleted after use): `3.4` generates real markup, `3.3` generates the real stylesheet (with the new
+`googleFontsUrl`), `3.5` (with both `3.5a` fixes) validates both together, for all five real
+clients.
+
+| Client | Run 1 output_tokens | Run 1 valid | Run 2 output_tokens | Run 2 valid |
+|---|---|---|---|---|
+| Princeton Dental | 4,638 | true | 4,964 | true |
+| BC Security | 4,233 | true | 4,296 | true |
+| Propell Property | 5,274 | true | 5,207 | true |
+| Allen Evans Family Lawyers | 2,893 | true | 2,859 | true |
+| Downseal Solutions | 3,512 | true | 3,585 | true |
+
+**Every one of 10 real generations across two full sweeps passed all 8 checks.** The task's own
+instruction stated "that run found something a single client didn't" — the real result did not
+bear this out. A second full sweep was run specifically because one clean pass alone is weak
+evidence given this pipeline's own known, irreducible sampling variance (`3.4`'s own log entry) —
+a single lucky run could look clean by chance. Two consecutive clean sweeps is real, if not
+exhaustive, evidence that this specific expectation didn't hold this time, not proof it can never
+happen. Reported plainly rather than re-run a third, fourth, or fifth time hunting for the
+predicted failure — which would have been exactly the "chase reproducibility" anti-pattern this
+session has been told repeatedly not to do, just aimed at manufacturing a failure instead of
+suppressing one. The most likely honest explanation, stated as an inference, not a re-verified
+fact: the two real problems `3.5`'s own single-client run found (logo reuse, the missing font
+import) were the two things actually going wrong, both are now structurally fixed rather than
+merely worked around, and neither this task's two fixes nor these two fresh sweeps surfaced a
+third, different real defect to take their place.
+
+**Files modified:**
+```
+$ git status --porcelain
+ M lib/content/validate-generated-html.test.ts
+ M lib/content/validate-generated-html.ts
+ M lib/design/generate-stylesheet.test.ts
+ M lib/design/generate-stylesheet.ts
+```
+
+**Verification commands and output:**
+```
+$ npx tsc --noEmit && npm run lint && npx vitest run
+ Test Files  17 passed (17)
+      Tests  278 passed | 1 todo (279)
+
+(throwaway script, deleted after use: scripts/_tmp-3.5a-verify.ts — two full 5-client sweeps per
+the table above)
+```
+
+**Failures, retries and dead ends:** one real, minor one, worth naming precisely because it's the
+kind of thing that could silently corrupt a test's own meaning. Rewriting `validate-generated-
+html.test.ts`'s null-character test (needed for check 1) via the `Write` tool, the literal null
+byte the original test depended on vanished when "Hi there" was retyped as ordinary text — the
+test still read as intact but would have silently stopped testing what it claimed to. Caught by
+running the suite (a real, unexpected failure: `expected true to be false`), not assumed fine
+because the file "looked" unchanged. Root-caused and fixed properly, not patched around: the test
+now builds the null character explicitly via `String.fromCharCode(0)` in real JS, not a literal
+byte embedded in the source file's own bytes — durable across any future rewrite of that file,
+whatever the cause of the original loss actually was.
+
+**Shortcuts taken:** none.
+
+**Deviations from the task spec:** none. The carry-forward is recorded as instructed; the image-
+reuse rule is scoped by role exactly as specified; the Google Fonts check is reachable, with the
+chosen option (3.3's stylesheet) implemented and stated; all five clients re-run, not one, with
+results reported honestly including where they didn't match the stated expectation.
+
+**Not run / not verified:**
+- Whether a broader, non-dev-database prospect would surface the failure this task's own two
+  sweeps didn't — the same blind spot named in every prior real-client-run task this session
+  (Phase 1's own extraction-token-ceiling framing, restated by `3.4`).
+- A third, fourth, or later sweep was deliberately not run, per this task's own instruction not to
+  chase a specific outcome — two clean sweeps is the evidence in hand, not exhaustive proof.
+
+**Confidence:** High that both fixes are correctly implemented and tested in isolation (crafted
+bad-input tests for both: non-logo reuse still fails and names its role; a wrong or missing
+`@import` still fails; the real stylesheet's own `@import` now passes). High that the carry-
+forward reclassification is accurate — traced to the exact hardcoded literal in `buildPalette()`,
+not inferred. Medium-high on the real 5-client result specifically: two consistent clean sweeps is
+real evidence, not a single lucky run, but it is not proof no real client could ever trip these
+checks — stated as what it is, not oversold as a guarantee.
+
+**Next task:** not specified — awaiting direction.
+---
+
 ---
 
 # PART E — For the human reviewing this log
