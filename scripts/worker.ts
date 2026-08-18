@@ -11,8 +11,17 @@
 // `npm run worker:prod` (plain `tsx scripts/worker.ts`, no --env-file flag) instead —
 // see railway.toml.
 import * as Sentry from "@sentry/node";
-import { claimNextJob, completeJob, failJob, reclaimOrphanedJobs, type ClaimedJob } from "@/lib/jobs/queue";
+import {
+  claimNextJob,
+  completeJob,
+  failJob,
+  reclaimOrphanedJobs,
+  parseAnalyzeSitePayload,
+  parseGeneratePagePayload,
+  type ClaimedJob,
+} from "@/lib/jobs/queue";
 import { runAnalysisInBackground } from "@/lib/content/run-analysis";
+import { generatePageInBackground } from "@/lib/content/generate-page";
 
 // The worker is its own standalone Node process (not part of the Next.js app), so it uses
 // @sentry/node directly rather than @sentry/nextjs's Next-specific instrumentation hooks
@@ -24,13 +33,22 @@ Sentry.init({ dsn: process.env.SENTRY_DSN, tracesSampleRate: 0.1 });
 
 const POLL_INTERVAL_MS = 3000;
 
-type AnalyzeSitePayload = { clientId: string; siteUrl: string };
-
+// Task 3.7, constraint 2. Both branches validate the real payload shape before using it —
+// `job.payload as AnalyzeSitePayload` (this function's own previous shape) was an unchecked
+// cast, safe only while exactly one job type existed. With two job types sharing one untyped
+// `Json` column, `parseAnalyzeSitePayload`/`parseGeneratePagePayload` (lib/jobs/queue.ts) throw
+// a specific, actionable error immediately if a row's payload doesn't actually match what this
+// case is about to assume — not proceeding with `undefined` fields that would fail confusingly
+// three calls later inside runAnalysisInBackground/generatePageInBackground.
 async function dispatch(job: ClaimedJob): Promise<void> {
   switch (job.type) {
     case "ANALYZE_SITE": {
-      const payload = job.payload as AnalyzeSitePayload;
+      const payload = parseAnalyzeSitePayload(job.payload);
       return runAnalysisInBackground(payload.clientId, payload.siteUrl);
+    }
+    case "GENERATE_PAGE": {
+      const payload = parseGeneratePagePayload(job.payload);
+      return generatePageInBackground(payload.clientId, job.createdByUserId);
     }
     default:
       throw new Error(`Unknown job type: ${job.type}`);
@@ -41,10 +59,13 @@ async function processJob(job: ClaimedJob): Promise<void> {
   console.log(`[worker] processing ${job.id} (${job.type})`);
   try {
     await dispatch(job);
-    // Contract runAnalysisInBackground must follow: on failure, it reverts Client.status
-    // to ANALYSIS_FAILED itself and then rethrows — never catch, log, and return
-    // normally. This catch only handles Job-row bookkeeping, not user-facing recovery, so
-    // it relies on that rethrow to know a dispatch actually failed.
+    // Contract both runAnalysisInBackground and generatePageInBackground must follow: on a
+    // genuinely unrecoverable failure, revert Client.status to ANALYSIS_FAILED itself and
+    // then rethrow — never catch, log, and return normally. This catch only handles Job-row
+    // bookkeeping, not user-facing recovery, so it relies on that rethrow to know a dispatch
+    // actually failed. generatePageInBackground's own markup-generation failures are a
+    // deliberate exception to this — see its own header comment — those recover via the
+    // fallback renderer and complete normally, they don't rethrow.
     await completeJob(job.id);
     console.log(`[worker] completed ${job.id}`);
   } catch (err) {
