@@ -3,9 +3,11 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { STATUS_LABEL } from "@/lib/labels";
 import { startAnalysis } from "@/lib/actions/analysis";
+import { startPageGeneration } from "@/lib/actions/generation";
 import { SubmitButton } from "@/components/SubmitButton";
 import { ConfirmSubmitButton } from "@/components/ConfirmSubmitButton";
 import { AnalysisProgress } from "@/components/AnalysisProgress";
+import { GenerationProgress } from "@/components/GenerationProgress";
 import { ContentReviewForm } from "@/components/ContentReviewForm";
 import { ConceptHistoryList } from "@/components/ConceptHistoryList";
 import { restoreFromTrash } from "@/lib/actions/trash";
@@ -49,6 +51,13 @@ export default async function ClientWorkspacePage({
         select: { lastError: true },
       })
     : null;
+  // Task 3.7b. GENERATE_PAGE never touches Client.status (lib/content/generate-page.ts's
+  // own header comment), so unlike isAnalyzing above, "a generation is running for this
+  // client" has to be answered by the Job row itself, not a status column.
+  const activeGenerationJob = await prisma.job.findFirst({
+    where: { type: "GENERATE_PAGE", status: { in: ["PENDING", "RUNNING"] }, payload: { path: ["clientId"], equals: id } },
+  });
+  const isGeneratingPage = !!activeGenerationJob;
   const isApproved = !!contentRecord?.reviewedAt;
   // The review form stays reachable after approval too — via the Edit content link
   // below — so a small mistake spotted later doesn't force a full "Re-analyse site"
@@ -141,7 +150,7 @@ export default async function ClientWorkspacePage({
                     ? `The last re-analysis failed${lastFailedJob?.lastError ? `: ${lastFailedJob.lastError}` : ""} — showing content from the last successful run.`
                     : isApproved
                       ? `Content approved${contentRecord.reviewedBy?.email ? ` by ${contentRecord.reviewedBy.email}` : ""} on ${contentRecord.reviewedAt!.toLocaleDateString()}.`
-                      : "Review the extracted content below, then approve it to unlock Choose Template."}
+                      : "Review the extracted content below, then approve it to unlock Generate Page."}
                 </p>
                 <form action={startAnalysis.bind(null, client.id)}>
                   <ConfirmSubmitButton
@@ -185,33 +194,40 @@ export default async function ClientWorkspacePage({
               )}
 
               {!showForm ? (
-                <div className="flex items-center justify-between rounded-xl border border-neutral-800 bg-neutral-950 px-6 py-5">
-                  <div>
-                    <p className="font-medium text-neutral-100">{contentRecord.businessName || client.name}</p>
-                    <p className="text-sm text-neutral-400">{contentRecord.tagline}</p>
+                isGeneratingPage ? (
+                  <GenerationProgress clientId={client.id} />
+                ) : (
+                  <div className="flex items-center justify-between rounded-xl border border-neutral-800 bg-neutral-950 px-6 py-5">
+                    <div>
+                      <p className="font-medium text-neutral-100">{contentRecord.businessName || client.name}</p>
+                      <p className="text-sm text-neutral-400">{contentRecord.tagline}</p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <Link
+                        href={`/clients/${client.id}?edit=1`}
+                        className="rounded-lg border border-neutral-700 px-5 py-2.5 font-medium text-neutral-300 transition hover:bg-neutral-900"
+                      >
+                        Edit content
+                      </Link>
+                      <Link
+                        href={`/clients/${client.id}/templates`}
+                        className="rounded-lg border border-neutral-700 px-5 py-2.5 font-medium text-neutral-300 transition hover:bg-neutral-900"
+                      >
+                        Choose Template
+                      </Link>
+                      <form action={startPageGeneration.bind(null, client.id)}>
+                        <SubmitButton pendingLabel="Starting...">Generate Page</SubmitButton>
+                      </form>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <Link
-                      href={`/clients/${client.id}?edit=1`}
-                      className="rounded-lg border border-neutral-700 px-5 py-2.5 font-medium text-neutral-300 transition hover:bg-neutral-900"
-                    >
-                      Edit content
-                    </Link>
-                    <Link
-                      href={`/clients/${client.id}/templates`}
-                      className="rounded-lg bg-yellow-400 px-5 py-2.5 font-medium text-neutral-900 transition hover:bg-yellow-300"
-                    >
-                      Choose Template
-                    </Link>
-                  </div>
-                </div>
+                )
               ) : (
                 <>
                   {isApproved && (
                     <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-neutral-800 bg-neutral-950 px-4 py-3 text-sm text-neutral-400">
                       <span>
-                        Editing already-approved content. &quot;Save changes&quot; keeps it approved — Choose
-                        Template stays unlocked; only Re-approve below changes who/when it was approved.
+                        Editing already-approved content. &quot;Save changes&quot; keeps it approved — Generate
+                        Page and Choose Template stay unlocked; only Re-approve below changes who/when it was approved.
                       </span>
                       <Link href={`/clients/${client.id}`} className="shrink-0 text-neutral-300 hover:underline">
                         Done editing
