@@ -10399,6 +10399,284 @@ confirming it requires access I don't have.
 `3.7b-UI-VERIFIED` with the outcome. `3.8` (the deletions) resumes after that.
 ---
 
+### 3.7b-UI-VERIFIED — the human's own click-through
+**Timestamp:** 2026-08-18
+**Reported by:** the human, via chat, then independently confirmed against the real `Concept`
+row rather than taken on the report alone.
+
+Clicked Generate Page on BC Security's real client page. Reported back "it generated" along with
+real browser console output (HMR/Fast Refresh noise only — no errors, no CSP violations, which
+also closes `0.2`/`3.0`'s own authenticated-page carry-forward: a real authenticated dashboard
+page hydrated clean under the nonce CSP). Confirmed directly against the database rather than
+trusting the report alone: `Concept cmsy9jftx0002ikff4sur66qa`, `templateKey: "generated"` (the
+real AI-markup path, not the fallback), `createdAt: 2026-08-18T06:09:49.029Z` — a third real
+Concept for BC Security, timestamped minutes after `3.7b`'s own log entry was pushed, `createdByUserId`
+matching a real profile, not the script-driven one from `3.7b`'s own verification run. The UI
+trigger, the polling component, and the underlying pipeline are now proven through the real
+interface, not just through a script.
+
+The human's actual next message raised a real product question, not a bug report — whether the
+generated page's visual quality was representative of the pipeline's real capability or an
+artifact of something temporary. Investigated directly (dumped the real `Concept.html` to a local
+static server since the Browser pane has no session; confirmed via `javascript_tool` that all 7
+images loaded with real, distinct URLs, the brand accent color rendered correctly on CTAs, and
+there was no layout overflow) and reported honestly: not temporary — the `Concept.html` is a
+fully self-contained frozen document, byte-identical to what production would serve. The real,
+verifiable cause of the "thin" look was a genuine gap: `generate-markup.ts`'s `CLASS_VOCABULARY`
+had no card-grid, cropped-media, or stat-block primitive for the model to reach for, so BC
+Security's sixteen services rendered as a flat bordered list — not a choice the model made, the
+only shape the vocabulary allowed. That diagnosis is what `3.7c` immediately below exists to fix.
+
+**Next task:** `3.7c` — harvest composition vocabulary before `3.8` deletes it.
+---
+
+### 3.7c — Harvest composition vocabulary before 3.8 destroys it
+**Timestamp:** 2026-08-18
+**Git SHA at start:** 94af45d
+**Status:** DONE-VERIFIED
+
+**Step 1 — inventory, reported before writing anything.** Read all three doomed stylesheets in
+full (`lib/templates/{atlas,ledger,showcase}/styles.ts`, ~470-610 lines each) and catalogued every
+composition primitive against what `lib/design/generate-stylesheet.ts` (Task 3.3) already has
+(`.container`, `.section`, `.surface-*`, `.btn*`, `.card*`, `.img`, `.pill`):
+
+- **Card grid** — only `atlas`'s `.at-why__grid`/`.at-why__card` (the differentiators section,
+  explicitly commented "the page's one card section") is a real bordered/shadowed card treatment.
+  Neither `ledger` nor `showcase` uses cards for services at all — both deliberately chose ruled
+  rows/a ledger list instead (their own comments say so directly: "a services list is an index,
+  not a sequence"). Genuinely reusable as a generic `repeat(auto-fit, minmax(...))` grid container
+  — not reusable as `atlas`'s own hover-lift/stagger/accent-rule card decoration, which is
+  `atlas`-signature styling, not a neutral primitive.
+- **Media/image treatments** — `.at-team`/`.at-scenes` (fixed aspect-ratio + `object-fit: cover`),
+  `.tl-hero__media` (a masked-edge blend driven by a `--hero-pan` custom property — genuinely
+  reusable *idea*, `object-position` from a variable, but the mask-gradient blend itself is
+  `ledger`-signature decoration), `.tl-gallery`/`.sc-mosaic__grid` (CSS-columns masonry, natural
+  aspect, no forced crop — a real, distinct alternative to fixed-ratio cropping), `.sc-about__shots`
+  (natural-aspect grid, explicitly "nothing cropped, whatever shape the crawl returns"),
+  `.sc-hero__bg`/`.sc-feature`/`.sc-cta__bg` (full-bleed image + gradient scrim behind text — a
+  decorative treatment, not attempted here, see "left out" below).
+- **Trust/partner strip** — `.at-partners`/`.tl-strip__row` (a hairline lattice: 1px grid gap
+  simulating dividers, background-color trick) vs. `showcase`'s simpler flex row with desaturated
+  logos. Judged NOT to need its own dedicated class — a `.grid` of `.card`-wrapped logo tiles
+  composes to the same real effect (a grid of bordered cells) using primitives this task already
+  adds/keeps, without introducing a background-color-driven lattice trick that would need its own
+  colour-safety reasoning.
+- **Stat blocks** — `.at-hero__stats` (`<dl>`, hairline-divided, oversized accent numeral) and
+  `.tl-facts` (lattice cells, dark band) — the same real shape (a number + a label) in two
+  different decorative wrappers. The reusable core is the `dt`/`dd` typography, not either
+  wrapper.
+- **Split/CTA panel** — `.at-cta__panel` (a literal two-column split card, accent ask + paper
+  details, `box-shadow: var(--shadow-elevated)`), `.sc-about__grid` (asymmetric sticky-label +
+  content split). The even-two-column shape generalizes cleanly; the asymmetric sticky-label
+  treatment is `showcase`-signature editorial styling, not attempted here.
+- **Section rhythm** — all three independently define their own `--band` via the same
+  `scaledBand(min, vwCoeff, max, tokens.bandMultiplier)` helper with near-identical numbers
+  (atlas 62/118, ledger 60/112, showcase 60/116) — already fully superseded by `.section`'s own
+  flat `bandMultiplier`-scaled rule from `3.3`. Nothing to harvest here; noted as already covered.
+- **Badge/pill** — `.at-credentials`/`.tl-credentials`/`.sc-credentials` (pill shape, paired with
+  `.surface-secondary`'s own colours) — this is exactly `.pill`, which `3.3` already shipped.
+  Nothing to add.
+- **"Icon tiles"** — no true icon-glyph system exists in any of the three stylesheets (confirmed:
+  no icon font or SVG-sprite import anywhere in any of the three files) — the closest real analog
+  is the partner-logo tile, already covered above by `.grid` + `.card` + `.img` composition.
+- **Deliberately left out, named rather than silently dropped:** `ledger`'s masked hero-image
+  blend (`-webkit-mask-image` gradient, `--hero-pan`/`--hero-split`/`--hero-fade` custom
+  properties) and `showcase`'s full-bleed-image-behind-text hero/feature/CTA treatment — both are
+  real, working techniques, but both are decorative signature moves of one specific template, not
+  neutral composition primitives every future style bundle should default to. Folding them in now
+  would be smuggling one template's visual identity into the shared vocabulary; that decision
+  belongs to `3.7d` (style bundles), not this task ("vocabulary only," per instruction).
+
+**Step 2/3 — eleven new `CLASS_VOCABULARY` entries, covering the six-item checklist:**
+
+| Checklist item | Delivered as | Notes |
+|---|---|---|
+| Multi-column card grid | `.grid` (new) | `repeat(auto-fit, minmax(min(260px,100%),1fr))` — composes with the existing `.card` |
+| Media, fixed aspect ratio + object-position | `.media-16-9`/`.media-4-3`/`.media-1-1`/`.media-3-4` + `.obj-top`/`.obj-bottom`/`.obj-left`/`.obj-right` (new, 8 classes) | see focalPoint section below |
+| Badge/pill | `.pill` | **already existed** (`3.3`) — nothing added |
+| Stat block | `.stat` (new) | `<dl>` wrapping one `<dt>`(number)/`<dd>`(label) pair |
+| Split section | `.split` (new) | even two-column grid, collapses to one column under 720px |
+| Generous section padding | `.section` | **already existed** (`3.3`) — nothing added |
+
+Object-position deliberately uses 4 composable axis modifiers (`--obj-x`/`--obj-y` CSS custom
+properties, defaulting to `50% 50%` in `:root`) rather than a 3×3 grid of 9 named positions — same
+expressive range (any combination of the 4 = 9 effective positions, or centred with none), less
+than half the vocabulary entries. `.stat` requires `<dt>`/`<dd>` specifically rather than adding
+two more generic `.stat-value`/`.stat-label` classes — matches the model's own "write semantic
+HTML" instruction and the exact shape both `atlas` and `ledger` already used for this content.
+
+**Guard: none of the eleven new classes declare `color` or `background`.** Verified three ways:
+by construction (every new rule is `display`/`grid-template-columns`/`gap`/`aspect-ratio`/
+`object-fit`/`object-position`/`font-size`/`margin` — read back after writing, none contain
+`color`/`background` at all), by the pre-existing generic `colorDeclaringSelectors` scan in
+`generate-stylesheet.test.ts` (which would flag any rule setting `color`, new or old — passes
+unmodified), and by three new, class-specific tests added this task that assert the harvested
+block of CSS text contains no `color:`/`background:` declaration at all. Because no new class
+touches `VALIDATED_TEXT_PAIRS`, the 191-palette gate needs no new pair and was re-run for real,
+not just inferred from unchanged code:
+```
+$ npx tsx lib/design/build/validate-contrast.ts
+Checked 191 palettes, 12 pairs each (2292 total checks), AA minimum 4.5:1.
+SUMMARY: 191/191 palettes fully AA-passing across all 12 checked pairs.
+```
+
+**Step 4 — `focalPoint` (Task 1.8) threaded through, previously computed and silently dropped.**
+`lib/content/classify-images.ts` has always computed `focalPoint: { x, y }` (normalised 0-1) per
+image; `lib/content/generate-markup.ts`'s `buildImageManifest` read `subject`/`caption` off the
+same `classification` object but never `focalPoint` — confirmed by reading, not assumed.
+`ManifestImage` now carries `focalPoint: { x: number; y: number } | null`, populated from
+`input?.classification?.focalPoint ?? null`. Since `buildUserText` already `JSON.stringify`s the
+whole manifest into the model's prompt, no separate prompt-plumbing change was needed — the model
+sees the real per-image value automatically. The `.obj-top`/`.obj-bottom`/`.obj-left`/`.obj-right`
+`CLASS_VOCABULARY` descriptions carry the mapping rule directly (below/above ~0.33/~0.66 on each
+axis → the matching edge class; centred or null → omit).
+
+**Style-object attribute still banned, not worked around.** `object-position` reaching the DOM
+only ever happens through one of the four fixed `.obj-*` classes — the model was never given a
+mechanism to emit a literal `style="object-position: …"`, and the existing `auditMarkup`/`3.5`
+inline-style ban is completely untouched by this addition.
+
+**Done when — real regeneration, not a fixture.** Enqueued a real `GENERATE_PAGE` job for BC
+Security. **A third occurrence of `3.7a`/`3.7b`'s own disclosed, unresolved anomaly**: the first
+attempt was claimed and failed with the identical `"Unknown job type: GENERATE_PAGE"` signature by
+a worker process already running from `3.7b`'s own verification (started before this task's edits
+existed — the ordinary, already-understood `3.7a` staleness, not the Railway-race hypothesis this
+time, since that worker's own log never touched the job either, matching the pattern that
+implicated a remote process last time). Killed that process (`Stop-Process`, confirmed via
+`Get-CimInstance Win32_Process` that no `worker.ts` process remained), started a genuinely fresh
+one, confirmed polling. The *next* attempt through that fresh worker **also** failed with the same
+signature, the fresh worker's own log never showing it was ever claimed — this is the same
+unconfirmed-Railway-race pattern `3.7b` named, recurring a second time this task (third time
+overall). Retried once more, per the same "one retry, then report" bound already established:
+succeeded.
+```
+$ (worker log, the successful attempt)
+[worker] processing cmsyatzmc00005cffgq71nph8 (GENERATE_PAGE)
+[generate-markup] attempt 1: stop_reason=tool_use output_tokens=4592/10000
+[worker] completed cmsyatzmc00005cffgq71nph8
+```
+
+**Real structural change, confirmed against the actual generated markup, not assumed from the
+vocabulary existing:**
+```
+Concept cmsyauryh00008kffh7dvt9pn | templateKey=generated | htmlLen=17782
+  .grid: 3 usage(s)
+  .split: 4 usage(s)
+  .media-16-9: 5 usage(s)
+  .stat, .media-4-3/-1-1/-3-4, .obj-*: 0 usage(s) — see below
+```
+The services section — the exact one named in the human's own diagnosis — is now:
+```html
+<div class="grid">
+  <div class="card card--elevated"><h3>Access Control</h3><p class="text-muted">...</p></div>
+  <div class="card card--elevated"><h3>CCTV Systems</h3><p class="text-muted">...</p></div>
+  ...16 total...
+</div>
+```
+a real multi-column card grid, not the flat bordered list the human saw before this task. `.split`
+is used for the hero, feature, about, and cta sections (text paired with a real cropped photo or a
+form); `.media-16-9` is used on three of the real site photos, each correctly combined with `.img`
+for radius (`class="img media-16-9"`), confirming the two compose as designed.
+
+**`.stat` and `.obj-*` saw zero real usage this run — investigated, not just noted, and the reason
+is genuine, not a gap.** `.stat`: BC Security's real `ContentRecord.stats` array is empty (checked
+directly) — there is nothing for the model to render as a statistic, so omitting `.stat` is
+correct, not a miss. `.obj-*`: pulled every real `focalPoint` BC Security has ever had classified
+(21 images) — every single one is at or within one bucket-width of centre (`0.40`-`0.75` on x,
+`0.50` on y throughout; the documented threshold is ~0.33/~0.66), so every real image this client
+has correctly resolves to "omit every `.obj-*` class" per the vocabulary's own stated rule. This
+client's own data simply cannot exercise that branch — the CSS mechanism itself (the four
+`--obj-x`/`--obj-y` modifier rules, the shared `object-position: var(--obj-x) var(--obj-y)` rule,
+the `50%`/`50%` default) is verified directly instead, by the new unit tests below, independent of
+any one client's real data.
+
+**New tests:** `lib/design/generate-stylesheet.test.ts` — a new `describe` block, 5 tests: every
+new class documented in `CLASS_VOCABULARY`, every new class's rule present in the generated CSS,
+none of the eleven declare `color`/`background` (scoped to just this task's own new CSS block),
+each `.media-*` sets its own distinct `aspect-ratio` and reads the shared `object-position`
+variable, and the `--obj-x`/`--obj-y` default-then-modifier values are exactly right.
+`lib/content/generate-markup.test.ts` — updated the existing `buildImageManifest` exact-equality
+test for the new `focalPoint` field, added one new test for the null-classification case
+(`focalPoint: null`, not a thrown error or a fabricated value).
+
+**Files created/modified:**
+```
+$ git status --porcelain -- lib/design/generate-stylesheet.ts lib/design/generate-stylesheet.test.ts lib/content/generate-markup.ts lib/content/generate-markup.test.ts lib/content/validate-generated-html.test.ts
+ M lib/content/generate-markup.test.ts
+ M lib/content/generate-markup.ts
+ M lib/content/validate-generated-html.test.ts
+ M lib/design/generate-stylesheet.test.ts
+ M lib/design/generate-stylesheet.ts
+```
+(`validate-generated-html.test.ts` needed a two-line fixture update only — its own `ALLOWED_IMAGES`
+fixtures were built against the old `ManifestImage` shape and needed the new required
+`focalPoint` field added; no behavioural change to that file itself.)
+
+**Verification commands and output:**
+```
+$ npx tsc --noEmit
+(clean, exit 0 — after fixing one real syntax error caught by this exact command: a literal
+backtick inside a comment nested inside generateStylesheet's own outer template-literal string,
+which terminates that string early. Caught before commit, not shipped.)
+
+$ npm run lint
+1 warning (pre-existing, unrelated — VALIDATED_TEXT_PAIRS unused in validate-generated-html.ts,
+from 3.5/3.5a, untouched by this task), exit 0
+
+$ npx vitest run
+ Test Files  20 passed (20)
+      Tests  310 passed | 1 todo (311)
+(304 -> 310: +6 real new tests — 5 in generate-stylesheet.test.ts, 1 in generate-markup.test.ts —
+not a regression, matches exactly what this task added)
+
+$ npx tsx lib/design/build/validate-contrast.ts
+SUMMARY: 191/191 palettes fully AA-passing across all 12 checked pairs.
+```
+
+**Token count, as asked.** `CLASS_VOCABULARY.length`: 19 before this task, 30 after (+11) —
+counted programmatically (`npx tsx` importing the real export and printing `.length`), not by
+hand-counting the array literal. The real generation's own token spend for the successful run:
+`output_tokens=4592/10000` (the markup-generation call itself) — comparable to `3.7`'s own real
+run (`4443`) and `3.7b`'s (`4424`/`4418`), i.e. the larger vocabulary did not meaningfully change
+the model's own output length for this client.
+
+**Failures, retries and dead ends:** the backtick/template-literal syntax error (caught by `tsc`,
+fixed before any other verification ran); the worker-claim race recurring a second time within
+this task (third time total across `3.7a`/`3.7b`/`3.7c`) — bounded the same way each time, one
+retry, then proceed with the real result rather than chase the root cause further.
+
+**Shortcuts taken:** none.
+
+**Deviations from the task spec:** none. Inventoried and reported before writing anything (step
+1); folded reusable primitives in under new semantic names, not the old BEM classes (step 2);
+covered all six checklist items, two of them by confirming existing coverage rather than adding
+redundant classes (step 3); threaded `focalPoint` through and emitted `object-position` from it
+(step 4); did not touch `lib/design/data/style-bundles.json` or `resolve-tokens.ts` (left for
+`3.7d`, per instruction).
+
+**Not run / not verified:**
+- The `.obj-*` branch was not exercised by a real client generation — BC Security's own real
+  image data happens to be entirely centred. Covered instead by direct unit tests of the CSS
+  mechanism (see "New tests" above), which do not depend on any one client's data.
+- The Railway-worker-race hypothesis first named in `3.7b` remains unconfirmed — recurred again
+  this task, bounded the same way, still explicitly a human-only check (build plan's own Task
+  `0.3`).
+- `.stat` was not exercised by a real client generation either (BC Security has no real stats
+  data) — its CSS is covered by the same direct unit-test approach as `.obj-*`, but no client with
+  real stat data has been regenerated against it yet.
+
+**Confidence:** High that the eleven new classes are structurally correct and colour-safe — three
+independent checks (construction, the pre-existing generic scan, new class-specific tests) agree,
+and the 191-palette gate was re-run for real, not inferred. High that the vocabulary is genuinely
+reachable and used by the model — not a theoretical addition, a real regeneration used `.grid`,
+`.split`, and `.media-16-9` substantively and correctly composed them with existing classes
+(`.card`, `.img`). Medium on `.stat`/`.obj-*` specifically, precisely because no real client data
+has exercised them yet — the mechanism is verified, real-world usage isn't, named honestly rather
+than assumed from the mechanism working.
+
+**Next task:** not specified — `3.7d` (style bundles) was named as explicitly out of scope for
+this task ("don't touch the style bundles yet"), so it's the natural next step, but awaiting the
+human's own direction rather than assumed.
 ---
 
 # PART E — For the human reviewing this log
