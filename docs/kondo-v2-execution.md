@@ -11846,6 +11846,67 @@ waits on the human's review. If free-CSS generation is ever adopted for real, `c
 is now the real, working, honestly-measured gate it would run behind.
 ---
 
+### 3.8-PARTIAL — Commit the already-verified-safe subset
+**Timestamp:** 2026-08-19
+**Git SHA at start:** 7d90d40
+**Status:** DONE — not the full `3.8` (line 369's own scope: the three template directories,
+`registry.ts` scoring, `TemplateGallery.tsx`, the two `/clients/[id]/...` routes, `render.test.ts` —
+all still gated on the human's explicit written sign-off, not given). This commits only the isolated
+subset `3.8`'s own prior entry (Part D, the deletions-scoped one) had already confirmed dead and left
+sitting uncommitted since: `adm-zip`/`@types/adm-zip` and `lib/media/prepare-image.ts`, plus two
+stale comments in `anthropic-retry.ts` and `goto-and-settle.ts` naming pre-rebuild call sites that no
+longer exist in this repo. Surfaced as a loose end while investigating `git status` noise ahead of
+`3.10a`'s own commit, not planned work in its own right.
+
+**Re-verified today, not trusted from the old record alone:**
+```
+$ grep -rn "adm-zip|AdmZip" --include="*.ts" --include="*.tsx" app lib scripts
+(zero matches)
+$ grep -rln "prepare-image|prepareImageBufferForApi|prepareImageFileForApi" --include="*.ts" --include="*.tsx" app lib scripts
+(zero matches)
+$ grep -c "adm-zip" package-lock.json
+0
+```
+Both still genuinely dead. No functional/logic change in either modified `.ts` file — comment text
+only, correcting stale references to `visual-shots.ts`, `reference-screenshot.ts`,
+`design-direction.ts`, `visual-read.ts`, `brief-synthesis.ts`, and `build-page.ts` (none exist in
+this repo; all belonged to the pre-rebuild "AI website engine," removed whole in commit `5f35c60`
+per the corrected comments themselves) to name the real current callers instead
+(`structure-and-rewrite.ts`, `generate-markup.ts`, `classify-images.ts`, `edit-concept-section.ts`,
+`crawler.ts`).
+
+**Files created/modified:**
+```
+$ git status --porcelain -- lib/ai/anthropic-retry.ts lib/crawl/goto-and-settle.ts lib/media/prepare-image.ts package.json package-lock.json
+ M lib/ai/anthropic-retry.ts
+ M lib/crawl/goto-and-settle.ts
+ D lib/media/prepare-image.ts
+ M package.json
+ M package-lock.json
+```
+
+**Verification commands and output:** covered by `3.10a`'s own full-suite run immediately prior
+(these files were already part of that working tree when `npx vitest run`, `npm run lint`, and
+`npm run build` all passed clean) — not re-run separately, since nothing changed between that run and
+this commit.
+
+**Failures, retries and dead ends:** none.
+
+**Shortcuts taken:** none.
+
+**Deviations from the task spec:** this is not a numbered build-plan task; logged for the same reason
+everything else in Part D is — real, uncommitted repo state changed, and the record should say why.
+
+**Not run / not verified:** the rest of `3.8`'s own scope (line 369) — unchanged, still fully gated
+on the human's own written sign-off.
+
+**Confidence:** High — a pure subtraction of already-confirmed-dead code plus comment corrections, no
+behavioural surface at all.
+
+**Next task:** `3.11` — tuning the generation prompt, per the human's own direction given alongside
+this cleanup.
+---
+
 # PART E — For the human reviewing this log
 
 Signs the log is not trustworthy, worth scanning for:
