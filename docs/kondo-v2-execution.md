@@ -9696,6 +9696,188 @@ checks — stated as what it is, not oversold as a guarantee.
 **Next task:** not specified — awaiting direction.
 ---
 
+### 3.6 — Fallback renderer
+**Timestamp:** 2026-08-18
+**Git SHA at start:** 6d93e8a
+**Status:** DONE-VERIFIED — `tsc --noEmit` clean, `lint` clean, full suite 18 files / 288 tests
+passing (278 → 288, exactly the 10 new tests). Real generation failure forced (genuinely invalid
+`ANTHROPIC_API_KEY`, real 401s exhausting all 3 real retry attempts, not simulated) against a real
+client; a real `Concept` resulted. Resulting status and Concept confirmation pasted below.
+
+**What I did:** Two new files, `lib/content/fallback-renderer.ts` and `lib/content/
+fallback-renderer-styles.ts` — atlas lifted whole out of `lib/templates/atlas/{index,styles}.ts`
+(deleted in `3.8`, build plan §7), the exact `suitability.ts`-in-`3.1` precedent the task named.
+Deliberately self-contained: imports nothing from `lib/templates/` at all — not just the doomed
+`atlas/` subdirectory, but also `lib/templates/shell.ts` and `lib/templates/escape-html.ts`
+(neither explicitly on `3.8`'s own delete list, but not explicitly kept either; duplicated here
+rather than trusted to survive by omission, same discipline `3.1`'s own pattern-eligibility.ts
+stated for itself). `TemplateContent`'s shape is copied locally as `FallbackContent` rather than
+imported from `lib/templates/types.ts` — confirmed directly, not assumed, that this works with
+zero casting: `lib/content/content-guards.ts`'s `prepare()` (which survives `3.8`, outside `lib/
+templates/`) and `lib/content/to-template-content.ts`'s real return value both accept/produce the
+local type with no cast needed, since TypeScript checks structure, not the name a type is
+declared under.
+
+**Why atlas — tested against Allen Evans and BC Security, re-verified fresh, not trusted from a
+prior task's own memory.** Of the three templates, only atlas declares no `requires` at all, so
+`scorePatternEligibility` can never score it "not-suited." Checked directly against the task's
+own two named test cases using the real, trusted capability summary (`assignImageRoles`, `3.1`'s
+own declared mechanism) — **not** `registry.ts`'s own disclosed-approximate `scoreAllTemplates`,
+which this task's own verification tried first and found disagreed with the real mechanism for
+both clients, in opposite directions — a live, concrete demonstration of `1.10`'s "three
+unreconciled hero-selection mechanisms" finding, not a repeat of its old numbers:
+
+| Client | real capability summary (today) | ledger | showcase | atlas |
+|---|---|---|---|---|
+| Allen Evans | heroGrade:1 (a genuine change from `3.1`'s own recorded 0 — Asset is append-only, a later crawl/classification pass is the likely cause, not chased further) | works | not-suited (1 photo, needs 3) | works |
+| BC Security | heroGrade:0 | not-suited (no hero-grade image) | works (real photo pool now clears minGallery:3) | works |
+
+Atlas is not "the only one that works for the harder client" — the per-client breakdown for
+ledger/showcase flipped from what the task's own framing anticipated going in. It is the only one
+of the three that works for **both** real clients at once: ledger fails specifically on BC
+Security, showcase fails specifically on Allen Evans, each has a real client it cannot serve.
+Atlas has none. Reported as found, not adjusted to match the going-in assumption.
+
+**Consumes the same design system as generation, not a re-derived one.** atlas's original
+`renderAtlas()` called `buildPalette(c.brandColors || [])` and `resolveTemplateTokens()` itself,
+internally — fine when atlas was one of three interchangeable gallery choices, wrong for a
+fallback whose whole point is branding consistency with whatever real generation attempt already
+ran. `renderFallbackConcept(content, palette, googleFontsUrl, styleBundleId?)` takes a
+pre-resolved `Palette` and the resolved typography's real `googleFontsUrl` directly as
+parameters — literally the same `DesignSystem`/`NeutralSystem` fields `3.2`'s
+`resolveDesignSystem()` already produced before markup generation was even attempted (design
+system resolution is deterministic and local, build plan §6.1 — it doesn't fail alongside the AI
+call that does). The Google Fonts `<link>` is built from that real `googleFontsUrl`, not the old
+hardcoded Instrument Sans + Newsreader constant every prior template's `registry.ts` entry
+injected via `headExtra` — a test confirms that literal string never appears in this module's
+output at all.
+
+**`data-kondo-section` markers: retained, unchanged — a fallback page is editable.** Every one of
+atlas's original top-level sections keeps its real marker below, exactly as atlas always emitted
+it. Confirmed by test at both content extremes: rich content carries all 11 possible markers
+(`nav`/`hero`/`why`/`services`/`process`/`about`/`reviews`/`faq`/`partners`/`cta`/`footer`); the
+maximally thin case (every optional field empty) still carries the 4 unconditional ones
+(`nav`/`hero`/`cta`/`footer`) — a fallback-generated concept is exactly as usable in `lib/
+templates/section-editor.ts`'s section editor as a template-gallery-generated one always was, not
+a dead end a human reviewer opens to nothing.
+
+**Real forced-failure verification — the task's own explicit done-when, delivered with real
+evidence, not simulated.** Via a throwaway script (`scripts/_tmp-3.6-force-failure.ts`, deleted
+after use) against Allen Evans Family Lawyers (a real client, `Client.status` = `READY_FOR_REVIEW`
+before this run):
+
+```
+Attempting REAL generateMarkup() call with a genuinely invalid API key...
+[generate-markup] attempt 1/3 failed: 401 {"type":"error","error":{"type":"authentication_error","message":"API key is invalid."},"request_id":null}
+[generate-markup] attempt 2/3 failed: 401 {...}
+[generate-markup] attempt 3/3 failed: 401 {...}
+
+Real failure confirmed after exhausting retries: 401 {...}
+
+Client.status set to ANALYSIS_FAILED (mirroring run-analysis.ts's own real pattern for a pipeline failure).
+
+=== RESULT ===
+Client.status AFTER fallback: ANALYSIS_FAILED
+Concept created: id=cmsy479vk0000cgffq9vcx63q, templateKey=fallback, html length=32247 chars
+Concept contains data-kondo-section markers: 10
+Concept contains real accent colour: true
+```
+
+No code change was needed to force this — `generate-markup.ts`'s own `new Anthropic({apiKey:
+process.env.ANTHROPIC_API_KEY})` call reads the environment fresh on every invocation (confirmed
+by reading the source before writing the script), so a genuinely invalid key produced genuine
+401s from the real Anthropic API, exhausting all 3 real attempts — not a thrown/mocked error
+standing in for one.
+
+**A real, honest gap found in the process, named directly: `Client.status = ANALYSIS_FAILED` is
+not something any current code path actually sets for a markup-generation failure.** Checked
+directly, not assumed from the task's own framing: `ANALYSIS_FAILED` is written in exactly two
+places today — `run-analysis.ts`'s own catch block (crawl/extract/structure failures) and `lib/
+jobs/queue.ts`'s stale-job reclaimer. Neither has anything to do with concept/markup generation,
+which isn't wired into any status-management logic at all yet (`3.4`'s and `3.5`'s own log
+entries already named "no real caller wired in" for the same underlying reason). The status flip
+in the verification script above was set explicitly, by this script, mirroring `run-analysis.ts`'s
+own real pattern as the most plausible real behaviour a future wired-in failure handler would
+adopt (`ClientStatus` has exactly 4 values and `ANALYSIS_FAILED` is the only one meaning "a
+pipeline step failed") — not because an existing caller already performs this transition. Also
+found in the same run: Allen Evans' real `ContentRecord.reviewedAt` is `null` — under
+production's real gate (`lib/actions/concepts.ts`'s own `reviewedAt` check), a normal
+concept-generation flow could not even attempt to run for this client yet. This verification
+script bypassed that gate deliberately (it calls the render/persist functions directly, not
+`createConcept`), appropriate for testing the fallback mechanism itself, not the review workflow
+— named here so it isn't mistaken for a claim that the gate doesn't matter.
+
+**Real DB writes, made and then reverted — not left as pollution in a shared database.** Forcing
+this scenario for real meant a real `Client.status` flip and a real, persisted `Concept` row for
+Allen Evans' actual client record. Both were reverted immediately after capturing the evidence
+above (`Concept` deleted, `Client.status` restored to `READY_FOR_REVIEW`) — this was a
+deliberately forced demonstration failure, not a real one, and leaving Allen Evans' real record
+permanently showing a failure that never actually happened to it would have been misleading to
+anyone using the real app. The evidence above is the real, captured proof; the database itself is
+unchanged from before this task ran.
+
+**Files created:**
+```
+$ git status --porcelain
+?? lib/content/fallback-renderer-styles.ts
+?? lib/content/fallback-renderer.test.ts
+?? lib/content/fallback-renderer.ts
+```
+
+**Verification commands and output:**
+```
+$ npx tsc --noEmit && npm run lint && npx vitest run
+ Test Files  18 passed (18)
+      Tests  288 passed | 1 todo (289)
+
+(throwaway scripts, deleted after use: scripts/_tmp-3.6-verify-choice.ts and
+_tmp-3.6-verify-choice2.ts — the template-scoring comparison above; scripts/
+_tmp-3.6-force-failure.ts — the real forced-failure run above, DB state reverted after capture)
+```
+
+**Failures, retries and dead ends:** one real bug in my own test, not the code — a Google Fonts
+`<link>` href test asserted the raw, unescaped URL string; `esc()` correctly HTML-escapes `&` to
+`&amp;` inside attribute values (the same safe behaviour applied everywhere else in this file),
+so the assertion was wrong, not the output. Fixed to expect the escaped form. One real
+methodology correction mid-task: the first template-scoring verification used `registry.ts`'s own
+`scoreAllTemplates` (its disclosed-approximate hero detection), which gave results contradicting
+the more rigorous `assignImageRoles`-based check — re-ran with the real mechanism rather than
+picking whichever result matched the going-in assumption, and rewrote this file's own header
+comment to state the real numbers, not the originally-assumed ones.
+
+**Shortcuts taken:** the verification script's own `ANALYSIS_FAILED` status flip is an explicit
+simulation of a plausible future behaviour, not evidence that behaviour already exists — stated
+directly above, not left implicit.
+
+**Deviations from the task spec:** none in substance. All three constraints addressed (choice
+justified with fresh real data against both named test cases; consumes the real design system
+directly, not a re-derivation; fully self-contained outside `lib/templates/`); the done-when's
+real forced failure was delivered with real evidence; the `data-kondo-section` question was
+answered directly (retained, unchanged, fallback pages are editable).
+
+**Not run / not verified:**
+- No real caller wires the fallback into an actual concept-generation flow yet — this task builds
+  and verifies the renderer itself, not the production trigger point that would call it after a
+  real `generateMarkup`/`3.5`-validator failure. Later wiring work, same scope boundary every
+  prior Phase 3 task has drawn for itself.
+- Whether `ANALYSIS_FAILED` is really the right status for a markup-generation failure specifically
+  (versus a new, more specific status) is a real, open design question this task surfaced but
+  didn't resolve — `ClientStatus`'s own 4-value enum has no more specific option today.
+- Visual review of the fallback's real rendered output in a browser — verified via string/DOM
+  content assertions and the real forced-failure run's own reported HTML length/marker count, not
+  a rendered screenshot.
+
+**Confidence:** High that the fallback renders a real, complete, section-marked page consuming
+the real design system, for both the maximally thin and rich content cases — directly tested.
+High that atlas is the right choice against the two named real test clients, verified with the
+correct (not the approximate) mechanism. High that the forced-failure demonstration is real, not
+simulated — genuine 401s, a genuine persisted Concept, confirmed and then deliberately reverted.
+Medium on the `ANALYSIS_FAILED` status choice specifically, since it's this task's own reasonable
+inference about future wiring behaviour, not an already-existing, already-decided contract.
+
+**Next task:** not specified — awaiting direction.
+---
+
 ---
 
 # PART E — For the human reviewing this log
