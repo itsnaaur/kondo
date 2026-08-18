@@ -1,9 +1,15 @@
 // Task 3.7. Phase B, wired for real — the path build plan §6 describes, run end to end for
-// the first time: design system resolution (3.2) -> stylesheet generation (3.3) -> markup
-// generation (3.4) -> validation (3.5) -> persist Concept. On markup generation OR validation
-// failure (after 3.4's own internal retries are exhausted), falls back to 3.6's
+// the first time: design system resolution (3.2) -> markup+CSS generation (3.4, rebuilt 3.13) ->
+// validation (3.5, rendered-contrast-authoritative since 3.10a) -> persist Concept. On generation
+// OR validation failure (after 3.4's own internal retries are exhausted), falls back to 3.6's
 // renderFallbackConcept rather than leaving a dead client — this is the first real caller
 // 3.6's own log entry said didn't exist yet.
+//
+// TASK 3.13. Stylesheet generation (3.3, lib/design/generate-stylesheet.ts) is retired from this
+// live path — the model now writes its own CSS alongside the markup, in the same call, validated
+// by rendering the real page rather than by construction from a fixed class vocabulary. See
+// 3.13's own log entry for the real measurement this replaces a token-split architecture with,
+// and for what still depends on generate-stylesheet.ts now that this file no longer does.
 //
 // TWO LAYERS OF FAILURE HANDLING, DELIBERATELY DIFFERENT:
 //   1. INNER (markup generation / validation failure) — always recovered via the fallback
@@ -28,12 +34,11 @@ import { resolveDesignSystem } from "@/lib/design/resolve-design-system";
 import type { ContentCoverage } from "@/lib/design/pattern-eligibility";
 import {
   generateMarkup,
-  toMarkupDesignInput,
+  toPageDesignInput,
   filterMarkupContent,
   buildImageManifest,
   type MarkupContentInput,
 } from "./generate-markup";
-import { generateStylesheet } from "@/lib/design/generate-stylesheet";
 import { validateGeneratedHtml, formatFailuresForRetry } from "./validate-generated-html";
 import { renderFallbackConcept, type FallbackContent } from "./fallback-renderer";
 import { toTemplateContent } from "./to-template-content";
@@ -47,10 +52,12 @@ function escHtml(input: string | null | undefined): string {
 }
 
 // The successful-generation shell — deliberately simpler than fallback-renderer.ts's own
-// wrapInShell: 3.3's generateStylesheet() (post-3.5a) already emits `@import url("...");` as
-// the first line of its own CSS, so the Google Font is already loading once that <style> block
-// is inlined — no separate <link> needed here the way the fallback path needs one (the
-// fallback's own stylesheet, lifted from atlas, was never wired to emit an @import itself).
+// wrapInShell: the system prompt (generate-markup.ts's buildSystemPrompt, since 3.13) requires
+// the model's own CSS to open with `@import url("...");` for the resolved Google Font, so the
+// font is already loading once that <style> block is inlined — no separate <link> needed here
+// the way the fallback path needs one (the fallback's own stylesheet, lifted from atlas, was
+// never wired to emit an @import itself). Unchanged from pre-3.13 other than which task's own
+// output honours this — always the CSS string this function is handed, never generated here.
 export function wrapGeneratedPage(title: string, css: string, bodyHtml: string): string {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -140,7 +147,7 @@ export async function generatePageInBackground(clientId: string, createdByUserId
       content: contentCoverage,
       images: capability,
     });
-    const design = toMarkupDesignInput(designResult);
+    const design = toPageDesignInput(designResult);
     const system = designResult.ok ? designResult.system : designResult.partial;
 
     const rawContent: MarkupContentInput = {
@@ -168,27 +175,28 @@ export async function generatePageInBackground(clientId: string, createdByUserId
     let templateKey: string;
 
     try {
-      const markupResult = await generateMarkup(design, filteredContent, manifest);
-      const css = generateStylesheet({
-        palette: system.palette,
-        tokens: system.tokens,
-        googleFontsUrl: system.typography.googleFontsUrl,
-      });
-      // Task 3.10a. Now awaited — validateGeneratedHtml's own contrast gate renders the real page
-      // in headless Chromium (checkRenderedContrast), which cannot run synchronously. Real,
-      // measured added cost per call: see that task's own log entry.
+      // Task 3.13. generateMarkup now returns both html AND css — the model's own, no longer
+      // lib/design/generate-stylesheet.ts's deterministic output. The rendered-contrast gate
+      // (checkRenderedContrast, authoritative inside validateGeneratedHtml since 3.10a) is what
+      // makes this safe to trust rather than the fixed CLASS_VOCABULARY generateStylesheet() used
+      // to guarantee by construction — see 3.13's own log entry for the real measurement behind
+      // this trade.
+      const genResult = await generateMarkup(design, filteredContent, manifest);
+      // Task 3.10a. Awaited — validateGeneratedHtml's own contrast gate renders the real page in
+      // headless Chromium (checkRenderedContrast), which cannot run synchronously. Real, measured
+      // added cost per call: see that task's own log entry.
       const validation = await validateGeneratedHtml({
-        html: markupResult.html,
-        css,
+        html: genResult.html,
+        css: genResult.css,
         allowedImages: manifest,
         palette: system.palette,
         styleBundleMode: system.styleBundle.mode as "light" | "dark",
         typographyGoogleFontsUrl: system.typography.googleFontsUrl,
       });
       if (!validation.valid) {
-        throw new Error(`Generated markup failed validation: ${formatFailuresForRetry(validation.failures)}`);
+        throw new Error(`Generated page failed validation: ${formatFailuresForRetry(validation.failures)}`);
       }
-      html = wrapGeneratedPage(record.businessName ?? "Concept preview", css, markupResult.html);
+      html = wrapGeneratedPage(record.businessName ?? "Concept preview", genResult.css, genResult.html);
       templateKey = "generated";
     } catch (genErr) {
       // Markup generation or validation failed — the fallback renderer recovers, the job

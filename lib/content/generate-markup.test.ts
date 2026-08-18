@@ -2,112 +2,93 @@ import { describe, it, expect } from "vitest";
 import {
   auditMarkup,
   buildImageManifest,
-  toMarkupDesignInput,
+  toPageDesignInput,
   filterMarkupContent,
   type MarkupContentInput,
 } from "./generate-markup";
-import { CLASS_VOCABULARY } from "@/lib/design/generate-stylesheet";
 import type { ResolveDesignSystemResult } from "@/lib/design/resolve-design-system";
 import type { RoleAssignment, RoleAssignmentInput } from "./assign-image-roles";
 import { buildPalette } from "@/lib/content/normalize-brand-colors";
 import { resolveTypography } from "@/lib/design/resolve-typography";
 import { resolveTemplateTokens, resolveStyleBundle } from "@/lib/design/resolve-tokens";
 
-// Task 3.4. Tests only the pure, non-network parts of generate-markup.ts — auditMarkup,
-// buildImageManifest, toMarkupDesignInput, filterMarkupContent. generateMarkup itself is a
-// real Anthropic API call; it is verified against real client data in this task's own log
-// entry, not mocked here — mocking the model response would test the parsing code against a
-// fabricated shape, not against what the model actually does, which is exactly the thing this
-// task's own done-when needs real evidence for.
+// Task 3.4, rebuilt 3.13. Tests only the pure, non-network parts of generate-markup.ts —
+// auditMarkup, buildImageManifest, toPageDesignInput, filterMarkupContent. generateMarkup itself
+// is a real Anthropic API call; it is verified against real client data in 3.9/3.11/3.12/3.13's
+// own log entries, not mocked here — mocking the model response would test the parsing code
+// against a fabricated shape, not against what the model actually does.
 
-function knownClasses(): Set<string> {
-  const set = new Set<string>();
-  for (const entry of CLASS_VOCABULARY) for (const t of entry.className.split(".").filter(Boolean)) set.add(t);
-  return set;
-}
-
-describe("auditMarkup — constraint 4: no colour, no <style>, no banned tags", () => {
-  const classes = knownClasses();
-
+describe("auditMarkup — no colour, no <style>, no banned tags (constraint unchanged by 3.13; class-vocabulary conformance is gone, there is no fixed vocabulary any more)", () => {
   it("clean markup produces no error findings", () => {
-    const html = `<section class="surface-paper section" data-kondo-section="hero"><div class="container"><h1>Hi</h1></div></section>`;
-    const findings = auditMarkup(html, classes);
+    const html = `<section class="hero-band" data-kondo-section="hero"><div class="wrap"><h1>Hi</h1></div></section>`;
+    const findings = auditMarkup(html);
     expect(findings.filter((f) => f.severity === "error")).toEqual([]);
   });
 
   it("flags a <style> tag", () => {
-    const findings = auditMarkup(`<section data-kondo-section="hero"><style>.x{color:red}</style></section>`, classes);
+    const findings = auditMarkup(`<section data-kondo-section="hero"><style>.x{color:red}</style></section>`);
     expect(findings.some((f) => f.message.includes("<style>"))).toBe(true);
   });
 
   it("flags an inline style attribute", () => {
-    const findings = auditMarkup(`<section data-kondo-section="hero"><div style="color:red">Hi</div></section>`, classes);
+    const findings = auditMarkup(`<section data-kondo-section="hero"><div style="color:red">Hi</div></section>`);
     expect(findings.some((f) => f.message.includes("inline style"))).toBe(true);
   });
 
   it("flags a hex colour literal even outside style=", () => {
-    const findings = auditMarkup(`<section data-kondo-section="hero">Brand colour is #ff0000</section>`, classes);
+    const findings = auditMarkup(`<section data-kondo-section="hero">Brand colour is #ff0000</section>`);
     expect(findings.some((f) => f.message.includes("hex colour"))).toBe(true);
   });
 
   it("flags an rgb()/hsl() colour function", () => {
-    const findings = auditMarkup(`<section data-kondo-section="hero">background: rgb(255, 0, 0)</section>`, classes);
+    const findings = auditMarkup(`<section data-kondo-section="hero">background: rgb(255, 0, 0)</section>`);
     expect(findings.some((f) => f.message.includes("colour function"))).toBe(true);
   });
 
   it("flags each banned tag", () => {
     for (const tag of ["script", "iframe", "object", "embed", "form"]) {
-      const findings = auditMarkup(`<section data-kondo-section="hero"><${tag}></${tag}></section>`, classes);
+      const findings = auditMarkup(`<section data-kondo-section="hero"><${tag}></${tag}></section>`);
       expect(findings.some((f) => f.message.includes(`<${tag}>`)), tag).toBe(true);
     }
   });
 
   it("flags an inline event handler attribute", () => {
-    const findings = auditMarkup(`<section data-kondo-section="hero"><button onclick="alert(1)">Go</button></section>`, classes);
+    const findings = auditMarkup(`<section data-kondo-section="hero"><button onclick="alert(1)">Go</button></section>`);
     expect(findings.some((f) => f.message.includes("event handler"))).toBe(true);
   });
 
   it("flags a javascript: URI", () => {
-    const findings = auditMarkup(`<section data-kondo-section="hero"><a href="javascript:alert(1)">Go</a></section>`, classes);
+    const findings = auditMarkup(`<section data-kondo-section="hero"><a href="javascript:alert(1)">Go</a></section>`);
     expect(findings.some((f) => f.message.includes("javascript:"))).toBe(true);
+  });
+
+  it("does not flag freely-composed class names — there is no fixed vocabulary any more", () => {
+    const html = `<section data-kondo-section="hero" class="totally-invented-class another-one">Hi</section>`;
+    const findings = auditMarkup(html);
+    expect(findings.filter((f) => f.severity === "error")).toEqual([]);
   });
 });
 
 describe("auditMarkup — constraint 1: data-kondo-section coverage", () => {
-  const classes = knownClasses();
-
   it("flags zero markers at all as an error", () => {
-    const findings = auditMarkup(`<section class="surface-paper"><h1>Hi</h1></section>`, classes);
+    const findings = auditMarkup(`<section class="hero"><h1>Hi</h1></section>`);
     expect(findings.some((f) => f.severity === "error" && f.message.includes("no data-kondo-section"))).toBe(true);
   });
 
   it("warns when a top-level section is missing its marker (count mismatch)", () => {
     const html = `<section data-kondo-section="hero">A</section><section>B</section>`;
-    const findings = auditMarkup(html, classes);
+    const findings = auditMarkup(html);
     expect(findings.some((f) => f.severity === "warning" && f.message.includes("may be missing one"))).toBe(true);
   });
 
   it("no warning when every top-level tag has a marker", () => {
     const html = `<header data-kondo-section="nav">A</header><section data-kondo-section="hero">B</section><footer data-kondo-section="footer">C</footer>`;
-    const findings = auditMarkup(html, classes);
+    const findings = auditMarkup(html);
     expect(findings.some((f) => f.message.includes("may be missing one"))).toBe(false);
   });
 });
 
-describe("auditMarkup — constraint 2: class vocabulary conformance", () => {
-  it("flags a class not in CLASS_VOCABULARY", () => {
-    const findings = auditMarkup(`<section data-kondo-section="hero" class="totally-invented-class">Hi</section>`, knownClasses());
-    expect(findings.some((f) => f.message.includes("totally-invented-class"))).toBe(true);
-  });
-
-  it("does not flag real vocabulary classes, including compound ones like btn btn--solid", () => {
-    const html = `<section data-kondo-section="hero" class="surface-mist section"><a class="btn btn--solid">Go</a></section>`;
-    const findings = auditMarkup(html, knownClasses());
-    expect(findings.some((f) => f.message.startsWith("classes not in CLASS_VOCABULARY"))).toBe(false);
-  });
-});
-
-describe("toMarkupDesignInput — colour is structurally unreachable", () => {
+describe("toPageDesignInput — colour IS reachable now, deliberately (the inverse of the pre-3.13 guarantee)", () => {
   function fakeDesignSystem(): ResolveDesignSystemResult {
     const palette = buildPalette([{ hex: "#2563eb" }]);
     const typography = resolveTypography({ moodSignals: [], positioningTier: "mainstream" });
@@ -126,15 +107,15 @@ describe("toMarkupDesignInput — colour is structurally unreachable", () => {
     };
   }
 
-  it("the returned object has no palette field to read a colour from", () => {
-    const input = toMarkupDesignInput(fakeDesignSystem());
-    expect("palette" in input).toBe(false);
-    expect("tokens" in input).toBe(false);
+  it("the returned object carries the real palette and typography fields the prompt needs", () => {
+    const input = toPageDesignInput(fakeDesignSystem());
+    expect(input.palette.accent).toBeTypeOf("string");
+    expect(input.typographyGoogleFontsUrl).toBeTypeOf("string");
     expect(input.vertical).toBe("medical-dental");
     expect(input.styleBundleName).toBeTypeOf("string");
   });
 
-  it("ok:false (NeutralSystem) resolves vertical:null and patternEligibility:null", () => {
+  it("ok:false (NeutralSystem) resolves vertical:null and patternEligibility:null, but still a real palette", () => {
     const palette = buildPalette([]);
     const typography = resolveTypography({ moodSignals: [], positioningTier: "mainstream" });
     const tokens = resolveTemplateTokens();
@@ -144,9 +125,10 @@ describe("toMarkupDesignInput — colour is structurally unreachable", () => {
       reason: "no-vertical-match",
       partial: { palette, typography, tokens, styleBundle },
     };
-    const input = toMarkupDesignInput(result);
+    const input = toPageDesignInput(result);
     expect(input.vertical).toBeNull();
     expect(input.patternEligibility).toBeNull();
+    expect(input.palette).toBe(palette);
   });
 });
 
@@ -186,7 +168,7 @@ describe("filterMarkupContent — drops flagged items, keeps everything else", (
   });
 });
 
-describe("buildImageManifest — the new Asset+RoleAssignment join", () => {
+describe("buildImageManifest — the Asset+RoleAssignment join (unchanged by 3.13)", () => {
   const inputs: RoleAssignmentInput[] = [
     { assetId: "a1", assetType: "IMAGE", metrics: { width: 800, height: 600, aspectRatio: 1.33, orientation: "landscape", fileSizeBytes: 1, bytesPerPixel: 1, hasAlpha: false, colorEntropy: 5 } as never, classification: { subject: "exterior", isHeadshot: false, peopleCount: 0, shotQuality: "professional", hasBurnedInText: false, hasWatermark: false, focalPoint: { x: 0.5, y: 0.5 }, clearSpace: "none", heroSuitable: { suitable: true, reason: "x" }, caption: "A storefront", confidence: "high" } },
     { assetId: "a2", assetType: "IMAGE", metrics: null, classification: null },
@@ -217,9 +199,6 @@ describe("buildImageManifest — the new Asset+RoleAssignment join", () => {
     expect(manifest).toEqual([]);
   });
 
-  // Task 3.7c — focalPoint was silently dropped before; confirm the null-classification case
-  // (metrics-only fallback role assignment, no vision classification at all) degrades to
-  // focalPoint: null rather than throwing or fabricating a value.
   it("focalPoint is null for a usable asset with no classification", () => {
     const noClsInputs: RoleAssignmentInput[] = [
       { assetId: "a3", assetType: "IMAGE", metrics: { width: 900, height: 700, aspectRatio: 1.29, orientation: "landscape", fileSizeBytes: 1, bytesPerPixel: 1, hasAlpha: false, colorEntropy: 5 } as never, classification: null },

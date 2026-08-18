@@ -1,39 +1,33 @@
-// Task 3.4. Build plan §6.4's other half of the token split: "the model owns markup only."
-// One forced tool call, same pattern as structure-and-rewrite.ts (the extraction call) and
-// classify-images.ts (Task 1.8) — output_config effort high, tool_choice forcing a single
-// tool, withTransientRetry wrapping the API call, an outer attempt loop feeding a
-// correctionNote back on failure. §8's explicit architecture rule: "Do not let the model
-// author CSS" — this module's whole job is making that true by construction, not by asking
-// nicely: the model is never shown a colour value (see toMarkupDesignInput below), the tool
-// schema's only field is a markup string, and every rule in the system prompt is enforced by
-// what information the model even has access to, not just by instruction text it could ignore.
+// Task 3.13. Rebuilt around the tuned free-CSS prompt validated real, end to end, across Tasks
+// 3.9-3.12 before this task ever touched production code — 3.9 found the token-split
+// architecture (this file writing markup only, lib/design/generate-stylesheet.ts writing CSS by
+// construction) cost real design quality for a validator that could not actually check
+// free-composed CSS; 3.10/3.10a/3.11/3.12 built and tuned the real gate and the real prompt in
+// that order, ending at a real, measured 7/10 rendered-AA-clean rate (3.12's own log entry) against
+// a 3/10 baseline for the untuned prompt, both measured through the same, real, unmodified
+// validator this file's own output now runs through unchanged. See 3.13's own log entry for what
+// still depends on generate-stylesheet.ts/CLASS_VOCABULARY now that this file no longer does (the
+// fallback renderer does not — it uses lib/design/resolve-tokens.ts's TemplateTokens, a separate
+// module never imported here).
 //
-// SCOPE NOTE: build plan §6.5's full validation gate (well-formed HTML, banned tags, contrast,
-// mode coherence, image provenance, no empty sections) is explicitly Task 3.5's job, not this
-// one's — this task's own instruction says so directly ("3.5's validator will assert them").
-// `auditMarkup` below is a lightweight, regex-based reporting aid that exists ONLY to make this
-// task's own honest-disclosure requirement possible (did the model follow the four constraints,
-// report it rather than silently patch around it) — it never gates a retry, and it is not a
-// substitute for 3.5's real, tested, HTML-parsing validator.
-//
-// FOUR CONSTRAINTS FROM THE TASK, ADDRESSED DIRECTLY:
-// 1. data-kondo-section on every top-level section — required by the system prompt below,
-//    checked (not enforced) by auditMarkup, because section-editor.ts's whole mechanism
-//    (lib/templates/section-editor.ts's ATTR_MARKER scan) depends on it and has zero fallback
-//    for an unmarked section.
-// 2. CLASS_VOCABULARY read directly from lib/design/generate-stylesheet.ts (Task 3.3's own
-//    export), interpolated into the system prompt at call time — never hand-copied, so the
-//    two files cannot drift.
-// 3. Forced tool use, withTransientRetry reused verbatim from lib/ai/anthropic-retry.ts.
-// 4. No colour values, no <style>, no inline styles — enforced two ways: the model is
-//    structurally never given a Palette (MarkupDesignInput has no such field, see
-//    toMarkupDesignInput's own comment), and the system prompt states the rule explicitly;
-//    auditMarkup checks for violations of both after the fact, for honest reporting.
+// THE MODEL NOW OWNS MARKUP AND CSS, IN ONE CALL, DELIBERATELY. Where the pre-3.13 version of
+// this file made "the model never sees a colour value" a structural guarantee (no Palette field
+// reachable from its own input type), that guarantee is now backwards: colour, contrast safety,
+// and section rhythm all depend on this file handing the model the real, resolved Palette and the
+// real validated text-on-background pairs, and trusting the real, rendered gate
+// (checkRenderedContrast, wired into validateGeneratedHtml since 3.10a) to catch what the prompt's
+// own rules don't. One forced tool call, output_config effort high, tool_choice forcing the one
+// tool, withTransientRetry wrapping the API call (unchanged pattern from structure-and-rewrite.ts/
+// classify-images.ts), an outer attempt loop feeding a correctionNote back on any failure —
+// SCOPE NOTE, UNCHANGED FROM BEFORE: the full validation gate is Task 3.5/3.10a's job, not this
+// one's. auditMarkup below remains a lightweight, regex-based, non-gating disclosure aid over the
+// `html` field only — it never gates a retry and is not a substitute for validateGeneratedHtml.
 
 import Anthropic from "@anthropic-ai/sdk";
 import { withTransientRetry } from "@/lib/ai/anthropic-retry";
 import { normalizeStringifiedJson } from "@/lib/ai/json-tool-utils";
-import { CLASS_VOCABULARY } from "@/lib/design/generate-stylesheet";
+import type { Palette } from "./normalize-brand-colors";
+import { VALIDATED_TEXT_PAIRS, paletteColorToHex } from "@/lib/design/validated-text-pairs";
 import type { ResolveDesignSystemResult } from "@/lib/design/resolve-design-system";
 import type { ImageRole, RoleAssignment, RoleAssignmentInput } from "./assign-image-roles";
 import type { ImageClassificationSubject } from "./classify-images";
@@ -50,57 +44,55 @@ import type {
   ContentCredential,
 } from "./types";
 
-const TOOL_NAME = "generate_markup";
+const TOOL_NAME = "generate_page";
 const MAX_ATTEMPTS = 3;
-// Build plan §6.4's own stated budget for the markup half is "~4,000-6,000 tokens, comfortably
-// inside budget" — set meaningfully above the task's own 8,000-token done-when bar so a
-// genuine completion under 8,000 is distinguishable from "would have kept going but got cut at
-// exactly the ceiling I chose." stop_reason === "max_tokens" is a hard failure either way.
-const MAX_OUTPUT_TOKENS = 10_000;
+// 3.9/3.11/3.12's own real, measured token spend for this exact combined markup+CSS shape: min
+// 9455, max 11700, mean 10449-10837 across three separate 10-run measurements — this ceiling is
+// set to what was actually tested and validated real, not a fresh guess. Roughly double
+// generate-markup.ts's pre-3.13 own 10,000 (markup-only), a real, quantified cost of the free-CSS
+// approach 3.9 first measured and this task now adopts.
+const MAX_OUTPUT_TOKENS = 16_000;
 
-// ---------- design system input, deliberately colour-free ----------
+// ---------- design system input — now WITH colour, deliberately ----------
 
-// Deliberately NOT `Palette` or the full DesignSystem/NeutralSystem — this type has no colour
-// field at all, on purpose. The prompt-building code below can never accidentally interpolate
-// a hex/hsl value into the model's context, because there is nothing on this type to read one
-// from. That is a stronger guarantee than "the prompt just doesn't mention colour" would be —
-// it holds even if a future edit to this file gets careless.
-export type MarkupDesignInput = {
+const NON_COLOR_PALETTE_KEYS = new Set(["derivedFrom"]);
+
+function toKebabCase(role: string): string {
+  return role.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
+}
+
+export type PageDesignInput = {
   vertical: string | null;
-  typographyName: string;
+  palette: Palette;
+  typographyHeadingFont: string;
+  typographyBodyFont: string;
+  typographyGoogleFontsUrl: string;
   styleBundleName: string;
   styleBundleDescription: string;
   sectionRhythm: string;
-  imageAspectPreference: string;
   // null when resolveDesignSystem returned ok:false — a NeutralSystem has no pattern to score.
   patternEligibility: { status: string; reasons: string[] } | null;
 };
 
-// The one place Palette gets dropped. Everything else this module touches is typed without a
-// colour field at all (see MarkupDesignInput above) specifically so nothing downstream of this
-// function can reach one even by accident.
-export function toMarkupDesignInput(result: ResolveDesignSystemResult): MarkupDesignInput {
+export function toPageDesignInput(result: ResolveDesignSystemResult): PageDesignInput {
   const system = result.ok ? result.system : result.partial;
   return {
     vertical: result.ok ? result.system.vertical : null,
-    typographyName: system.typography.name,
+    palette: system.palette,
+    typographyHeadingFont: system.typography.headingFont,
+    typographyBodyFont: system.typography.bodyFont,
+    typographyGoogleFontsUrl: system.typography.googleFontsUrl,
     styleBundleName: system.styleBundle.name,
     styleBundleDescription: system.styleBundle.description,
     sectionRhythm: system.styleBundle.tokens.sectionRhythm,
-    imageAspectPreference: system.styleBundle.tokens.imageTreatment.aspectPreference,
     patternEligibility: result.ok
       ? { status: result.system.patternEligibility.status, reasons: result.system.patternEligibility.reasons }
       : null,
   };
 }
 
-// ---------- content record input ----------
+// ---------- content record input (unchanged from pre-3.13) ----------
 
-// A direct 1:1 read off ContentRecord's own JSON-column shapes (lib/content/types.ts) — the
-// caller parses ContentRecord's Json columns into these typed arrays; this module doesn't touch
-// Prisma at all. Scalar fields only the ones a landing page markup generator actually needs —
-// detectedIndustry is deliberately absent here (it already fed resolveDesignSystem's own
-// vertical classification; MarkupDesignInput.vertical is its resolved output, not the raw text).
 export type MarkupContentInput = {
   businessName: string | null;
   tagline: string | null;
@@ -121,10 +113,6 @@ export type MarkupContentInput = {
   credentials: ContentCredential[];
 };
 
-// Every array field has its own `flagged` boolean (lib/content/types.ts) — dropping flagged
-// items before they ever reach the model, rather than sending them with a caveat, since a
-// markup-writing model has no mechanism to visually distinguish "trustworthy" from "flagged"
-// content on a page the way a human reviewer's UI does (ContentReviewForm's ConfidenceBadge).
 function dropFlagged<T extends { flagged: boolean }>(items: T[]): T[] {
   return items.filter((item) => !item.flagged);
 }
@@ -145,7 +133,7 @@ export function filterMarkupContent(content: MarkupContentInput): MarkupContentI
   };
 }
 
-// ---------- image manifest ----------
+// ---------- image manifest (unchanged from pre-3.13) ----------
 
 export type ManifestImage = {
   assetId: string;
@@ -154,25 +142,10 @@ export type ManifestImage = {
   widthPx: number | null;
   heightPx: number | null;
   subject: ImageClassificationSubject | null;
-  // Doubles as alt text, per classify-images.ts's own ImageClassification.caption comment —
-  // reused here for exactly that purpose, not a separate field this module invents.
   altText: string | null;
-  // Task 3.7c. 1.8's classify-images.ts computes this (normalised 0-1, image's main visual
-  // interest) for every classified image and it has sat unused ever since — buildImageManifest
-  // below read subject/caption off the same classification object but dropped focalPoint on the
-  // floor. Threaded through now so the model can pick a .obj-top/.obj-bottom/.obj-left/.obj-right
-  // modifier instead of every cropped image defaulting to a centred crop regardless of where its
-  // actual subject sits.
   focalPoint: { x: number; y: number } | null;
 };
 
-// "The image manifest with assigned roles" the task names as an input — this join (Asset URL +
-// RoleAssignmentInput's own metrics/classification + assignImageRoles' own verdict) does not
-// exist anywhere else in the codebase (confirmed before writing this: lib/content/run-analysis.ts
-// calls assignImageRoles but only ever reads .role off the result, never persists or joins it
-// against Asset; the real analogous join pattern is to-template-content.ts's assetById Map, over
-// the OLDER ContentImage-shaped data, not this one) — new, disclosed infrastructure this task
-// needed in order to have a real manifest to call generateMarkup with at all.
 export function buildImageManifest(
   inputs: RoleAssignmentInput[],
   assignments: RoleAssignment[],
@@ -181,8 +154,6 @@ export function buildImageManifest(
   const inputById = new Map(inputs.map((i) => [i.assetId, i]));
   const manifest: ManifestImage[] = [];
   for (const a of assignments) {
-    // Never offered to the model at all — the structural equivalent of §6.5's eventual "nothing
-    // marked unusable" check, satisfied here by construction rather than left for 3.5 to catch.
     if (a.role === "unusable") continue;
     const url = urlByAssetId.get(a.assetId);
     if (!url) continue;
@@ -203,33 +174,99 @@ export function buildImageManifest(
 
 // ---------- prompt construction ----------
 
-// Real production vocabulary already in use by the three (3.8-doomed) templates' own
-// data-kondo-section values (grepped directly from lib/templates/{atlas,ledger,showcase}/
-// index.ts), and the exact key set lib/templates/section-editor.ts's own SECTION_LABELS display
-// map was built from. Offered as existing convention, not a mandatory enum — section-editor.ts's
-// own key type is a free string, and a genuinely different section this vocabulary doesn't name
-// is still valid; SECTION_LABELS just falls back to the raw key as its own label in that case.
+// Same real production vocabulary as pre-3.13 — grepped from the (3.8-deleted) templates' own
+// data-kondo-section values, unchanged by this task.
 const KNOWN_SECTION_KEYS = [
   "nav", "hero", "why", "services", "process", "about",
   "reviews", "faq", "partners", "deep", "feature", "mosaic", "cta", "footer",
 ];
 
-function buildSystemPrompt(classVocabulary: { className: string; description: string }[]): string {
-  const vocabLines = classVocabulary.map((c) => `  ${c.className} — ${c.description}`).join("\n");
+function paletteToPromptLines(palette: Palette): string {
+  return Object.entries(palette)
+    .filter(([key]) => !NON_COLOR_PALETTE_KEYS.has(key))
+    .map(([key, value]) => `  --${toKebabCase(key)}: ${paletteColorToHex(value as string)};  /* role: ${key} */`)
+    .join("\n");
+}
+
+function validatedPairLines(): string {
+  return VALIDATED_TEXT_PAIRS.map(
+    (p) => `  --${toKebabCase(p.fg)} text on --${toKebabCase(p.bg)} background (${p.label})`
+  ).join("\n");
+}
+
+// Every section below is real, tested prompt content — not freshly authored for this task.
+// Palette/VALIDATED_TEXT_PAIRS/contrast rule/reference compositions/token-budget note: 3.11's own
+// prompt (log entry, Part D). The two CSS-authoring rules (blanket resets, specificity ties):
+// 3.12's own addition, added after 3.11's own two investigated failures named the exact mechanism
+// each one closes. Banned tags/event handlers/URIs/data-kondo-section/image-reuse-at-most-once:
+// carried over unchanged from this file's own pre-3.13 version (Task 3.4/3.7e).
+function buildSystemPrompt(design: PageDesignInput): string {
   return (
-    "You write semantic HTML markup for a single business's landing-page concept. You never write CSS.\n\n" +
-    "You are given: the business's real, extracted content (ground every claim in it — never invent " +
-    "a service, testimonial, stat, or credential that isn't present); a manifest of real images " +
-    "already assigned a role (hero, gallery, team, etc.) — only reference an image by its exact URL " +
-    "from that manifest, never invent one; and a fixed CSS class vocabulary that is the ONLY way to " +
-    "express colour, layout, or shape on this page.\n\n" +
-    "CSS CLASS VOCABULARY — use these, and only these, for every visual decision:\n" +
-    vocabLines +
-    "\n\n" +
+    "You write a complete landing-page concept for a single real business — both the semantic HTML " +
+    "body markup AND its own <style> block, written entirely in CSS you compose yourself. Compose " +
+    "freely: asymmetric layouts, overlapping elements, offset images, real visual variety — whatever " +
+    "the content genuinely warrants. You are not filling in a template.\n\n" +
+    "PALETTE — the ONLY colours that exist on this page. Reference every one by CSS custom property " +
+    `(var(--role-name)), never a literal hex/rgb/hsl value:\n${paletteToPromptLines(design.palette)}\n\n` +
+    "TEXT-ON-BACKGROUND PAIRS — validated safe for real accessibility contrast (AA, 4.5:1). Every " +
+    "piece of text on this page must use one of these exact role pairs for its colour+background:\n" +
+    `${validatedPairLines()}\n\n` +
+    "CONTRAST — a specific rule learned from real prior failures, not a general reminder. Across " +
+    "real prior free-composed pages measured by rendering them in a real browser, EVERY genuine AA " +
+    "contrast failure had the exact same shape: accent-coloured text (var(--accent)) placed on a " +
+    "tinted accent background (var(--accent-soft)) or a dark elevated background (var(--deep-soft)) " +
+    "instead of one of the validated pairs above. That specific combination looks fine at a glance " +
+    "and fails a real contrast check every time it has been tried. Accent-coloured TEXT belongs only " +
+    "on --paper or --mist backgrounds. If you want a coloured label, eyebrow, badge, or number on a " +
+    "tinted or dark surface, use --ink or --paper for the TEXT there instead of --accent — never " +
+    "accent text on accent-soft or deep-soft, under any circumstance, even inside a more specific " +
+    "nested selector that overrides just the background, and even if you also build a separate, " +
+    "correctly-scoped variant elsewhere — double check every real usage of an accent-text class " +
+    "against the actual background it ends up on before finishing.\n\n" +
+    "CSS AUTHORING — two more specific rules, each learned from a real, previously-found bug in this " +
+    "exact exercise, not general advice:\n" +
+    "  - Never set `background` inside a blanket multi-tag reset rule (e.g. `body, section, header, " +
+    "footer { ...; background: ...; }`) for any tag name that could be reused in a different " +
+    "semantic context elsewhere on the page. A citation's own <footer> inside a <blockquote>, for " +
+    "example, is not the page's own footer. Scope background colours to classes, never to a bare " +
+    "tag selector shared across more than one real use on the page.\n" +
+    "  - When a modifier class (e.g. `.service-card--large`) is meant to override a property that " +
+    "the base class (`.service-card`) also sets for the same descendant shape, the two rules have " +
+    "IDENTICAL CSS specificity if they differ only by class name — the LATER-declared rule silently " +
+    "wins the tie regardless of which one you intended to win. Always declare a modifier's own " +
+    "override rules AFTER the base class's rules in your stylesheet's source order, for every " +
+    "property the modifier changes.\n\n" +
+    `TYPOGRAPHY: heading font "${design.typographyHeadingFont}", body font "${design.typographyBodyFont}". ` +
+    "Load both from this exact Google Fonts URL via @import at the very top of your <style> block: " +
+    `${design.typographyGoogleFontsUrl}\n\n` +
+    `STYLE DIRECTION: "${design.styleBundleName}" — ${design.styleBundleDescription} Section rhythm: ` +
+    `${design.sectionRhythm}. This is direction, not fixed values — choose your own real ` +
+    "border-radius, shadow, and spacing numbers that express this character; do not invent a wildly " +
+    "different visual character than described.\n\n" +
+    (design.vertical
+      ? `Detected vertical: ${design.vertical}\n\n`
+      : "Detected vertical: (unmatched — no vertical could be classified; write generic, " +
+        "content-led framing rather than industry-specific jargon)\n\n") +
+    "REFERENCE COMPOSITIONS — read these as composition PATTERNS to adapt to this business's real " +
+    "content and real images, not markup to copy verbatim. Use what genuinely fits; do not force the " +
+    "page into a shape the real content doesn't support:\n" +
+    "  - Offset hero: headline and CTA in one column, hero image in the other, deliberately not " +
+    "vertically centred against the text block — let the image sit higher/lower than the text " +
+    "baseline, or bleed slightly past the section edge. A small floating card (its own background, " +
+    "border, real shadow) overlaps the boundary between the text column and the image, carrying one " +
+    "concrete trust signal drawn from the real content below (a stat, a credential, years in " +
+    "business) — never invented.\n" +
+    "  - Asymmetric service grid: services are not identical equal-width tiles in a uniform grid. " +
+    "Vary column or row span so one or two tiles (e.g. the first, or the one with the richest real " +
+    "content) are visibly larger, with the rest following a smaller, denser rhythm around them.\n" +
+    "  - Split proof section: two unequal-width columns — one carrying a real testimonial or a small " +
+    "cluster of real stats/numbers, the other a supporting image or a short list of real credentials. " +
+    "The split need not be 50/50; let the real content's own weight decide which side is wider.\n\n" +
+    "TOKEN BUDGET: you have up to 16,000 output tokens for this response. There is room for a " +
+    "fuller, richer page — more sections, more considered composition, more of the real content " +
+    "included — without approaching the ceiling. Use the space the content genuinely calls for; do " +
+    "not pad for its own sake.\n\n" +
     "RULES, NO EXCEPTIONS:\n" +
-    "- Never write a <style> tag, a style=\"\" attribute, or any literal colour value — no hex codes, " +
-    "no rgb()/rgba()/hsl()/hsla(), no named CSS colours like \"red\" or \"navy\". Colour and shape " +
-    "come entirely from the class vocabulary above; you are never deciding a colour value yourself.\n" +
     "- Never write <script>, <iframe>, <object>, <embed>, <form>, an inline event handler attribute " +
     "(onclick=, onload=, etc.), or a javascript:/data: URI.\n" +
     "- Every top-level section of the page must be exactly one <header>/<section>/<footer> element " +
@@ -246,22 +283,13 @@ function buildSystemPrompt(classVocabulary: { className: string; description: st
     "sections needs a different image from the manifest instead, or no image at all — never the " +
     "same URL twice. Before you finish, mentally check every non-logo <img src> you wrote against " +
     "every other one: no two may match.\n" +
-    "- Output body-level markup only. No <html>, <head>, or <body> wrapper tags — those are added " +
-    "separately by the page shell."
+    "- Output body markup and a <style> block only. No <html>, <head>, or <body> wrapper tags — " +
+    "those are added separately by the page shell."
   );
 }
 
-function buildUserText(design: MarkupDesignInput, content: MarkupContentInput, images: ManifestImage[]): string {
-  const lines = [
-    `Business: ${content.businessName ?? "(name unknown)"}`,
-    `Detected vertical: ${
-      design.vertical ??
-      "(unmatched — no vertical could be classified; write generic, content-led framing rather than industry-specific jargon)"
-    }`,
-    `Typography mood: ${design.typographyName}`,
-    `Style direction: ${design.styleBundleName} — ${design.styleBundleDescription} ` +
-      `(section rhythm: ${design.sectionRhythm}; preferred image aspect: ${design.imageAspectPreference})`,
-  ];
+function buildUserText(design: PageDesignInput, content: MarkupContentInput, images: ManifestImage[]): string {
+  const lines = [`Business: ${content.businessName ?? "(name unknown)"}`];
   if (design.patternEligibility) {
     lines.push(
       `Pattern eligibility signal: ${design.patternEligibility.status}` +
@@ -280,67 +308,60 @@ function buildUserText(design: MarkupDesignInput, content: MarkupContentInput, i
   return lines.join("\n");
 }
 
-// Task 3.7e. A real, measured baseline (10 real generations, unmodified prompt) found a 50%
+// Task 3.7e, carried over unchanged. A real, measured baseline (10 real generations) found a 50%
 // validation-failure rate, 100% of it the model reusing one non-logo image across two sections —
-// and every failure reused the SAME image, the one with the single best/most distinctive caption
-// in the manifest, not an ambiguous one. That rules out "the model can't tell two similar images
-// apart" as the driver and points at "the model wants to reuse its favourite image and has no
-// rule stopping it" instead — this line restates the same per-role counts the rule above already
-// covers, concretely, right where the model is about to read the images it can pick from, so
-// "5 feature-inline images, use each at most once" is impossible to miss the way one rule buried
-// in a longer list can be.
+// this line restates the per-role counts right where the model is about to read the images it can
+// pick from, concretely, so "5 feature-inline images, use each at most once" is impossible to miss.
 function roleCountSummary(images: ManifestImage[]): string {
   const counts = new Map<string, number>();
   for (const img of images) counts.set(img.role, (counts.get(img.role) ?? 0) + 1);
   const parts: string[] = [];
   for (const [role, count] of counts) {
-    if (role === "logo") continue; // reuse is fine for logo — no count warning needed
+    if (role === "logo") continue;
     parts.push(count > 1 ? `${count} different "${role}" images below — use each at most once, never the same one twice` : `1 "${role}" image below`);
   }
   return parts.length ? `(${parts.join("; ")}.)` : "";
 }
 
-function buildMarkupTool(): Anthropic.Tool {
+function buildPageTool(): Anthropic.Tool {
   return {
     name: TOOL_NAME,
     description:
-      "Return the complete semantic HTML body markup for this business's landing-page concept, " +
-      "written entirely against the supplied CSS class vocabulary — no CSS, no colour values, no " +
-      "inline styles, every top-level section carrying its own data-kondo-section attribute.",
+      "Return the complete landing-page concept for this business: semantic HTML body markup, and " +
+      "the CSS for its own <style> block, written entirely against the supplied palette and text-on-" +
+      "background pairs — every top-level section carrying its own data-kondo-section attribute.",
     input_schema: {
       type: "object",
-      required: ["html"],
+      required: ["html", "css"],
       properties: {
         html: {
           type: "string",
           description:
             "Complete body-level HTML markup. Every top-level section is a <header>/<section>/" +
-            '<footer> element carrying its own data-kondo-section="key" attribute. No <style>, no ' +
-            'style="", no literal colour values, no <script>/<iframe>/<form>/<object>/<embed>, no ' +
-            "inline event handlers.",
+            '<footer> element carrying its own data-kondo-section="key" attribute. No <style> tag, ' +
+            'no style="" attribute, no literal colour values, no <script>/<iframe>/<form>/<object>/' +
+            "<embed>, no inline event handlers.",
+        },
+        css: {
+          type: "string",
+          description:
+            "Complete CSS for the page, to be placed in a <style> block. Every colour references " +
+            "the given palette via var(--role-name); no literal hex/rgb/hsl values.",
         },
       },
     },
   };
 }
 
-// ---------- lightweight, reporting-only audit (see the file header's scope note) ----------
+// ---------- lightweight, reporting-only audit (see file header's scope note) ----------
+// Constraint 2 from the pre-3.13 version (class-vocabulary conformance) is gone — there is no
+// fixed vocabulary to conform to any more. Everything else (no colour/no <style> in the html
+// field specifically — colour and CSS both belong in the separate css field — banned tags, event
+// handlers, javascript:/data: URIs, data-kondo-section coverage) is unchanged.
 
 export type MarkupAuditFinding = { severity: "error" | "warning"; message: string };
 
-function flattenKnownClasses(vocabulary: { className: string }[]): Set<string> {
-  const set = new Set<string>();
-  for (const entry of vocabulary) {
-    for (const token of entry.className.split(".").filter(Boolean)) set.add(token);
-  }
-  return set;
-}
-
-// Regex heuristics over the raw HTML string, deliberately not a real HTML parser — the same
-// pragmatic choice section-editor.ts already made for this exact file format. Never gates a
-// retry (see file header) — exists only so this task's own real findings can be reported with
-// something more concrete than "I read it and it looked fine."
-export function auditMarkup(html: string, knownClasses: Set<string>): MarkupAuditFinding[] {
+export function auditMarkup(html: string): MarkupAuditFinding[] {
   const findings: MarkupAuditFinding[] = [];
 
   if (/<style[\s>]/i.test(html)) findings.push({ severity: "error", message: "contains a <style> tag" });
@@ -368,15 +389,6 @@ export function auditMarkup(html: string, knownClasses: Set<string>): MarkupAudi
     });
   }
 
-  const usedClasses = new Set<string>();
-  for (const m of html.matchAll(/class="([^"]*)"/g)) {
-    for (const c of m[1].split(/\s+/).filter(Boolean)) usedClasses.add(c);
-  }
-  const unknown = [...usedClasses].filter((c) => !knownClasses.has(c));
-  if (unknown.length > 0) {
-    findings.push({ severity: "warning", message: `classes not in CLASS_VOCABULARY: ${unknown.join(", ")}` });
-  }
-
   return findings;
 }
 
@@ -384,6 +396,7 @@ export function auditMarkup(html: string, knownClasses: Set<string>): MarkupAudi
 
 export type GenerateMarkupResult = {
   html: string;
+  css: string;
   stopReason: string;
   outputTokens: number;
   inputTokens: number;
@@ -392,15 +405,14 @@ export type GenerateMarkupResult = {
 };
 
 export async function generateMarkup(
-  design: MarkupDesignInput,
+  design: PageDesignInput,
   content: MarkupContentInput,
   images: ManifestImage[]
 ): Promise<GenerateMarkupResult> {
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-  const systemPrompt = buildSystemPrompt(CLASS_VOCABULARY);
+  const systemPrompt = buildSystemPrompt(design);
   const userText = buildUserText(design, content, images);
-  const tool = buildMarkupTool();
-  const knownClasses = flattenKnownClasses(CLASS_VOCABULARY);
+  const tool = buildPageTool();
 
   let lastError: Error | null = null;
   let correctionNote: string | null = null;
@@ -441,7 +453,7 @@ export async function generateMarkup(
       );
 
       if (result.stop_reason === "max_tokens") {
-        throw new Error("Markup generation was cut off by the token limit.");
+        throw new Error("Page generation was cut off by the token limit.");
       }
 
       const toolUse = result.content.find(
@@ -449,18 +461,22 @@ export async function generateMarkup(
       );
       if (!toolUse) throw new Error("Claude did not return a tool_use block.");
 
-      const normalized = normalizeStringifiedJson(toolUse.input) as { html?: unknown };
+      const normalized = normalizeStringifiedJson(toolUse.input) as { html?: unknown; css?: unknown };
       if (typeof normalized.html !== "string" || !normalized.html.trim()) {
         throw new Error("Claude's tool response is missing a non-empty html field.");
+      }
+      if (typeof normalized.css !== "string" || !normalized.css.trim()) {
+        throw new Error("Claude's tool response is missing a non-empty css field.");
       }
 
       return {
         html: normalized.html,
+        css: normalized.css,
         stopReason: result.stop_reason ?? "unknown",
         outputTokens: result.usage.output_tokens,
         inputTokens: result.usage.input_tokens,
         attemptsUsed: attempt,
-        findings: auditMarkup(normalized.html, knownClasses),
+        findings: auditMarkup(normalized.html),
       };
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
