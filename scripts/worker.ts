@@ -10,6 +10,17 @@
 // file to load there, and `--env-file` errors out hard if the file doesn't exist. Use
 // `npm run worker:prod` (plain `tsx scripts/worker.ts`, no --env-file flag) instead —
 // see railway.toml.
+//
+// Task 3.7a. This file is loaded once, at process start, like any long-running Node
+// process — there is no --watch flag here, so an already-running worker never re-reads its
+// own source after startup. Editing this file (or anything it imports, like dispatch()'s own
+// switch) while a local dev worker is already running does nothing to that live process; it
+// keeps executing whatever it loaded at start, confirmed directly (see docs/kondo-v2-
+// execution.md's 3.7a entry: a worker started before a dispatch() case existed threw "Unknown
+// job type" for that case even after the file on disk was corrected, until the process itself
+// was restarted). Restart the local worker after any change to this file or its dependencies.
+// Not a production concern — a real deploy always starts a fresh process from the newly
+// deployed code, so this is a dev-loop hazard only, not something a live deployment can hit.
 import * as Sentry from "@sentry/node";
 import {
   claimNextJob,
