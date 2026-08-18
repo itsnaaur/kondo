@@ -1,16 +1,21 @@
 import Anthropic from "@anthropic-ai/sdk";
 
-// Every Anthropic call site in the generation pipeline (design-direction.ts,
-// visual-read.ts, brief-synthesis.ts, build-page.ts, generate.ts) wraps its call in a
-// small retry loop — but that loop exists to recover from a malformed/incomplete tool
-// call, which is the model's fault and benefits from an immediate retry with the
-// rejection reason fed back in. A transient failure (Anthropic overloaded, rate
-// limited, a 5xx) is a completely different kind of failure: it has nothing to do with
-// what the model produced, and hammering it three times inside the same second (no
-// backoff) is one attempt with extra steps, not three independent chances. Confirmed
-// live: a single "Overloaded" burned all 3 of design-direction.ts's validation-retry
-// attempts in under two seconds, leaving zero budget for an actual schema failure to
-// get a fair shake.
+// Task 3.8. Corrected — the previous version of this comment named five call sites
+// (design-direction.ts, visual-read.ts, brief-synthesis.ts, build-page.ts, generate.ts)
+// from the pre-rebuild "AI website engine," all removed whole in an earlier migration
+// (commit 5f35c60); build-page.ts never existed in this repo's history at all. Real,
+// current callers of withTransientRetry: structure-and-rewrite.ts, generate-markup.ts,
+// classify-images.ts, edit-concept-section.ts.
+//
+// Every Anthropic call site in this pipeline wraps its call in a small outer retry loop
+// — but that loop exists to recover from a malformed/incomplete tool call, which is the
+// model's fault and benefits from an immediate retry with the rejection reason fed back
+// in. A transient failure (Anthropic overloaded, rate limited, a 5xx) is a completely
+// different kind of failure: it has nothing to do with what the model produced, and
+// hammering it three times inside the same second (no backoff) is one attempt with
+// extra steps, not three independent chances. Confirmed live: a single "Overloaded"
+// once burned an entire outer validation-retry budget in under two seconds, leaving
+// zero budget for an actual schema failure to get a fair shake.
 //
 // The fix: classify the error, and only let genuine validation failures consume the
 // caller's own MAX_ATTEMPTS budget. Transient errors are retried here, with backoff,
