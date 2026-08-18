@@ -11315,6 +11315,172 @@ that's the one thing still waiting on the human's own look, same as it's been si
 `3.7f`'s.
 ---
 
+### 3.9 — Free-CSS generation test
+**Timestamp:** 2026-08-18
+**Status:** DONE-VERIFIED as an experiment — a real 10-run measurement, real data, real findings.
+Explicitly not a feature decision: nothing in the pipeline was touched, the throwaway script was
+deleted after use, per instruction.
+
+**What was built.** A standalone script, outside the pipeline, making its own Anthropic call (NOT
+`generate-markup.ts`'s `generateMarkup` — that function's whole contract is "no colour, no CSS,"
+the opposite of this test). Forced tool use, one field for `html`, one for `css`. Given: the
+resolved `Palette` (role names + real hex, converted from the same `hsl(...)`/hex strings
+`generate-stylesheet.ts` itself resolves), all 12 `VALIDATED_TEXT_PAIRS` stated as the only
+permitted text-on-background combinations, `resolveTypography`'s real pairing + Google Fonts URL,
+`trusted-established`'s own character translated into descriptive bands (corner rounding/elevation/
+section rhythm as prose, not `--radius-card: 4px`-style literal tokens), BC Security's real
+`ContentRecord` and image manifest (including `focalPoint`, unused by name but available), and the
+`data-kondo-section` requirement. Withheld: `CLASS_VOCABULARY` and any generated stylesheet — the
+model writes its own `<style>` block from scratch. Same bundle (`trusted-established`) as `3.7f`/
+`3.7g`'s own real regenerations, for a fair three-way comparison.
+
+**Three real bugs in my own analysis tooling, caught and fixed before trusting any result — not
+the model's bugs, mine, disclosed the same way every other real bug this session has been:**
+1. `Palette.derivedFrom` (`"brand" | "fallback"`) is metadata, not a colour — my first draft
+   iterated every `Palette` key indiscriminately and crashed trying to parse `"brand"` as a hex
+   value. Fixed by excluding it explicitly.
+2. Gave the model camelCase CSS variable names (`--accentInk`) instead of this codebase's own real
+   convention (`--accent-ink`, confirmed directly from `generate-stylesheet.ts`) — cosmetically
+   fine for the model (it just used what it was given), but it broke my OWN reverse-lookup regex
+   (`[a-z-]+`, case-sensitive), silently mis-resolving roles. Fixed by emitting kebab-case,
+   matching the rest of the codebase.
+3. The real, structural one: several DISTINCT `Palette` roles share the exact same hex for this
+   client's palette — confirmed directly: `paper`, `accentInk`, `onSecondary`, and
+   `onDestructive` are all `#ffffff`; `ring` equals `accent`. A hex-value reverse lookup is
+   therefore ambiguous by construction, not a bug in the lookup's implementation — last-role-wins
+   silently misattributed `ink`-on-`paper` as `ink`-on-`onDestructive`. Fixed by resolving the role
+   directly from the `var(--role-name)` reference in the model's own CSS, never round-tripping
+   through a resolved colour when a role name is available.
+
+**1. Truncation and tokens.**
+```
+Truncated (stop_reason=max_tokens): 0/10
+Token distribution: min=10072 max=11476 mean=10837 median=10844
+Budget used at max: 11476/16000 = 71.7%
+```
+No truncation, a tight distribution (13% spread around the mean), comfortable headroom under a
+16,000-token budget (deliberately more generous than `generate-markup.ts`'s own 10,000, since this
+call writes CSS too — stated as a real choice, not hidden). Combined markup+CSS costs roughly
+double `generate-markup.ts`'s own real per-run spend (`3.7g`'s real run: `4788`/`10000`) — a real,
+quantified cost of the free-CSS approach, not assumed.
+
+**2. Validator pass rate.**
+```
+Pass: 6/10
+Fail: 4/10 — runs 1, 3, 5, 10
+  section-markers: runs 1, 5 — "Top-level element 1 of 1 (<div>) has no data-kondo-section
+    attribute." Both runs wrapped the ENTIRE page in one outer <div> (confirmed: run 1's own CSS
+    names it .bcs-root) instead of multiple <header>/<section>/<footer> siblings — a real,
+    disclosed new failure mode free composition introduces that `generate-markup.ts`'s own
+    vocabulary-constrained prompt has never produced in any real run this whole session.
+  contrast (inline styles): runs 3, 10 — 2 inline style="" attributes each, one run using a
+    palette var() inline, the other a literal invented hex (#ffffff) — not from the palette at
+    all, the one place across all 10 runs the model invented a colour outside what it was given.
+```
+Real, new failure modes, not the image-reuse pattern that dominated every prior real measurement
+this session (`3.7e`'s own baseline was 50% failure, 100% of it image-reuse; here it's 0% image-
+reuse across all 10 runs — genuinely different content, genuinely different risk profile).
+
+**3. Contrast — the load-bearing question this task exists to answer.**
+
+**The existing validator's own contrast check cannot meaningfully evaluate free-authored CSS at
+all — confirmed directly, not inferred.** `checkContrast` in `validate-generated-html.ts` only
+recomputes a real ratio for elements carrying one of eight HARDCODED class names
+(`SURFACE_CLASS_PAIRS`: `.surface-paper`, `.surface-mist`, etc.) — a free-composing model has no
+reason to ever use those exact strings, and across all 10 real runs, none did. The "contrast"
+failures the validator DID report in runs 3/10 were exclusively the inline-style ban firing — the
+actual pair-matching logic inside `checkContrast` never activated even once across 60 real
+generateStylesheet-free rule declarations. **"Passed the existing validator" and "contrast is
+actually safe" are not the same claim for this experiment's own output** — this is precisely why
+this task built independent analysis rather than trusting `valid: true` at face value.
+
+**My own analysis — every same-rule `color`+`background` co-declaration across all 10 runs,
+resolved by real palette-role identity, checked against a real computed ratio:**
+```
+Total co-declared rules: 91
+  Exactly one of the 12 validated pairs: 65 (71%)
+  Unresolved (transparent background / gradient — no static ratio to compute): 17 (19%)
+  Real, computed ratio BELOW 4.5:1 — a genuine AA failure: 4 (4%)
+  Real ratio >= 4.5:1 but not one of the 12 listed pairs — safe by luck for THIS palette, not
+    validated across the 191-palette corpus the way the 12 pairs are: 5 (5%)
+```
+**Four real, confirmed AA failures, invisible to the existing validator, only surfaced by this
+task's own independent check:**
+```
+run 5: accent/accentSoft = 4.48:1  (marginal — 0.02 below the line)
+run 7: accent/deepSoft   = 2.99:1  (a real failure, not marginal)
+run 9: secondary/deepSoft = 4.19:1 (a real failure)
+run 10: accent/deepSoft  = 2.99:1  (identical failure to run 7, independently)
+```
+The `accent`-on-`deepSoft` failure recurring identically in two independent runs (7 and 10, both
+inside a `.why-head .section-label`-shaped small eyebrow nested in a dark "why us" band) is a real,
+systematic pattern, not a fluke — the model reliably reaches for accent-coloured text on a dark-
+but-not-darkest background when composing a small label inside a dark section, and that specific
+combination is not one this palette's own validated list covers. Named as a real, repeatable blind
+spot, not a one-off.
+
+**4. Variance — real structural diversity, checked, not assumed from "10 independent calls."**
+Every one of the 10 runs used `display: grid`, `display: flex`, `position: absolute`, AND
+`transform` — full convergence on the same underlying layout TOOLKIT, unsurprising for modern CSS.
+Real variance shows up elsewhere: section counts ranged 9-12; gradient usage split exactly 5/10 (a
+real 50/50 aesthetic choice, not universal or absent); distinct class-name counts ranged 38-55 (a
+~45% spread). Ten runs read as ten genuinely independent COMPOSITIONS built from a shared, sensible
+TOOLKIT — not ten copies of one design with different class names, and not ten unrelated designs
+either. A real middle position, stated as exactly that rather than rounded to either extreme.
+
+**Sent to the human, per instruction, since pixel-level judgement is still not something this
+session can do itself (Browser pane still won't composite frames — tried again, twice, same
+failure as `3.7d`/`3.7f`/`3.7g`):**
+- **Best 3:** run 7 (richest — 15 co-declared colour rules, 11 real sections, both hero and "why"
+  bands committing to a dark surface, real credential chips and service numbering — but carries
+  one of the four real AA failures above, sent with that disclosed, not hidden, because it's the
+  most informative example of what free composition can produce AND its real risk in the same
+  file). Run 6 (cleanest of all 10 — zero contrast violations of any kind, 8/9 co-declared rules
+  matching a validated pair). Run 2 (simplest but perfectly clean — 6/6 rules matched, highest
+  section count of any run at 12).
+- **Worst:** run 10 — failed the validator on two inline styles (one a literal invented `#ffffff`,
+  the only outside-the-palette colour found across all 10 runs), and independently carries the
+  most severe real contrast failure found (`2.99:1`). The clearest single example of what goes
+  wrong without the vocabulary system's own structural guarantees.
+
+**Files created/modified:** none — the experiment script (`scripts/tmp-3.9-free-css.ts`) was
+deleted after use, per instruction ("nothing gets wired into the pipeline"). `git status
+--porcelain` shows only `3.8`'s own already-disclosed, still-uncommitted safe deletions, untouched
+by this task.
+
+**Verification commands and output:** none run — no pipeline source changed this task, so
+`tsc`/`lint`/`vitest`/the 191-gate had nothing new to check. Stated explicitly rather than silently
+omitted, so this isn't mistaken for an oversight.
+
+**Failures, retries and dead ends:** the three real bugs in this task's own analysis tooling
+(above), all caught and fixed before any reported number was trusted — not discovered after the
+fact.
+
+**Shortcuts taken:** none.
+
+**Deviations from the task spec:** none — ten runs, no prompt tuning between them (confirmed: the
+system prompt string is identical across every one of the 10 calls, built once before the loop),
+no fallback renderer, every real failure reported as data rather than retried or hidden.
+
+**Not run / not verified:** pixel-level visual judgement of any of the 10 outputs — the same
+disclosed limitation as `3.7d`/`3.7f`/`3.7g`, now affecting this task too. Whether the same 71%/
+4%/5% contrast breakdown holds for a client with a differently-shaped palette (BC Security only,
+same scope limitation named in every prior real-generation task this session).
+
+**Confidence:** High on every number reported — each is either a direct API response field
+(`stop_reason`, `output_tokens`) or computed from the model's own real, saved output by a
+real, bug-fixed analysis, not inferred or eyeballed. The headline finding — the existing
+validator's contrast check is structurally blind to free-authored CSS, and independent checking
+found 4 real AA failures across 91 real declarations (4%) plus 5 more that were safe only by
+coincidence, not by rule — is as direct as this kind of question gets to answer without pixels.
+No claim made about whether free composition LOOKS better than the vocabulary system's own recent
+output (`3.7g`'s file) — that comparison is explicitly the human's own call, with both real
+artifacts now in hand to make it.
+
+**Next task:** holding — no next step specified; this was an experiment to inform the human's own
+`3.8` sign-off decision, not a task with its own follow-on.
+---
+
 # PART E — For the human reviewing this log
 
 Signs the log is not trustworthy, worth scanning for:
