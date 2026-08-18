@@ -11141,6 +11141,180 @@ none should be inferred, about the one open question this task was built to feed
 alongside `3.7d`'s six-way comparison.
 ---
 
+### 3.7g — Give the stylesheet a visual opinion
+**Timestamp:** 2026-08-18
+**Git SHA at start:** 9761b22
+**Status:** DONE-VERIFIED for everything this task can verify itself (real type scale, real
+filled cards, real accent expansion, all guard-checked, all confirmed in real regenerated output).
+Whether it's now good enough is, again, explicitly the human's own call — not claimed here, same
+discipline as `3.7d`/`3.7f`.
+
+**Step 1 — re-read all three doomed stylesheets fresh, reported before any CSS was touched.**
+
+*Type scale.* All three independently converged on the same shape, confirmed by direct grep, not
+assumed from memory: a big display size (atlas `clamp(2.3rem,5.4vw,4.1rem)`, ledger
+`clamp(2.4rem,6.2vw,4.3rem)`, showcase `clamp(2.3rem,5.2vw,4rem)` — all weight 600), a smaller h2
+(`clamp(1.7-1.8rem, 3.4-3.8vw, 2.6-2.9rem)`, all weight 600), card/row headings around
+`1.06-1.28rem` at weight 600 (atlas's own `.at-why__card h3`, ledger's `.tl-row__name`), a distinct
+"lede"/lead-paragraph size around `1-1.22rem` at the surface's muted colour, and a small uppercase
+`0.7-0.72rem` eyebrow label with a short decorative rule before it. The generator's own current
+`h1-h6` rule set NO font-size at all — every level fell back to the browser's own UA default,
+which for `h3` (~1.17em ≈ 18.7px) sits within 2px of the 17px body text. This is the literal
+mechanism behind gap 1, not just a description of the symptom.
+
+*Card fills.* Atlas's `.at-why__card`: `background: var(--deep-soft); border: ... rgb(255 255 255
+/ 0.12);` — a real fill, inside a `.at-why` DARK section, with the border colour deliberately
+swapped to translucent white rather than the light-mode `--line` token. Showcase's `.sc-about__
+shots figure`: `background: var(--paper); box-shadow: var(--shadow-card);` — filled white with a
+real shadow. The generator's own current `.card` sets NO background or colour at all, by design
+(`"pair with a .surface-* class"`) — but the real markup from every regeneration so far never does
+that pairing; a `.card` sitting inside a `.surface-paper` section inherits that same paper
+background, becomes indistinguishable from the page. This is the literal mechanism behind gap 2.
+
+*Accent usage.* Atlas's hero stat numerals (`.at-hero__stats dt`) are accent-coloured, but
+specifically inside `.at-hero`'s own `background: var(--mist)` band — matching, not coincidentally,
+`generate-stylesheet.ts`'s own existing `.surface-mist .text-accent` scoping exactly (accent-as-
+text is only AA-validated against mist, one of the 12 pairs — confirmed by re-checking
+`VALIDATED_TEXT_PAIRS`, not assumed). None of the three templates has a literal icon system (no
+icon font/SVG sprite import anywhere, re-confirmed this task). What they DO have, repeatedly, is
+accent as a small DECORATIVE shape rather than text: `.at-why__card::before` (an accent rule
+instead of a numeral), `.at-eyebrow::before` (a short accent-adjacent rule before every eyebrow
+label). This is the real, reusable idea gap 3 draws on — accent doesn't need new contrast
+validation everywhere if it's a decoration, not text.
+
+*Section rhythm.* Atlas alternates deliberately: `.at-hero`(mist) -> `.at-why`(deep) ->
+`.at-svc`(unstyled, i.e. paper) -> `.at-proc`(mist) -> `.at-says`(accent) -> `.at-cta`(mist) ->
+`.at-foot`(deep) — a real, considered pattern, confirmed by reading every section's own background
+declaration in sequence. The generator already HAS the primitives to do this (`.surface-*`
+classes, `.section`) — the gap is that nothing in `CLASS_VOCABULARY`'s own documentation ever told
+the model to actually alternate them, and every real regeneration so far defaults every section to
+the ambient `.surface-paper`.
+
+**Step 2 — implemented, all four gaps, all guard-compliant by construction (reusing the existing
+12 validated pairs, never adding a 13th):**
+
+1. **Real type scale** — `h1` through `h6` now each carry their own `font-size`/`line-height`/
+   `letter-spacing`/`font-weight` (h1/h2 at 700, h3-h6 at 600), harvested proportions from all
+   three templates above, no colour touched. New `.lede`/`.eyebrow`/`.caption` utilities fill the
+   gaps a bare heading tag can't (intro paragraph, small label, fine print) — all three set zero
+   colour of their own, composing with the existing `.text-muted`/`.text-accent` exactly like
+   every other shape-only utility already does.
+2. **Filled cards** — `.card` now sets `background: var(--mist); color: var(--ink);` directly —
+   self-contained, already one of the 12 validated pairs (the same pair `.surface-mist` itself
+   emits), reused rather than invented. New `.card--dark` (paper/deep-soft, also already
+   validated) for `.surface-deep` contexts, border colour swapped to translucent white matching
+   atlas's own real precedent, not guessed.
+3. **Accent beyond buttons** — `.eyebrow::before` is an unconditional accent-coloured decorative
+   rule (a `background`, never `color` — safe on any surface by construction, the one place accent
+   shows up guaranteed regardless of context). New `.pill--accent`/`.tile-accent`, both
+   self-contained accentInk-on-accent pairs (the same pair `.btn--solid` already emits) for badges
+   and small accent-filled markers. `.text-accent`'s own documentation extended to explicitly name
+   stat numerals and links, not just prose, as valid targets when nested in `.surface-mist`.
+4. **Section rhythm** — `.section`'s own `CLASS_VOCABULARY` description now explicitly instructs
+   alternating the paired `.surface-*` class between adjacent sections, naming the flat-background
+   symptom directly. New `.section--accent-top` (`border-top: 3px solid var(--accent)` — a
+   divider, not a surface, no `color`/`background` at all) for deliberate punctuation between
+   sections.
+
+**Guards — re-verified for real:**
+```
+$ npx tsx lib/design/build/validate-contrast.ts
+SUMMARY: 191/191 palettes fully AA-passing across all 12 checked pairs.
+```
+No bundle touched, no palette/derivation code touched — this result was never in doubt, confirmed
+anyway rather than assumed. The structural colour-safety test's own `SAFE_UNSCOPED_SELECTOR`
+allow-list was extended to include `.card`/`.card--dark`/`.pill--accent`/`.tile-accent` (the same
+self-contained-pair shape `.btn--solid`/`.surface-*` already occupy) — a real, necessary,
+documented extension, not a loosened guard: every one of the four still emits an already-validated
+pair, the `EMITTED_PAIRS`/`VALIDATED_TEXT_PAIRS` correspondence test needed zero changes because no
+new pair was introduced.
+
+**Two real bugs caught by this task's own new tests, fixed before anything shipped, not glossed
+over:** `h4`'s first draft (`1.05rem` = 16.8px) was actually SMALLER than body's own hardcoded
+`17px` — the exact class of bug a type-scale fix exists to prevent, caught by a real
+`toBeGreaterThan` assertion, not eyeballed. Fixed to `1.15rem` (18.4px). A double-escaping bug in
+one test's own regex-building helper (`ruleFor("\\.lede")` when the helper already escapes dots
+internally) made the `.lede` check silently match nothing rather than fail loudly on the real
+assertion — caught because the test failed anyway (0 is not greater than 17), fixed by removing
+the pre-escaping.
+
+**Real regeneration, apples-to-apples with `3.7f`'s own file.** Same client, same bundle
+(`trusted-established` — BC Security, `bestFor` names "security" directly, identical reasoning to
+`3.7f`), current code (`3.7c` + `3.7e` + `3.7g` all live), same bypass-the-queue approach, same
+disclosed reason:
+```
+Resolved style bundle: trusted-established (Trusted Established)
+[generate-markup] attempt 1: stop_reason=tool_use output_tokens=4788/10000
+Concept created: cmsytkp1v0000s8ffws3eltql | templateKey=generated-trusted-established-3.7g
+```
+Passed on the first attempt.
+
+**Verified directly against the real output, not assumed from the vocabulary existing:**
+```
+Non-logo image URLs: 5, unique: 5 — zero reuse (3.7e's fix still holding).
+.grid: 5   .split: 6   .stat: 4   .card: 23   .card--elevated: 15   .card--dark: 1
+.media-16-9: 5   .obj-right: 2   .lede: 2   .eyebrow: 6   .caption: 1
+.pill: 2   .pill--accent: 2   .section--accent-top: 1
+<h1>: 1   <h2>: 7   <h3>: 23   <h4>: 0
+```
+**One thing checked rather than assumed clean:** `.stat` fired 4 times despite BC Security's own
+`ContentRecord.stats` still being empty (confirmed in `3.7c`/`3.7d`/`3.7f`'s own entries) —
+investigated directly rather than either flagging it as a violation or letting it pass unchecked.
+The model repurposed `.stat`'s dt/dd shape for real credentials already present elsewhere in the
+content record — "Gallagher / Certified channel partner," "iLOQ / Exclusive NZ distributor,"
+"Tōtika / Certified for health & safety," "2022 & 2024 / NZ Security Industry Awards" — all four
+traceable to real extracted content, not invented. A creative, grounded reuse of the primitive, not
+a hallucination; confirmed by reading the actual markup, not inferred from the count alone.
+
+**Files created/modified:**
+```
+$ git status --porcelain -- lib/design/generate-stylesheet.ts lib/design/generate-stylesheet.test.ts
+ M lib/design/generate-stylesheet.ts
+ M lib/design/generate-stylesheet.test.ts
+```
+
+**Verification commands and output:**
+```
+$ npx tsc --noEmit && npm run lint && npx vitest run
+ Test Files  20 passed (20)
+      Tests  323 passed | 1 todo (324)
+(310 -> 323: +13 real new tests, all in generate-stylesheet.test.ts, covering all four gaps
+individually — not a general smoke test)
+
+$ npx tsx lib/design/build/validate-contrast.ts
+SUMMARY: 191/191 palettes fully AA-passing across all 12 checked pairs.
+```
+
+**Failures, retries and dead ends:** the two real bugs named above (h4 sizing, double-escaping),
+both caught by this task's own tests before anything shipped, not discovered afterward.
+
+**Shortcuts taken:** the regeneration bypasses the job queue/worker, same disclosed reason as
+`3.7d`/`3.7e`/`3.7f` (no real caller can select a bundle yet).
+
+**Deviations from the task spec:** none — worked entirely in `generate-stylesheet.ts` as scoped
+(`generate-markup.ts` untouched this task; the "alternate surfaces" instruction and the accent-on-
+stat/link clarification both live in `CLASS_VOCABULARY`'s own description strings, which is how
+this codebase's own architecture already gets documentation into the model's prompt, not a new
+mechanism invented for this task).
+
+**Not run / not verified:** the actual visual judgement — explicitly the human's own call, per the
+same discipline `3.7d`/`3.7f` already established, restated here rather than let a clean guard
+pass imply more than it proves. Whether the type scale/card fill/accent choices hold up on a
+SECOND client with different content shape (a shorter services list, no strong credentials to
+repurpose into `.stat`) — this task's own real regeneration is BC Security only, same scope
+limitation `3.7e`'s own entry already named.
+
+**Confidence:** High on everything this task can check itself — the audit is grounded in direct
+greps against the real template source (not memory), every new colour-setting rule reuses an
+already-validated pair (verified, not assumed), two real bugs were caught by real tests before
+shipping, and the real regeneration shows substantive, correct, grounded use of every new
+primitive. No claim, and none should be inferred, about whether the result actually looks good —
+that's the one thing still waiting on the human's own look, same as it's been since `3.7d`.
+
+**Next task:** holding — `3.8` still waits on the human's own comparison of this file against
+`3.7f`'s.
+---
+
 # PART E — For the human reviewing this log
 
 Signs the log is not trustworthy, worth scanning for:
