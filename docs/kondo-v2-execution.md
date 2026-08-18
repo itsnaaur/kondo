@@ -11664,6 +11664,188 @@ review, now informed by both `3.9`'s real free-CSS artifacts and this task's own
 of how rarely free-composed CSS can be statically proven safe.
 ---
 
+### 3.10a — Rendered contrast validation
+**Timestamp:** 2026-08-19
+**Git SHA at start:** efe1d95
+**Status:** DONE-VERIFIED — full suite green, all ten of `3.9`'s real saved outputs run through the
+real, unmodified, now-async `validateGeneratedHtml`, coverage 99.4% (1056/1062), and — critically —
+run 6 was investigated per this task's own explicit instruction and found to be a genuine, previously
+undetected AA violation, not a bug in the new check. That means this task's own stated prediction
+("run 6... pass") was wrong, reported as such rather than adjusted to fit.
+
+**Authoritative check named directly, per this task's own question.** `checkRenderedContrast`
+(new file, `lib/content/validate-rendered-contrast.ts`) is the gate. `checkEmittedContrast` (`3.10`'s
+static same-rule parser) stays in `validate-generated-html.ts`, still exported, explicitly excluded
+from the failures array `checkContrast` returns — a real, callable, fast pre-pass for whoever wants
+one later, not deleted, not wired into anything today. `validateGeneratedHtml` is now `async`; its
+one real production call site (`generate-page.ts`) now awaits it.
+
+**How it measures, per the task's four numbered points.** Playwright renders the real page in
+headless Chromium (`page.setContent`), then `page.evaluate` walks `document.body.querySelectorAll("*")`
+inside the real browser, keeping only elements with their own direct (non-descendant) text node
+children, and reads real computed `color` plus an `effectiveBackground()` that walks up
+`parentElement` checking `getComputedStyle` at each ancestor — `background-image !== "none"` short-
+circuits to "image" (unresolvable), an opaque `background-color` (alpha >= 0.999) resolves to
+"solid", anything else keeps climbing. Real ratios go through the same `contrastRatio` (Task 1.3)
+every other check uses, at 4.5:1, with the standard 1.4.3 large-text exemption (>=24px, or >=18.66px
+bold) dropping the floor to 3:1. Each failure message names the selector (tag + id/first-two-classes,
+up to 4 ancestors), a 60-character text snippet, both real hex colours, and the computed ratio —
+directly actionable, matching point 3 exactly.
+
+**A real, production-affecting bug found only because this task insisted on running against real
+saved files via the real script runner, not just vitest.** The first real run against all ten of
+`3.9`'s saved outputs failed identically on every single one:
+`ReferenceError: __name is not defined` inside `page.evaluate(collectFindings)` — despite this exact
+function passing all 9 of its own new vitest tests moments earlier. Diagnosed by hand, not guessed:
+a minimal repro (`npx tsx` printing `collectFindings.toString()`) showed `tsx`'s esbuild transform
+rewrites every nested named function declaration into
+`function foo(){...} __name(foo,"foo");` — a call to a helper esbuild injects at MODULE scope in
+this process, invisible inside the isolated string Playwright serialises into the browser. A local
+shim declaration (`const __name = (fn) => fn`) does NOT fix it — esbuild detects the collision and
+silently renames the user's own binding to `__name2`, confirmed directly in a second repro. The real
+fix, confirmed against a live `chromium.launch()` before touching the production file: one extra
+`page.evaluate(() => { globalThis.__name ??= (fn) => fn; })` call before evaluating
+`collectFindings`, run once per render. **This matters beyond this one function: `scripts/worker.ts`
+— the actual production entry point — runs under the exact same `tsx` transform this bug came from,
+and this exact crash would have shipped, converted to a clean validation failure every single time
+rather than a crash (the try/catch from the earlier robustness pass absorbed it), silently failing
+every real page's contrast gate in production while all 54 unit tests stayed green.** Vitest's own
+transform does not apply the same rewrite, which is exactly why the unit suite never caught it — a
+concrete instance of why this task's own instruction to validate against real saved files, through
+the real script runner, was correct and non-optional.
+
+**A second real design question, also investigated rather than assumed, found while looking at run
+6 and run 8.** The first working version of `checkRenderedContrast` put unresolvable findings
+(gradient/image backgrounds behind text) into the same `failures` array as genuine, computed,
+below-threshold ratios — which made run 8 fail validation with ZERO real contrast violations, purely
+because three photo captions sit on a `linear-gradient(to top, rgba(17,24,29,0.85), transparent)`
+scrim (a real, deliberate, standard legibility pattern, confirmed by reading run 8's own CSS
+directly). Re-reading the task's own wording: point 2 ("fail below 4.5:1") and point 4 ("if anything
+is still unresolvable, name it") are two different instructions — a failure needs "both colours" and
+"the ratio" (point 3), which an unresolvable case structurally cannot supply. Fixed by splitting
+`RenderedContrastResult` into `failures` (computed, below-threshold, gates validity) and
+`unresolved` (named, reported, does not gate) — the same "rejects a correct page" failure mode this
+whole task exists to fix, just from a second, different cause than `3.10`'s static-analysis
+limitation. Confirmed this was the right split, not a preference: `checkContrast` already only wired
+`rendered.failures` (never a combined list) into the array that determines `valid`.
+
+**Run 6, investigated per this task's own explicit instruction, not assumed clean.** Real,
+independent verification, not read off the failure message alone: `.about-eyebrow`'s base rule sets
+`color:var(--accent); background:var(--mist);` — the validated `accent`-on-`mist` pair, confirmed
+directly via `buildPalette()` + `contrastRatio()` against BC Security's real resolved palette at a
+genuinely safe 4.6993:1. But a more specific nested rule, `.section-head .about-eyebrow{background:
+var(--accent-soft);}`, overrides only the background for three real instances — producing
+`accent`-on-`accentSoft`, a pair `VALIDATED_TEXT_PAIRS` never validates (only `ink`/`inkMuted`-on-
+`accentSoft` are listed), at a real, independently-confirmed 4.476:1 — 0.02 below the 4.5:1 floor.
+**`3.9`'s own narrower same-rule-only tool could not see this**, because the background comes from a
+SEPARATE, more specific CSS rule than the colour declaration — exactly the "hand-composed CSS nests
+selectors" cascade problem this whole task was created to solve, now proven to have caught a real
+bug `3.9`'s own analysis missed, not manufactured one. **Run 6 was not clean. The new check is
+correct. This task's own stated prediction was wrong — reported as such, not adjusted to match.**
+
+**Validated against `3.9`'s real data — all ten real saved outputs, through the real, unmodified,
+now-async `validateGeneratedHtml`, plus a direct `checkRenderedContrast` call per run for coverage
+reporting:**
+```
+run 1:  valid=false  section-markers(1) [pre-existing, unrelated to contrast]      coverage 114/114
+run 2:  valid=true                                                                  coverage 107/107
+run 3:  valid=false  contrast(2) [inline-style bans]              unresolved(1)     coverage  99/100
+run 4:  valid=true                                                                  coverage 104/104
+run 5:  valid=false  section-markers(1), contrast(15) [accent-on-accentSoft 4.48:1] coverage 113/113
+run 6:  valid=false  contrast(3)  [accent-on-accentSoft 4.48:1]   unresolved(1)     coverage 109/110
+run 7:  valid=false  contrast(1)  [accent-on-deepSoft 2.99:1]                       coverage 110/110
+run 8:  valid=true                                                unresolved(3)     coverage  83/86
+run 9:  valid=false  contrast(7)  [#368ec9-on-#1f282e 4.19:1]                       coverage 109/109
+run 10: valid=false  contrast(4)  [2 inline-style bans, 4.48:1, 2.99:1] unresolved(1) coverage 108/109
+
+Aggregate coverage: 1056/1062 = 99.4%
+```
+Run 2 and run 4 pass outright. Run 8 now correctly passes too (it only ever failed on unresolvable
+gradient captions, never a real ratio — the `failures`/`unresolved` split above fixes exactly this).
+All four of `3.9`'s original real AA failures reproduced exactly by pair and ratio (`4.48:1`
+accent/accentSoft in run 5, `2.99:1` accent/deepSoft in run 7, `4.19:1` in run 9, `2.99:1` in run 10)
+— plus the rendered check catches three more real instances of the SAME accent/accentSoft bug in run
+6 and one more in run 10 that neither `3.9` nor `3.10`'s static parser saw, because all of them are
+caused by a cascade override no same-rule text scan can resolve.
+
+**Files created/modified:**
+```
+$ git status --porcelain -- lib/content/validate-rendered-contrast.ts lib/content/validate-generated-html.ts lib/content/validate-generated-html.test.ts lib/content/generate-page.ts
+?? lib/content/validate-rendered-contrast.ts
+ M lib/content/validate-generated-html.ts
+ M lib/content/validate-generated-html.test.ts
+ M lib/content/generate-page.ts
+```
+
+**Verification commands and output:**
+```
+$ npx vitest run
+ Test Files  20 passed (20)
+      Tests  340 passed | 1 todo (341)
+
+$ npm run lint
+(clean — also removed one real pre-existing unused import, `VALIDATED_TEXT_PAIRS`, in
+validate-generated-html.ts, found by this same lint run)
+
+$ npx tsx lib/design/build/validate-contrast.ts
+SUMMARY: 191/191 palettes fully AA-passing across all 12 checked pairs.
+(unaffected — confirms the accent/accentSoft failure above is a real MODEL cascade-override bug in
+the ten free-CSS runs, not a defect in the design system's own validated-pairs table)
+
+$ npm run build
+✓ Compiled successfully
+```
+
+**Cost — real, measured, not estimated.** `checkRenderedContrast` alone (browser launch + render +
+evaluate, the actual work `GENERATE_PAGE` pays once per validation call): 315-706ms across the ten
+real runs, mean 405ms. The `validateGeneratedHtml: Xms` figures in the table above are higher (401-
+881ms, mean 631ms) only because the verification script calls `checkRenderedContrast` a SECOND,
+separate time per run purely for its own coverage reporting — each call launches its own browser.
+Production only ever calls it once, inside `validateGeneratedHtml`, so 405ms mean is the real added
+cost per `GENERATE_PAGE` call, not the higher combined figure. One fresh `chromium.launch()` per
+call, matching `lib/crawl/crawler.ts`'s own real per-operation pattern; reusing one browser across
+`generate-page.ts`'s own up-to-3 retries is a disclosed, real optimisation this task did not
+implement.
+
+**Failures, retries and dead ends:** the `__name is not defined` bug (real, production-affecting,
+diagnosed via two hand-written repro scripts against real `tsx` compilation before touching
+production code, fixed with a one-line shim, both repros deleted after use); the unresolvable-as-
+hard-failure design bug found via run 8's own real CSS (fixed by splitting `failures`/`unresolved`,
+one test updated to match, 54/54 still green); two throwaway verification scripts
+(`scripts/tmp-3.10a-validate-3.9-runs.ts`, `scripts/tmp-3.10a-verify-accent-mist.ts`) used to produce
+every real number in this entry, deleted after use per this session's own convention.
+
+**Shortcuts taken:** gradient/image backgrounds are reported as named, non-gating `unresolved`
+findings rather than resolved via real pixel sampling (e.g. a canvas screenshot read at the text's
+own position) — a real, disclosed limitation, not a silent gap, and consistent with the task's own
+point 4 ("if anything is still unresolvable, name it").
+
+**Deviations from the task spec:** none of the four numbered points, none of the "validate against
+the same ten outputs" instruction. The one real deviation from what the task predicted — "run 6...
+pass" — was investigated exactly as instructed ("if run 6 fails... investigate before reporting") and
+found to be a wrong prediction, not a wrong check; reported as such rather than silently adjusted.
+
+**Not run / not verified:** whether real pixel sampling (rendering to a canvas and reading the actual
+painted colour under text, rather than declining to resolve gradient/image backgrounds) would close
+the remaining ~0.6% coverage gap — named here as a real next step for whoever wants full coverage on
+gradient-scrim captions, not attempted in this task's own scope. Browser-reuse-across-retries, named
+in this same entry's own cost section, also not implemented.
+
+**Confidence:** High. The `__name` bug and its fix were confirmed against a real, live
+`chromium.launch()` before being applied to production code, not inferred from reading esbuild's
+documentation. The run 6 finding is independently cross-checked two ways — the real rendered ratio
+(4.476:1) and a fully independent `contrastRatio()` computation against `buildPalette()`'s own real
+resolved hex values (also 4.476:1 for the actual painted pair, vs. 4.699:1 for the pair the base CSS
+rule alone would suggest) — not read off one code path's own self-report. The one place confidence is
+lower: whether 99.4% coverage and a 405ms mean cost generalise beyond this one client's real palette
+and these ten specific free-CSS samples, since free-CSS generation itself remains an experiment
+(`3.9`), not something wired into the pipeline.
+
+**Next task:** holding — same as `3.10`'s own entry: no next step specified, `3.8`'s sign-off still
+waits on the human's review. If free-CSS generation is ever adopted for real, `checkRenderedContrast`
+is now the real, working, honestly-measured gate it would run behind.
+---
+
 # PART E — For the human reviewing this log
 
 Signs the log is not trustworthy, worth scanning for:
