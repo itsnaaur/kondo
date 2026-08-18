@@ -11481,6 +11481,189 @@ artifacts now in hand to make it.
 `3.8` sign-off decision, not a task with its own follow-on.
 ---
 
+### 3.10 — Rewrite the contrast check to validate emitted CSS
+**Timestamp:** 2026-08-19
+**Git SHA at start:** dfa3c52
+**Status:** DONE-VERIFIED — full suite green, all ten of `3.9`'s real saved outputs run through the
+real (not re-implemented) validator, every one of `3.9`'s own four real AA failures reproduced
+exactly, coverage computed and reported honestly.
+
+**1/2 — lifted, not rewritten from memory.** `checkEmittedContrast` (new, exported) is `3.9`'s own
+`analyzeOwnContrast` logic, reconstructed from this log's own verbatim record of that script (the
+throwaway file itself was deleted per that task's own instruction, but every version of it passed
+through an `Edit` tool call in this same conversation, so the algorithm was lifted from that real
+record, not re-derived from a description of what it did). Resolves every declared colour by
+`var(--role)` identity, never by reversing a hex back to a role — `3.9`'s own investigation found
+several DISTINCT `Palette` roles legitimately share an identical hex for a real client (`paper`/
+`accentInk`/`onSecondary`/`onDestructive` can all be `#ffffff` at once; `ring` equals `accent`),
+which makes a hex→role reverse lookup ambiguous by construction, not a fixable bug in the lookup —
+`3.9`'s own first analysis draft made exactly this mistake and had to correct it; this task did not
+repeat it. Every ratio computed via the real `contrastRatio` (Task 1.3), same function
+`checkSurfaceClassContrast` already used, not a second implementation.
+
+**3 — untraceable colours are rejected.** A literal hex/`var()` that doesn't resolve to a real
+palette value fails outright, "regardless of what ratio it would compute to" — the identical shape
+the existing inline-style ban already used, extended to the emitted-CSS path. **Correction to this
+task's own framing, checked directly rather than assumed:** `3.9`'s run 10 used an inline
+`style="color:#ffffff;..."` — but `#ffffff` genuinely IS one of BC Security's real palette values
+(`paper` and `accentInk` are both `#ffffff` for this client, confirmed by printing the real
+resolved palette directly). Run 10's real violation is that it used a literal hex value INSIDE AN
+INLINE STYLE rather than referencing the palette via a variable in the stylesheet — already caught
+by the pre-existing inline-style ban, unrelated to this task's new "untraceable" logic. Confirmed
+directly: `grep`ing all ten real validation runs for this task's own "does not match any colour in
+this client's real palette" message returns zero matches — **none of the ten real 3.9 outputs
+actually exercises the untraceable-colour path**, because no run happened to invent a hex that
+didn't coincidentally match this client's own palette. The logic is real and implemented (`§3` of
+this task), but proven by four new crafted tests, not by real data — stated plainly rather than
+implied by the real-data run alone.
+
+**4 — coverage reported, unresolvable treated as findings, not passes.** Every declaration counts
+toward `total` the moment a `color:` is found (after skipping `inherit`/`currentColor`, which
+declare no new colour, and the known-safe nested-utility shape below); it only counts toward
+`resolved` if a real ratio was actually computed. `ContrastCoverage` (`{resolved, total}`) is
+exported specifically so this number is reportable independently of the boolean `ValidationResult`
+— constraint 4 asks for it reported, not folded silently into pass/fail.
+
+**Kept as a branch, not replaced — the explicit question this task asked, answered with a real
+conflict found while implementing, not a preference.** `generate-stylesheet.ts`'s own scoped
+utilities (`.text-muted`, `.text-accent`, `.btn--outline`) are safe by SELECTOR NESTING under one
+specific ancestor `.surface-*` class, not by same-rule co-declaration — `checkEmittedContrast` only
+resolves same-rule pairs, so without an explicit exemption it flags every one of those three real,
+already-safe utilities as unresolvable the moment a real stylesheet reaches it. Confirmed directly,
+not assumed: this exact regression fired against a real `generateStylesheet()` output the first
+time this task's own test suite ran, before `NESTED_UTILITY_SKIP_RE` was added. Reimplementing real
+CSS cascade/selector resolution to subsume that one nesting pattern generally would be a materially
+larger, riskier task than this one's own scope — so `checkSurfaceClassContrast` stays, unchanged,
+handling exactly that one known-safe shape, and `checkEmittedContrast` runs alongside it (both
+contribute to the same `"contrast"` check id) for everything else. `NESTED_UTILITY_SKIP_RE` mirrors
+`generate-stylesheet.test.ts`'s own `SAFE_NESTED_SELECTOR` allow-list exactly — the same three
+names, not a fourth hand-copied list.
+
+**Validated against `3.9`'s real data — all ten real saved outputs, through the real, unmodified
+`validateGeneratedHtml`, not a re-implementation:**
+```
+run 1:  valid=false  section-markers(1), contrast(34)  coverage 7/41
+run 2:  valid=false  contrast(30)                       coverage 6/36
+run 3:  valid=false  contrast(36)                        coverage 4/38
+run 4:  valid=false  contrast(32)                        coverage 8/40
+run 5:  valid=false  section-markers(1), contrast(28)   coverage 8/35
+run 6:  valid=false  contrast(23)                        coverage 8/31
+run 7:  valid=false  contrast(29)                        coverage 14/42
+run 8:  valid=false  contrast(28)                        coverage 7/35
+run 9:  valid=false  contrast(32)                        coverage 6/37
+run 10: valid=false  contrast(32)                        coverage 6/35
+
+Aggregate coverage: 74/370 = 20.0%
+```
+
+**Both required catches, confirmed directly in the real output, not assumed from the code reading
+correct:**
+```
+run 7:  .why-head .section-label: text "var(--accent)" on background "var(--deep-soft)"
+        contrasts at 2.99:1 — below the 4.5:1 minimum.
+run 10: .why .about-label: text "var(--accent)" on background "var(--deep-soft)"
+        contrasts at 2.99:1 — below the 4.5:1 minimum.
+run 10: Inline style="color:#ffffff;border-color:rgba(255,255,255,0.3);" sets a colour/
+        background — colour must come only from the class vocabulary.
+```
+All four of `3.9`'s own real AA failures reproduced exactly, not just the two 2.99:1s specifically
+named:
+```
+run 5: .service-tag: ... contrasts at 4.48:1 — below the 4.5:1 minimum.
+run 7: .why-head .section-label: ... contrasts at 2.99:1 — below the 4.5:1 minimum.
+run 9: .why-head .section-label: ... contrasts at 4.19:1 — below the 4.5:1 minimum.
+run 10: .why .about-label: ... contrasts at 2.99:1 — below the 4.5:1 minimum.
+```
+
+**"Any disagreement is a bug in one of them, so say which" — answered directly.** `3.9`'s own
+narrower analysis (the throwaway script this logic was lifted from) reported a rough "6/10 pass the
+existing validator" figure — the real, updated validator reports 10/10 fail. **This is not a
+disagreement to attribute as a bug in either tool — it is the deliberate, instructed consequence of
+closing exactly the gap this task exists to close.** `3.9`'s own script only ever examined
+same-rule co-declared pairs and silently skipped everything else (disclosed at the time as a real
+limitation: `"only same-rule co-declarations are analyzable this way"`); the production validator,
+per this task's own constraint 4, does not skip them anymore. Every run failed primarily because
+most of its real, hand-composed CSS uses ordinary selector nesting (`.hero h1 { color: ... }`, with
+`.hero`'s own background declared in a separate rule) — a pattern this check cannot verify without
+full cascade resolution, and per instruction, cannot silently pass either. Stated as the real,
+sometimes uncomfortable consequence of the instruction as given, not softened to make the number
+look better.
+
+**A real bug in this task's own first test draft, caught by the test itself, fixed before
+shipping.** A crafted test claimed to reproduce `3.9`'s own exact `2.99:1` finding using this test
+file's own `REAL_PALETTE` fixture (derived from `#2563eb`) — but `3.9`'s real `2.99:1` figure came
+from BC Security's own real palette (hue 204), a different input producing a different real number
+(`2.14:1` for this fixture). Fixed by asserting the real mechanism (a genuinely computed ratio below
+4.5:1) rather than a specific number that depends on which palette produced it — the exact `2.99:1`
+figure is confirmed instead by this task's own real 10-file run above, against the real palette that
+actually produced it.
+
+**New tests:** 12 new tests in `lib/content/validate-generated-html.test.ts`, one per constraint
+this task names plus the real regressions found while building it — a safe co-declared pair passes;
+a real, computed sub-4.5 ratio fails with the actual number; the same real shape `3.9` found twice
+(accent-on-deepSoft); an untraceable literal hex is rejected outright; a `var()` naming a non-real
+role is rejected; a colour with no co-declared background is a finding, not a pass; a gradient
+background is a finding; `transparent` is a finding; `inherit`/`currentColor` are skipped entirely
+(not counted toward coverage's total, not a finding); the known-safe nested-utility shape is
+exempted, not double-flagged; a real `generateStylesheet()` output resolves every co-declared pair
+safely with no regression; last-declaration-within-one-rule wins, matching real CSS cascade
+semantics.
+
+**Files created/modified:**
+```
+$ git status --porcelain -- lib/content/validate-generated-html.ts lib/content/validate-generated-html.test.ts
+ M lib/content/validate-generated-html.ts
+ M lib/content/validate-generated-html.test.ts
+```
+
+**Verification commands and output:**
+```
+$ npx tsc --noEmit && npm run lint && npx vitest run
+ Test Files  20 passed (20)
+      Tests  335 passed | 1 todo (336)
+(323 -> 335: +12 real new tests, matches exactly what this task added — no regression in any of
+the other 37 pre-existing tests in this same file, confirming the nested-utility exemption works)
+
+$ npx tsx lib/design/build/validate-contrast.ts
+SUMMARY: 191/191 palettes fully AA-passing across all 12 checked pairs.
+(unaffected — this task changed no palette-derivation code)
+
+$ npm run build
+✓ Compiled successfully
+```
+
+**Failures, retries and dead ends:** the real test bug above (wrong palette, overclaimed an exact
+ratio) — caught by the test's own assertion failing, fixed before the suite was reported green; a
+dead, no-op loop left over from an earlier draft of the nested-utility skip logic, caught on
+self-review before running any test at all.
+
+**Shortcuts taken:** none.
+
+**Deviations from the task spec:** none — every one of the four numbered constraints implemented,
+`checkSurfaceClassContrast` kept as an explicit, justified branch (not replaced), validated against
+`3.9`'s real ten outputs rather than crafted fixtures alone, coverage computed and reported.
+
+**Not run / not verified:** whether hard-failing every unresolvable declaration is the right
+LONG-TERM policy if free-CSS generation were ever actually adopted (as opposed to the right policy
+for THIS task, which is unambiguous) — a real design question this task's own scope doesn't answer.
+At 20% real coverage, a hard-fail policy makes near-certain rejection the default outcome for any
+CSS that doesn't co-declare colour and background on every single text-bearing selector, which is a
+demanding constraint on how CSS must be written, not just a safety net for genuine mistakes. Named
+here as a real, open question for whoever makes that adoption call, not resolved unilaterally by
+loosening the check to produce a more comfortable pass rate.
+
+**Confidence:** High. Every number reported is either a direct, real computation
+(`contrastRatio` against a real resolved palette) or a real pass/fail from running the actual,
+unmodified `validateGeneratedHtml` against real saved files — nothing here is inferred or
+estimated. The "10/10 fail, 20% coverage" result is the most important number in this entry and
+also the least likely to be quietly walked back: it is exactly what the task's own instruction
+should produce once a check stops silently skipping what it cannot verify.
+
+**Next task:** holding — no next step specified; `3.8`'s own sign-off still waits on the human's
+review, now informed by both `3.9`'s real free-CSS artifacts and this task's own real measurement
+of how rarely free-composed CSS can be statically proven safe.
+---
+
 # PART E — For the human reviewing this log
 
 Signs the log is not trustworthy, worth scanning for:
