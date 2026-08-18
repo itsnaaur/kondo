@@ -35,9 +35,9 @@ const REAL_CSS = generateStylesheet({
 });
 
 const ALLOWED_IMAGES: ManifestImage[] = [
-  { assetId: "logo", url: "https://example.com/logo.png", role: "logo", widthPx: 200, heightPx: 60, subject: "graphic", altText: "Acme logo" },
-  { assetId: "hero", url: "https://example.com/hero.jpg", role: "hero", widthPx: 1600, heightPx: 900, subject: "exterior", altText: "Storefront" },
-  { assetId: "team", url: "https://example.com/team.jpg", role: "team", widthPx: 800, heightPx: 800, subject: "people", altText: "The team" },
+  { assetId: "logo", url: "https://example.com/logo.png", role: "logo", widthPx: 200, heightPx: 60, subject: "graphic", altText: "Acme logo", focalPoint: { x: 0.5, y: 0.5 } },
+  { assetId: "hero", url: "https://example.com/hero.jpg", role: "hero", widthPx: 1600, heightPx: 900, subject: "exterior", altText: "Storefront", focalPoint: { x: 0.5, y: 0.4 } },
+  { assetId: "team", url: "https://example.com/team.jpg", role: "team", widthPx: 800, heightPx: 800, subject: "people", altText: "The team", focalPoint: { x: 0.5, y: 0.3 } },
 ];
 
 const BASE_INPUT: ValidateGeneratedHtmlInput = {

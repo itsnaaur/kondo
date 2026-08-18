@@ -181,3 +181,56 @@ describe("CLASS_VOCABULARY — the contract with Task 3.4", () => {
     }
   });
 });
+
+// Task 3.7c — composition vocabulary harvested from lib/templates/{atlas,ledger,showcase}/
+// styles.ts before 3.8 deletes them. Grid, split, stat, media-*, obj-* are all new; none of them
+// may declare `color` or `background`, per this task's own guard ("stays at 191/191" / 3.5's own
+// colour-safety test) — verified directly here, not just inferred from the shared
+// colorDeclaringSelectors scan above (which would already catch a violation, but a class-specific
+// check pins down exactly which new rule would be at fault if one ever regressed).
+describe("generateStylesheet — Task 3.7c: harvested composition vocabulary", () => {
+  const css = generateStylesheet(REAL_HUE_INPUT);
+  const NEW_CLASSES = [
+    ".grid", ".split", ".stat",
+    ".media-16-9", ".media-4-3", ".media-1-1", ".media-3-4",
+    ".obj-top", ".obj-bottom", ".obj-left", ".obj-right",
+  ];
+
+  it("every new class is documented in CLASS_VOCABULARY", () => {
+    const documented = new Set(CLASS_VOCABULARY.map((c) => c.className));
+    for (const cls of NEW_CLASSES) expect(documented.has(cls), `${cls} not documented`).toBe(true);
+  });
+
+  it("every new class's CSS rule is present in the generated stylesheet", () => {
+    for (const cls of NEW_CLASSES) {
+      const selector = cls.replace(".", "\\.");
+      expect(new RegExp(`${selector}[\\s,{]`).test(css), `${cls} rule not found`).toBe(true);
+    }
+  });
+
+  it("none of the new classes declare `color` or `background` — pure layout/shape/position modifiers", () => {
+    // Scoped to just this task's own new block, not the whole file (the pre-existing .card/.pill/
+    // .img section above this one already proves the same property for the older classes).
+    const block = css.slice(css.indexOf("Task 3.7c: composition vocabulary harvested"));
+    expect(block).not.toMatch(/(?<![-a-z])color\s*:/);
+    expect(block).not.toMatch(/(?<![-a-z])background\s*:/);
+  });
+
+  it(".media-* classes each set a distinct aspect-ratio and read the shared --obj-x/--obj-y position", () => {
+    expect(css).toMatch(/\.media-16-9\s*\{\s*aspect-ratio:\s*16\s*\/\s*9;\s*\}/);
+    expect(css).toMatch(/\.media-4-3\s*\{\s*aspect-ratio:\s*4\s*\/\s*3;\s*\}/);
+    expect(css).toMatch(/\.media-1-1\s*\{\s*aspect-ratio:\s*1\s*\/\s*1;\s*\}/);
+    expect(css).toMatch(/\.media-3-4\s*\{\s*aspect-ratio:\s*3\s*\/\s*4;\s*\}/);
+    expect(css).toMatch(/object-position:\s*var\(--obj-x\)\s*var\(--obj-y\)/);
+  });
+
+  it("--obj-x/--obj-y default to centred (50% 50%) in :root, moved only by the .obj-* modifiers", () => {
+    const rootBlock = /:root\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(rootBlock).toMatch(/--obj-x:\s*50%;/);
+    expect(rootBlock).toMatch(/--obj-y:\s*50%;/);
+    expect(css).toMatch(/\.obj-top\s*\{\s*--obj-y:\s*18%;\s*\}/);
+    expect(css).toMatch(/\.obj-bottom\s*\{\s*--obj-y:\s*82%;\s*\}/);
+    expect(css).toMatch(/\.obj-left\s*\{\s*--obj-x:\s*18%;\s*\}/);
+    expect(css).toMatch(/\.obj-right\s*\{\s*--obj-x:\s*82%;\s*\}/);
+  });
+});

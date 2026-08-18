@@ -118,6 +118,26 @@ export const CLASS_VOCABULARY: { className: string; description: string }[] = [
   { className: ".card--elevated", description: "Modifier on .card — swaps the flat border for a stronger drop shadow." },
   { className: ".img", description: "Applies the resolved image corner radius. Put on <img> tags." },
   { className: ".pill", description: "Small rounded badge/tag shape. Sets no colour of its own — pair with a .surface-* class." },
+  // Task 3.7c. Harvested from the three now-doomed templates' own composition CSS (lib/templates/
+  // {atlas,ledger,showcase}/styles.ts) before 3.8 deletes them — see this task's own log entry for
+  // the full inventory. Expressed against these same resolved tokens, not the templates' hardcoded
+  // values, and under new semantic names, never the templates' own BEM classes (.at-*/.tl-*/.sc-*
+  // were template-specific markup structure, not a vocabulary this model should inherit). None of
+  // these six set `color`/`background` — every one is either pure layout (.grid, .split), pure
+  // shape (.media-*), or a CSS custom-property modifier that only takes effect on a .media-*
+  // element (.obj-*) — so the 191-palette contrast gate and 3.5's structural colour-safety check
+  // are untouched by construction, the same way .card/.pill already were.
+  { className: ".grid", description: "Responsive multi-column grid. Wraps a row of .card items (a service/feature card grid), logo tiles (a trust strip), or .stat items (a stat row) into columns that reflow down to one on narrow screens." },
+  { className: ".split", description: "Even two-column layout for paired content — a CTA panel (ask + contact details), an about section (copy + image), anything that reads as two blocks side by side. Collapses to one column on narrow screens." },
+  { className: ".stat", description: "A single statistic. Apply to a <dl> containing exactly one <dt> (the number, e.g. \"200+\") and one <dd> (its label, e.g. \"Projects completed\"). Put several inside a .grid for a stat row." },
+  { className: ".media-16-9", description: "Crops an <img> to a 16:9 frame, filling it (the image is cropped, never distorted). Use for wide hero/feature photography." },
+  { className: ".media-4-3", description: "Crops an <img> to a 4:3 frame, filling it. Use for standard landscape photography." },
+  { className: ".media-1-1", description: "Crops an <img> to a square frame, filling it. Use for logo tiles, headshots, or a uniform gallery grid." },
+  { className: ".media-3-4", description: "Crops an <img> to a 3:4 portrait frame, filling it. Use for team headshots or portrait-oriented photography." },
+  { className: ".obj-top", description: "Combine with a .media-* class: shifts that image's visible crop toward its top edge instead of centring it. Use when the image manifest's focalPoint.y for that image is below ~0.33." },
+  { className: ".obj-bottom", description: "Combine with a .media-* class: shifts that image's visible crop toward its bottom edge. Use when the image manifest's focalPoint.y for that image is above ~0.66." },
+  { className: ".obj-left", description: "Combine with a .media-* class: shifts that image's visible crop toward its left edge. Use when the image manifest's focalPoint.x for that image is below ~0.33." },
+  { className: ".obj-right", description: "Combine with a .media-* class: shifts that image's visible crop toward its right edge. Use when the image manifest's focalPoint.x for that image is above ~0.66. Omit every .obj-* class when a focalPoint is centred (~0.33-0.66 on both axes) or null." },
 ];
 
 export function generateStylesheet(input: StylesheetInput): string {
@@ -154,6 +174,8 @@ export function generateStylesheet(input: StylesheetInput): string {
   --band-multiplier: ${t.bandMultiplier};
   --maxw: ${MAXW_DEFAULT};
   --gutter: ${GUTTER_DEFAULT};
+  --obj-x: 50%;
+  --obj-y: 50%;
 }
 
 body {
@@ -250,5 +272,59 @@ p { margin: 0; }
   padding: 0.3em 0.9em;
   border-radius: var(--radius-pill);
 }
+
+/* ---------- Task 3.7c: composition vocabulary harvested from the doomed templates ----------
+   Grid, split, stat, media, obj-* — none of these declare color or background, so they need no
+   entry in the 12-pair validated-text-pairs correspondence and cannot affect the 191-palette
+   contrast gate. See CLASS_VOCABULARY above for the full per-class contract with 3.4. ---------- */
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
+  gap: clamp(16px, 2.4vw, 28px);
+}
+
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: clamp(24px, 4vw, 64px);
+  align-items: center;
+}
+@media (max-width: 720px) {
+  .split { grid-template-columns: minmax(0, 1fr); }
+}
+
+.stat dt {
+  margin: 0;
+  font-size: clamp(2rem, 4vw, 3rem);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+.stat dd {
+  margin: 0.5em 0 0;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+/* Fixed-ratio, filled crop. object-position reads --obj-x/--obj-y, which default to centred
+   (50% 50%, set in :root above) and are only ever moved by the .obj-* modifiers below — so a
+   .media-* image with no .obj-* class behaves exactly like a plain object-fit: cover crop. */
+.media-16-9, .media-4-3, .media-1-1, .media-3-4 {
+  width: 100%;
+  height: auto;
+  display: block;
+  object-fit: cover;
+  object-position: var(--obj-x) var(--obj-y);
+}
+.media-16-9 { aspect-ratio: 16 / 9; }
+.media-4-3 { aspect-ratio: 4 / 3; }
+.media-1-1 { aspect-ratio: 1 / 1; }
+.media-3-4 { aspect-ratio: 3 / 4; }
+
+.obj-top { --obj-y: 18%; }
+.obj-bottom { --obj-y: 82%; }
+.obj-left { --obj-x: 18%; }
+.obj-right { --obj-x: 82%; }
 `;
 }

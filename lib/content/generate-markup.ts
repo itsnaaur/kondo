@@ -157,6 +157,13 @@ export type ManifestImage = {
   // Doubles as alt text, per classify-images.ts's own ImageClassification.caption comment —
   // reused here for exactly that purpose, not a separate field this module invents.
   altText: string | null;
+  // Task 3.7c. 1.8's classify-images.ts computes this (normalised 0-1, image's main visual
+  // interest) for every classified image and it has sat unused ever since — buildImageManifest
+  // below read subject/caption off the same classification object but dropped focalPoint on the
+  // floor. Threaded through now so the model can pick a .obj-top/.obj-bottom/.obj-left/.obj-right
+  // modifier instead of every cropped image defaulting to a centred crop regardless of where its
+  // actual subject sits.
+  focalPoint: { x: number; y: number } | null;
 };
 
 // "The image manifest with assigned roles" the task names as an input — this join (Asset URL +
@@ -188,6 +195,7 @@ export function buildImageManifest(
       heightPx: input?.metrics?.height ?? null,
       subject: input?.classification?.subject ?? null,
       altText: input?.classification?.caption ?? null,
+      focalPoint: input?.classification?.focalPoint ?? null,
     });
   }
   return manifest;

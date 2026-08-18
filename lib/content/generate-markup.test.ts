@@ -205,15 +205,29 @@ describe("buildImageManifest — the new Asset+RoleAssignment join", () => {
     expect(manifest.find((m) => m.assetId === "a2")).toBeUndefined();
   });
 
-  it("joins url, role, dimensions, subject, and caption-as-alt-text for a usable asset", () => {
+  it("joins url, role, dimensions, subject, caption-as-alt-text, and focalPoint for a usable asset", () => {
     const manifest = buildImageManifest(inputs, assignments, urlByAssetId);
     expect(manifest).toEqual([
-      { assetId: "a1", url: "https://example.com/a1.jpg", role: "hero", widthPx: 800, heightPx: 600, subject: "exterior", altText: "A storefront" },
+      { assetId: "a1", url: "https://example.com/a1.jpg", role: "hero", widthPx: 800, heightPx: 600, subject: "exterior", altText: "A storefront", focalPoint: { x: 0.5, y: 0.5 } },
     ]);
   });
 
   it("skips an assigned asset with no known URL rather than emitting a broken entry", () => {
     const manifest = buildImageManifest(inputs, assignments, new Map());
     expect(manifest).toEqual([]);
+  });
+
+  // Task 3.7c — focalPoint was silently dropped before; confirm the null-classification case
+  // (metrics-only fallback role assignment, no vision classification at all) degrades to
+  // focalPoint: null rather than throwing or fabricating a value.
+  it("focalPoint is null for a usable asset with no classification", () => {
+    const noClsInputs: RoleAssignmentInput[] = [
+      { assetId: "a3", assetType: "IMAGE", metrics: { width: 900, height: 700, aspectRatio: 1.29, orientation: "landscape", fileSizeBytes: 1, bytesPerPixel: 1, hasAlpha: false, colorEntropy: 5 } as never, classification: null },
+    ];
+    const noClsAssignments: RoleAssignment[] = [{ assetId: "a3", role: "gallery", reason: "no classification; usable dimensions" }];
+    const manifest = buildImageManifest(noClsInputs, noClsAssignments, new Map([["a3", "https://example.com/a3.jpg"]]));
+    expect(manifest).toEqual([
+      { assetId: "a3", url: "https://example.com/a3.jpg", role: "gallery", widthPx: 900, heightPx: 700, subject: null, altText: null, focalPoint: null },
+    ]);
   });
 });
