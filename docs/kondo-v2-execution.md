@@ -9363,6 +9363,207 @@ uncertainty about whether the original "10 vs 9" count reflected a genuinely unm
 **Next task:** not specified — awaiting direction.
 ---
 
+### 3.5 — Output validator
+**Timestamp:** 2026-08-18
+**Git SHA at start:** 5825ead
+**Status:** DONE-VERIFIED — `tsc --noEmit` clean, `lint` clean, full suite 17 files / 275 tests
+passing (239 → 275, exactly the 36 new tests). **8 of build plan §6.5's 8 checks implemented**
+(count of checks implemented against count specified: 8/8) — one (Google Fonts import) only
+implementable as a pure, tested function today, not against real pipeline output, for a real,
+named reason below, not a silently dropped check. Two real findings surfaced against genuine 3.4
+output (not just crafted fixtures), reported rather than smoothed over.
+
+**Parser, and why (constraint 2 — not `auditMarkup`).** New file
+`lib/content/validate-generated-html.ts`, built on two new dependencies (`parse5` `8.0.1`,
+`cheerio` `1.2.0` — added to `package.json`, confirmed via `npm audit` that neither introduces
+any of the 6 pre-existing high-severity advisories in this repo, all of which trace to
+`prisma`/`next`/`sharp`, untouched by this task). `parse5.parseFragment(html, { onParseError })`
+is the real WHATWG HTML5 parsing algorithm — the same one every browser implements — used for
+check 1 (well-formedness); `cheerio.load(html)` gives a real, queryable DOM for every other
+check. Confirmed directly, empirically, before writing any check logic (not assumed): a genuine
+`duplicate-attribute` or `unexpected-null-character` fires a real, named parse5 error; a
+mismatched-but-HTML5-legal closing tag, or a `<!DOCTYPE>` mid-fragment, does not — HTML5's own
+error-recovery algorithm silently repairs almost everything a human would informally call
+"malformed" without ever raising a spec-defined parse error. Stated plainly in the file's own
+header comment so check 1's real, narrower scope isn't oversold. `cheerio.load()` was also
+confirmed empirically to wrap any fragment in an implicit `<html><body>` — `$('body').children()`
+is genuinely every top-level element 3.4 wrote, and only those; a `<section>` three levels deep
+inside an FAQ accordion is correctly excluded. This is the exact distinction `3.4`'s own
+`auditMarkup` (a regex heuristic over the raw string) could not make, and its own log entry named
+as the real, unresolved ambiguity behind the Allen Evans finding — a dedicated test in this
+task's own suite proves the distinction directly (a nested, unmarked `<section>` is NOT flagged;
+a genuinely top-level one is, by name and position).
+
+**The 8 checks, each implemented and each with a crafted-bad-input test (constraint 1):**
+1. **Well-formed HTML** — `parse5` parse errors. Tested against a real duplicate-attribute and a
+   real embedded null character, both confirmed to trigger.
+2. **Every `data-kondo-section` marker present** — every `$('body').children()` element checked;
+   failure names which element (e.g. "2 of 2") and its tag. Tested against a missing marker, and
+   separately proves a nested unmarked `<section>` is correctly ignored.
+3. **No `<script>`/`<iframe>`/`<object>`/`<embed>`/`<form>`/`<meta http-equiv>`, inline event
+   handlers, `javascript:`/`data:` URIs** — one crafted-bad test per banned construct (8 cases in
+   one table-driven test block).
+4. **Every image supplied; none reused; nothing unusable** — whitelist check against 3.4's own
+   `buildImageManifest` output (which already excludes `unusable`-role assets, so "nothing marked
+   unusable" holds by construction of the whitelist, not a separate re-derivation). Tested against
+   an invented URL, a URL used twice, and a URL absent from the whitelist (standing in for an
+   unusable one, exactly as `3.4`'s own manifest would produce).
+5. **Contrast ≥ 4.5:1 on every pair used** — real, independent recomputation against the real
+   resolved `Palette`, not a trust of `3.3`'s own guarantee. Two real failure modes: any inline
+   `style` setting `color`/`background` is rejected outright (no principled way to trust a value
+   that bypasses the class system entirely, regardless of what its actual ratio would be), and a
+   `SURFACE_CLASS_PAIRS` lookup (cross-checked in its own test against `VALIDATED_TEXT_PAIRS`, so
+   it cannot silently name a pair `1.6` never validated) recomputes `contrastRatio` for every real
+   `.surface-*` class found. Tested against a hand-built palette with `ink === paper` — a real
+   computed failure, not a structural assumption.
+6. **Mode coherence** — `isDarkColor(palette.paper)` vs. `styleBundle.mode`, exported and unit-
+   tested directly, not only through the full pipeline (see the dead-end below for why). See
+   constraint 4's own writeup for whether this is reachable against real data today.
+7. **No empty sections** — every `[data-kondo-section]` element checked for zero text AND zero
+   `<img>` descendants (recursive, not just direct children). Tested against an empty section,
+   and confirms an image-only section (no text) is correctly NOT flagged as empty.
+8. **Google Fonts import matches the chosen pairing** — see its own writeup below; implemented and
+   tested as a real function, with a real, disclosed gap in what it can check today.
+
+**Constraint 3 — the interface for 3.4's retry.**
+```ts
+export type ValidationFailure = { check: string; message: string };
+export type ValidationResult = { valid: true } | { valid: false; failures: ValidationFailure[] };
+export function formatFailuresForRetry(failures: ValidationFailure[]): string;
+```
+`formatFailuresForRetry` joins every failure into one string (`"[check] message"` per failure),
+shaped to drop directly into `generate-markup.ts`'s own existing `correctionNote` mechanism —
+tested by literally constructing the exact `` `IMPORTANT: your previous attempt was rejected:
+${note}. Try again, following every rule.` `` string `3.4`'s own retry loop builds, and asserting
+it renders sensibly. Wiring this validator's output into that retry loop for real is later work —
+`3.4`'s own log entry already named "no real caller wired in yet" for the same reason, and this
+task doesn't attempt that wiring either, only defines the interface it would use.
+
+**Constraint 4 — the mode-coherence carry-forward, answered directly, not glossed over.** Not
+reachable against real data today, and for a bigger reason than the task's own framing named.
+The task's own text said "all six style bundles declare light, so no bundle exercises mode
+coherence's failing branch" — true, but investigating this check's OTHER side found it's doubly
+unreachable: `buildPalette()` (`lib/content/normalize-brand-colors.ts`) returns `paper: "#ffffff"`
+as a hardcoded literal, confirmed by reading the source directly — never hue-derived, for any
+input. So even if a dark style bundle existed tomorrow, THIS palette side of the comparison could
+still never independently produce "dark" without a real dark-palette derivation path being built
+first — a real, more surprising finding than "no dark bundle exists yet." A synthetic fixture was
+built exactly as constraint 4 asks for as the alternative: a hand-constructed `Palette` with
+`paper: "#0a0a0a"` against a real style bundle's `mode: "light"` — `checkModeCoherence` fires
+correctly, with the message naming the optometry bug directly. Both directions tested (mismatch
+fails; a hand-built dark palette against a hand-built "dark" mode coheres).
+
+**The Google Fonts check — implemented as specified, but nothing in the real pipeline today
+produces what it checks against, named directly, not quietly softened.** `3.4`'s own system
+prompt forbids head-level content in the model's markup (body-only, by design — confirmed by
+re-reading that file). `3.3`'s `generate-stylesheet.ts` emits `--font-body`/`--font-heading` as
+CSS custom properties holding font-family *names*, never a `<link>`/`@import` to actually load
+the font files. The old, `3.8`-doomed templates solved this via `registry.ts`'s own hardcoded
+`GOOGLE_FONT_LINKS` constant, injected through `renderShell`'s `headExtra` parameter — nothing in
+the new `3.2`→`3.3`→`3.4` pipeline has an equivalent yet. `checkGoogleFontsImport` is real and
+tested (crafted cases: no link, wrong link, matching link — all behave correctly), but calling it
+against `3.4`'s actual real output will always report "missing" until that wiring exists — proven
+directly against real output below, not just argued from reading the code.
+
+**Real end-to-end check against genuine 3.4 output, not just crafted fixtures (one real client,
+Downseal Solutions — a single spot-check, not a full 5-client sweep, given real API cost):**
+```
+generateMarkup: stop_reason=tool_use output_tokens=3439 auditMarkup findings=[]
+
+validateGeneratedHtml result: valid=false
+  [image-provenance] Image ".../logo-from-crawl.webp" is used more than once — each supplied
+  image may appear at most once.
+  [google-fonts-import] No Google Fonts <link> found; expected one matching
+  "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap".
+```
+The Google Fonts finding confirms the disclosed gap directly against real output, not just
+argued from reading the code. **The image finding is new and genuinely worth naming, not a bug in
+this validator — it did exactly what §6.5 literally specifies.** The model reused the client's own
+logo in both the nav and the footer — an entirely ordinary, probably-intended real design
+convention (header + footer logo repeat is common on real marketing pages), not a hallucinated or
+careless duplicate. Build plan §6.5's own wording is "none reused," unqualified — implemented
+literally here, and real output shows that literal reading catches a pattern many real sites do on
+purpose. Not loosened to make this pass: the task's own instruction is to implement every check as
+specified and report what's actually true, not tune the check until real output stops tripping it.
+Flagged here as a real, disclosed tension between the literal spec and a common, likely-legitimate
+markup pattern — a decision for whoever next revisits this check's exact semantics (e.g. "no
+image reused within the same *rendered viewport section*" vs. "no image reused anywhere on the
+page" are different, both defensible rules), not resolved unilaterally in this task.
+
+**Files created/modified:**
+```
+$ git status --porcelain
+ M package-lock.json
+ M package.json
+?? lib/content/validate-generated-html.test.ts
+?? lib/content/validate-generated-html.ts
+```
+
+**Verification commands and output:**
+```
+$ npx tsc --noEmit && npm run lint && npx vitest run
+ Test Files  17 passed (17)
+      Tests  275 passed | 1 todo (276)
+
+$ npm audit --json   (checked before committing to the new dependencies)
+6 high-severity advisories, all pre-existing (prisma/@prisma/config, next/postcss, sharp) —
+none from parse5 or cheerio.
+
+(throwaway script, deleted after use: scripts/_tmp-3.5-verify.ts — the real Downseal Solutions
+end-to-end check above)
+```
+
+**Failures, retries and dead ends — two real bugs, both in this task's own test setup, neither in
+the validator itself:**
+1. The "fully clean concept is valid" test failed on its first run — not a validator bug: the
+   fixture (3.4's own real body-only markup shape) legitimately has no Google Fonts link, so it
+   legitimately fails check 8, exactly as the pipeline gap above predicts. Fixed by splitting the
+   fixture into `CLEAN_BODY_HTML` (3.4's real current shape, which now has its own explicit test
+   proving it fails only `google-fonts-import`) and `CLEAN_FULL_PAGE_HTML` (body plus a real
+   matching font link, standing in for what a future fully-wired page would look like) — not by
+   loosening the "fully clean" test's own definition of clean.
+2. The mode-coherence tests failed for a different real reason: the synthetic dark-`paper`
+   `Palette` used to prove constraint 4 is internally inconsistent by construction (every other
+   role still assumes a light `paper`), so running it through the FULL `validateGeneratedHtml`
+   pipeline also tripped the contrast check — the test failure said `"contrast"`, not
+   `"mode-coherence"`, which is real and correct behaviour, just not what that specific test was
+   trying to isolate. Fixed by exporting `checkModeCoherence` and unit-testing it directly, not by
+   constructing a "more consistent" fake palette that would have hidden a real property of
+   synthetic fixtures (they don't have to obey the internal relationships a real `buildPalette()`
+   output always does).
+
+**Shortcuts taken:** none disclosed beyond the two already-named "can't be implemented against
+real data today" items (mode coherence, Google Fonts), both of which are named directly rather
+than hidden, per the task's own instruction.
+
+**Deviations from the task spec:** none. All 8 checks implemented; every check has a crafted-
+bad-input test; the retry interface is defined and tested; the mode-coherence carry-forward is
+answered with a synthetic fixture exactly as constraint 4 offered as the fallback, plus a real,
+disclosed finding beyond what was asked (the check is unreachable on both sides, not just the
+bundle side).
+
+**Not run / not verified:**
+- No real caller wires `validateGeneratedHtml` into `3.4`'s own retry loop yet — this task defines
+  the interface, later work does the wiring, same scope boundary `3.4`'s own log entry already
+  drew for itself.
+- Only one real client's real 3.4 output was run through this validator end-to-end (Downseal
+  Solutions) — not all five, given real API cost for a check this task's own done-when didn't
+  require a full sweep for. The two real findings above (image reuse, missing font link) are
+  confirmed real for that one client; whether every real client would show the same logo-reuse
+  pattern wasn't checked further.
+- Whether the literal "none reused" reading is the right call long-term, versus a scoped variant
+  (e.g. "no reuse within one section") — named as an open question, not decided here.
+
+**Confidence:** High that all 8 checks are implemented correctly against their own crafted test
+cases, and that the parser choice genuinely solves the top-level/nested ambiguity `3.4`'s own
+finding left unresolved (proven directly, not just argued). High that the two "unreachable against
+real data" findings (mode coherence, Google Fonts) are real and precisely characterized — both
+traced to specific, named, re-read source lines, not inferred. Medium on the image-reuse finding's
+long-term resolution, since it's a genuine judgement call this task surfaced rather than made.
+
+**Next task:** not specified — awaiting direction.
+---
+
 ---
 
 # PART E — For the human reviewing this log
