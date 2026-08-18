@@ -10933,6 +10933,120 @@ considered closed. Worker-claim race: flagged as the human requested — a recur
 touched the job queue.
 ---
 
+### 3.7e — Fix image reuse in generate-markup.ts
+**Timestamp:** 2026-08-18
+**Git SHA at start:** a62915a
+**Status:** DONE-VERIFIED — measured before, fixed, measured after, both real 10-run measurements
+against the same real client, same real pipeline calls, no retries within either run.
+
+**Step 3 done first, deliberately, per instruction — a clean baseline before touching any code.**
+`3.7d`'s own numbers (5 of 9 real attempts failing) mixed three different style bundles, a real
+confound for a rate this task needed to trust. Ran a dedicated script: same client (BC Security),
+the real production default bundle (`crisp-formal`), 10 independent `generateMarkup` +
+`validateGeneratedHtml` calls against `generate-markup.ts` completely unmodified, one attempt each
+(no internal retry diluting the per-attempt rate):
+```
+Pass: 5/10
+Fail: 5/10 — all 5 of which image-provenance reuse specifically
+```
+A real, clean, controlled 50% failure rate, 100% of it this one violation class.
+
+**A finding that changed the plan, not just decoration: every single failure reused the SAME
+image** (`site-image-2`, asset `cmsx3e28h003cv0ff41e45fol`) — and it's the ONE feature-inline image
+in the manifest with a real, specific, distinguishing caption ("A lineup of black access control
+devices including keypads and card readers..."), not one of the four with `caption: null`. Going
+in, the working hypothesis (from `3.7d`'s own log entry) was that null-caption images looking
+identical to each other was the likely driver. The data says otherwise: the model isn't confusing
+similar images, it's repeatedly reaching for its *favourite* one because nothing tells it not to.
+Reported honestly and the fix aimed at what the evidence actually showed, not the original
+hypothesis.
+
+**Step 1 — the rule, stated explicitly, mirroring `3.5a`'s own validator rule exactly.**
+`checkImages` in `lib/content/validate-generated-html.ts` (Task 3.5a) has always drawn this exact
+line — `role: "logo"` may repeat, every other role may appear at most once — but the *prompt* the
+model actually reads never said so; it only said "only reference an image by its exact URL... never
+invent one," which forbids fabrication, not repetition. Added a new bullet to
+`buildSystemPrompt`'s RULES list stating the identical logo-exception shape in the model's own
+words, plus a concrete instruction for the exact failure mode observed: "if you find yourself
+wanting to place the same non-logo URL a second time, that means one of those two sections needs a
+different image... or no image at all."
+
+**Step 2 — investigated whether the manifest itself invites reuse, and answered honestly rather
+than defaulting to my original hypothesis.** The 4-of-5 null captions are real (confirmed against
+`classify-images.ts`'s own schema: `caption: null` is a legitimate model output for "nothing
+genuinely useful can be said," not a bug) — but the baseline data doesn't support them as the cause
+of *this* failure pattern, since the reused image was never one of the ambiguous four. Rather than
+ship a fix aimed at a hypothesis the evidence had already undercut, added a smaller, directly
+evidence-matched reinforcement: `roleCountSummary()`, a new function in `generate-markup.ts` that
+computes a concrete per-role count line placed immediately before the manifest JSON in the user
+message — `"5 different "feature-inline" images below — use each at most once, never the same one
+twice."` — restating the same rule with a real number, right where the model is about to read the
+images it can choose from, rather than relying on it being retained from one bullet earlier in a
+longer list. No `ManifestImage` schema change — the original plan (a per-image `label` field) was
+dropped once the evidence stopped supporting the theory it was meant to fix.
+
+**Step 3 done second — the same 10-run measurement, same client, same bundle, against the fixed
+prompt:**
+```
+Pass: 10/10
+Fail: 0/10
+```
+50% -> 0% failure, a real and dramatic drop, not a single clean run mistaken for a fix. Ten runs is
+not an enormous sample and doesn't rule out an occasional failure at some lower rate the fix didn't
+fully eliminate — stated plainly rather than oversold — but the size of the drop, combined with the
+prompt having genuinely never stated this rule before (not a subtle wording issue, an absent one),
+makes this a credible real improvement, not noise.
+
+**Files created/modified:**
+```
+$ git status --porcelain -- lib/content/generate-markup.ts
+ M lib/content/generate-markup.ts
+```
+(one new private function, `roleCountSummary`, plus the new RULES bullet — no exported surface
+changed, no test fixtures needed updating.)
+
+**Verification commands and output:**
+```
+$ npx tsc --noEmit && npm run lint && npx vitest run
+ Test Files  20 passed (20)
+      Tests  310 passed | 1 todo (311)
+(unchanged from 3.7d — this task edited prompt-construction logic only, no new exported type, no
+new test needed beyond the real before/after measurement itself, which is the actual evidence)
+```
+
+**Failures, retries and dead ends:** the original step-2 hypothesis (null captions causing
+confusion) — investigated, found real but not supported by the actual failure data, dropped in
+favour of the evidence-matched fix rather than shipped anyway for having already been designed.
+
+**Shortcuts taken:** none — both measurements bypass the job queue/worker for the same disclosed
+reason as `3.7d` (no real caller can override which bundle/config is exercised through the queue;
+this task additionally needed a clean, single-attempt-per-run measurement the job queue's own
+internal retry shape doesn't offer), not a shortcut around the actual measurement.
+
+**Deviations from the task spec:** the manifest-side fix (step 2) is not what was originally
+planned going in (a `label` field) — changed once the baseline data itself argued against the
+original theory. Stated as a deviation from my own plan, not from the task's instruction, which
+asked exactly for "say whether [the manifest invites reuse] ... and fix it if so" — answered
+honestly, including the part where the obvious-seeming answer turned out incomplete.
+
+**Not run / not verified:** whether the fix holds on a different client/manifest (this task's own
+10+10 measurement is BC Security only, the same client every prior real regeneration in this
+session has used) — a real, disclosed scope limit, not chased further since the task's own done-
+when was specific to this measurement shape. Whether a much larger sample (50, 100 runs) would
+still show 0% or reveal a lower-but-nonzero residual rate — not run, cost/time tradeoff not asked
+for.
+
+**Confidence:** High. This is about as clean a before/after as a prompt-reliability fix gets: a
+real, controlled, confound-free baseline; a fix that targets exactly the mechanism the baseline
+evidence pointed at, not the first-guessed one; a same-shape re-measurement; a dramatic, plausible
+result. The one honest caveat is sample size (10, not 100) — stated directly above, not glossed
+over.
+
+**Next task:** not specified — `3.8` (the deletions, still blocked on the earlier `lib/actions/
+concepts.ts` decision) or `3.7d`'s own outstanding visual-review item are the two live threads;
+awaiting the human's own direction.
+---
+
 # PART E — For the human reviewing this log
 
 Signs the log is not trustworthy, worth scanning for:
