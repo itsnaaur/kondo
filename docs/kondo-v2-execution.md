@@ -10679,6 +10679,260 @@ this task ("don't touch the style bundles yet"), so it's the natural next step, 
 human's own direction rather than assumed.
 ---
 
+### 3.7d — Re-author the six style bundles
+**Timestamp:** 2026-08-18
+**Git SHA at start:** 4260c3e
+**Status:** DONE-UNVERIFIED. The token audit, the re-authoring, and every guard are real and
+complete. The one item this status withholds is the actual headline deliverable (Phase 2 sign-off
+item 1: "the bundles were never visually reviewed") — my Browser pane cannot composite frames
+this session (confirmed twice more below), so I have not looked at any of these six bundles
+rendered, and per direct instruction this is not marked verified from computed CSS in its place.
+
+**Two notes carried over from the human's own message, applied throughout this entry, not just
+acknowledged here:** `.obj-*` (Task 3.7c) is unit-tested but has never been exercised on real
+output — nothing below calls it verified. The worker-claim race (`3.7a`/`3.7b`/`3.7c`) is now a
+three-time recurrence — framed below as a recurring cost, not chased again this task (this task's
+own real regenerations bypass the job queue/worker entirely regardless — see "shortcuts taken" —
+so the anomaly had no opportunity to fire here either way).
+
+**Step 1 — full audit, reported before any value changed.**
+
+*The real placeholder, confirmed two independent ways.* `blur: "0px"` is literally identical
+across all six bundles — but more than that, `lib/design/generate-stylesheet.ts` has **zero CSS
+rule that reads `--surface-blur` at all** (confirmed by grep: the only line referencing it is the
+`:root` declaration itself). Its only real consumer, ever, was `lib/templates/showcase/styles.ts`'s
+own sticky-nav `backdrop-filter: blur(var(--surface-blur))` — a template `3.8` deletes. This exact
+finding was already independently documented, before this task started: `lib/design/
+resolve-tokens.test.ts`'s own header comment (dated the same Task-2.5 timestamp) names it
+`2.3-CARRY-FORWARD` and states directly, "none of the six bundles actually explored blur as a
+design axis at all." Two independent investigations, today's and the prior task's, converge on the
+same conclusion.
+
+*Two more real, adjacent, dead-or-inert fields — found while auditing, out of this task's own
+named scope (radius/shadow/blur/border/spacing/rhythm), disclosed rather than silently fixed or
+silently ignored:*
+- `focusRingWidth` — only `clinical-precise` declares it; the other five fall back to a hardcoded
+  `"2px"` in `resolve-tokens.ts` itself, not a per-bundle authored value. Not touched — not one of
+  the six named token categories.
+- `minTouchTarget` — `clinical-precise` is the only bundle that declares it, and
+  `resolveTemplateTokens` never reads it at all (confirmed by reading the function's full return
+  object) — dead data with zero effect on any generated output, for any bundle. Not touched.
+- `imageTreatment.radius` — an exact duplicate of `radius.image` in every one of the six bundles,
+  and confirmed by a repo-wide grep to never be independently read (only
+  `imageTreatment.aspectPreference` is consumed, in `generate-markup.ts`'s own
+  `toMarkupDesignInput`). Left as a mirrored duplicate for consistency with today's shape, not
+  fixed — a schema question, not this task's "was this value ever really chosen" question.
+- `mode: "light"` is literally identical across all six bundles, and — unlike blur — **is** a real,
+  consumed value (`validate-generated-html.ts`'s own `styleBundleMode` check). Named as a real,
+  load-bearing finding, deliberately not acted on: introducing a dark bundle is a materially bigger
+  design decision than tuning six numeric tokens (every `.surface-paper`-as-default assumption in
+  `generate-stylesheet.ts` would need re-examining), and "mode" isn't one of the six categories this
+  task was scoped to. Flagged for its own future task, not smuggled into this one.
+
+*Audited and judged NOT placeholder, left unchanged, with reasoning:* `radius.pill: "999px"` is
+shared by five of six bundles — but pill shapes are conventionally near-fully-rounded across
+almost every real design system (a real convention, not an oversight), and the one bundle that
+deliberately departs (`structural-industrial`, `"4px"`, matching its own "squared-off surfaces
+including the credential pills" description) is already correctly differentiated. `radius`/
+`shadow`/`borderWeight` are NOT identical or null across the six bundles at all — each has a real,
+distinct value with its own `harvestedFrom` citation. This is a different, weaker uncertainty than
+blur's, in the exact words `resolve-tokens.test.ts`'s own prior comment already used to describe
+it: "a real distinguishing choice not yet confirmed to look good" — re-audited by rendering, see
+below, not reinvented from nothing.
+
+*"Harvest from the doomed templates again" — investigated three ways, all genuine dead ends for
+new numeric data, reported honestly rather than quietly worked around:*
+1. The templates' own CSS source is a pure token pass-through — grepped all three `styles.ts`
+   files for every `box-shadow`/`blur(`/`backdrop-filter` occurrence: exactly 4 matches, every one
+   `var(--shadow-*)`/`var(--surface-blur)`. Zero hardcoded pixel shadow/blur values exist anywhere
+   in the template source to harvest.
+2. Real historical shipped output doesn't help either — queried every real `Concept` row using
+   `templateKey` in `atlas`/`ledger`/`showcase` (23 real rows, real clients, back to 2026-08-01) and
+   confirmed every single one predates Task 2.4's token system entirely: their `:root` blocks carry
+   `--accent`/`--paper`/`--maxw`/`--band` etc. but **none** of the current `--radius-*`/
+   `--shadow-*`/`--surface-blur` custom properties exist in any of them. There is no real "shipped"
+   render of the current token system to mine.
+3. The external corpus each bundle's own `harvestedFrom` field cites (`uupm styles.csv`, 88 rows)
+   is not present anywhere in this repository (confirmed by file search) — only `docs/
+   uupm-port-audit.md`'s own summary of it survives, and that audit itself rates the file "Partial
+   — Good CSS-variable payloads... 38/88 unreachable by search." I have no way to re-consult the
+   raw source Task 2.3's own author apparently had access to at authoring time.
+
+The only real, available reference points, given all three dead ends, are the six bundles' own
+already-cited `harvestedFrom` reasoning and current values — re-audited against a real render
+(next section), not reinvented from an unreachable source.
+
+**Step 2 — what was actually re-authored, and what was audited and deliberately left alone.**
+
+*Real change: `sectionRhythmMultiplier` widened.* All six values were clustered in a 0.9-1.1 band
+(a 22% spread) despite six distinct qualitative `sectionRhythm` labels (tight/cozy/cozy/loose/airy/
+loose) — too narrow to read as different section rhythm at a glance, the literal bar this task set.
+Widened to a 0.78-1.25 band (a 60% spread), preserving every bundle's own label ordering exactly
+(tight < both cozy < loose/airy):
+```
+structural-industrial (tight):    0.90 -> 0.78
+warm-approachable (cozy):         0.95 -> 0.88
+trusted-established (cozy):       1.00 -> 0.92
+clinical-precise (loose):         1.05 -> 1.10
+grounded-property (airy):         1.00 -> 1.20
+crisp-formal (loose):             1.10 -> 1.25
+```
+At `.section`'s real `padding-block: calc(64px * var(--band-multiplier))`, this is 49.9px vs
+80.0px at the extremes — a real, structurally confirmed 60% difference (measured directly below,
+not just computed from the formula).
+
+*Real correction to my own earlier impression, investigated rather than assumed.* Radius/shadow/
+border-weight were suspected placeholder going into this task — specifically `crisp-formal`'s own
+radius:2px/shadow:none, which I myself had flagged as reading "flat/generic" while investigating
+the human's "is this temporary" question earlier this session. Rendered all six bundles against
+the SAME real markup (BC Security's actual `3.7c` generation, `.grid`/`.split`/`.media-16-9`/
+`.card--elevated` and all — a fast CSS-swap comparison, no repeated AI calls needed for this part)
+and checked computed styles directly: `crisp-formal`'s `.card.card--elevated` (the class the model
+actually reaches for, confirmed in `3.7c`'s own real output) resolves to a real, visible
+`box-shadow: rgba(16, 24, 40, 0.16) 0px 20px 40px -28px` — not flat at all. The earlier "generic"
+impression was the pre-`3.7c` vocabulary gap (a flat bordered list with no `.card`/`.grid` to
+reach for), not a token-value problem — reported plainly rather than left as a stale, uncorrected
+finding. Radius/shadow/border-weight/pill values are **left unchanged** for all six bundles — each
+one's own `harvestedFrom` array in `style-bundles.json` now carries a `Task 3.7d:` line stating
+this conclusion and why, specific to that bundle's own character, not one copy-pasted six times.
+
+*`blur` — left at "0px" for all six, deliberately, reasoning rewritten rather than left silent.*
+Given the confirmed-zero-consumer finding above, authoring six different blur values now would
+mean six invisible, unverifiable numbers — which fails this task's own step 4 ("don't mark it
+verified... ") in a different, worse way than leaving it alone. `resolve-tokens.test.ts`'s own
+header comment (which already tracked this exact gap as `2.3-CARRY-FORWARD`) is rewritten to close
+the loop: both halves of the carry-forward are now resolved, not the same way — radius/shadow/
+border-weight re-audited and kept; blur deliberately deferred to whenever a real translucent-
+surface consumer exists in the surviving system.
+
+**Guards — re-verified for real, not inferred from "I didn't touch colour."**
+```
+$ npx tsx lib/design/build/validate-contrast.ts
+SUMMARY: 191/191 palettes fully AA-passing across all 12 checked pairs.
+```
+No bundle specifies a colour value — confirmed by reading `style-bundles.json`'s full `tokens`
+schema; it has never had a colour field for any bundle, and this task added none.
+`generate-stylesheet.ts`'s own CSS rules (the file `3.5`'s structural colour-safety test scans)
+were not touched at all this task — only the JSON data feeding it and `resolve-tokens.test.ts`'s
+own golden values changed, so that test needed no update and was re-run unmodified.
+
+**Steps 3/4 — real regeneration and structural comparison, real limitation on the "look" step
+disclosed rather than worked around.**
+
+No real production caller can pass an explicit `styleBundleId` today (`generate-page.ts`'s own
+`resolveDesignSystem` call never threads one — confirmed by reading; every real client generation
+resolves to `crisp-formal`, the hard-coded default, 100% of the time, which is itself why every
+real BC Security concept before this task used exactly `crisp-formal`'s values). The only way to
+exercise a non-default bundle for real was a script replicating `generatePageInBackground`'s own
+real internal call sequence (`resolveDesignSystem` -> `generateMarkup` -> `generateStylesheet` ->
+`validateGeneratedHtml` -> `prisma.concept.create`) with one explicit override, bypassing the job
+queue/worker entirely — same shape as `3.7b`'s own script-based verification of
+`startPageGeneration`'s internal logic, same disclosed reason.
+
+**A real, new, out-of-scope finding surfaced by this: 5 of 9 real `generateMarkup` +
+`validateGeneratedHtml` attempts across this task failed on the same real violation** — the model
+reusing a `feature-inline`-role image across two sections, despite BC Security having 5 real
+`feature-inline` images available (confirmed directly, not assumed). Failed on the first attempt
+against `structural-industrial`, then 3/3 against `grounded-property`, then 3/3 against
+`warm-approachable` — confirmed NOT bundle-specific (it recurred across three different bundles).
+Read `generate-markup.ts`'s own system prompt directly: it says "only reference an image by its
+exact URL from that manifest, never invent one" but never says "don't reuse the same image twice"
+— `3.5a`'s own logo-reuse fix scoped the *validator's* uniqueness check to non-logo roles, but
+nothing in the *prompt* was ever updated to tell the model that rule exists. A real, disclosed gap
+in `generate-markup.ts`'s own prompt, not this task's to fix (out of "re-author the six style
+bundles"' own scope) — named for a future task. Routed around it pragmatically: retried with a
+higher attempt ceiling (6, vs. the standard 3) until two bundles produced a clean pass.
+
+**Two real regenerations, chosen for maximum contrast:**
+```
+structural-industrial: Concept cmsyc79de0000k8ffubgf3fb3 | htmlLen=16305 (succeeded, attempt 2/3)
+grounded-property:     Concept cmsycfy280000gcff08hehgpl | htmlLen=16858 (succeeded, attempt 3/6)
+```
+Structural comparison, measured directly via `javascript_tool` computed styles against the real
+rendered HTML (not read off the JSON source):
+```
+                        structural-industrial    grounded-property
+.card border-radius     2px                      8px
+.card box-shadow        none                     rgba(16,24,40,0.2) 0 18px 40px -22px
+.btn border-radius      2px                      3px
+.pill border-radius     4px                      999px
+.section padding-top    49.92px                  76.8px
+page height             3004px                   3789px
+```
+Real, measurable, structural confirmation that the two bundles produce different output for the
+same real client and the same real 3.7c vocabulary — genuinely differentiated by every number that
+can be checked without pixels.
+
+**The "render and look" step itself — not satisfied by me, stated as exactly that.** Tried
+`computer.screenshot` and `computer.zoom` again, twice more, fresh, against a locally-served real
+render: both failed identically — `"the Browser pane is not displayed, so the page is not
+compositing frames."` This is a session-level limitation on my end, not something retrying
+differently was going to fix. Per direct instruction, this is NOT marked verified from computed
+CSS in its place. Instead: sent all 8 real/comparison HTML files directly to the human via
+`SendUserFile` — the two real AI-generated Concepts (`structural-industrial`, `grounded-property`)
+plus a fast six-way CSS-swap comparison (same real markup, all six bundles' CSS, no repeat AI
+calls) covering the four bundles not regenerated for real this task. The human's own offer ("I'll
+look myself") is the only way this specific item closes.
+
+**Files created/modified:**
+```
+$ git status --porcelain -- lib/design/data/style-bundles.json lib/design/resolve-tokens.test.ts
+ M lib/design/data/style-bundles.json
+ M lib/design/resolve-tokens.test.ts
+```
+
+**Verification commands and output:**
+```
+$ npx tsc --noEmit && npm run lint && npx vitest run
+ Test Files  20 passed (20)
+      Tests  310 passed | 1 todo (311)
+(unchanged from 3.7c — this task edited JSON data and one test file's golden values, no new
+source file, no new test)
+
+$ npx tsx lib/design/build/validate-contrast.ts
+SUMMARY: 191/191 palettes fully AA-passing across all 12 checked pairs.
+```
+
+**Failures, retries and dead ends:** the three-way harvest dead end (template source, shipped DB
+data, external corpus — all reported above, not silently worked around); the real
+`feature-inline`-image-reuse flakiness (5 of 9 real attempts, a genuinely new finding, not chased
+beyond routing around it); the Browser pane's screenshot/zoom failing identically on a second,
+fresh attempt this task, confirming it's not a transient/retry-away issue.
+
+**Shortcuts taken:** the two required real regenerations bypass the real job queue/worker
+entirely, via a script replicating `generatePageInBackground`'s own logic with an explicit
+`styleBundleId` override — disclosed above, not a shortcut taken quietly (no real production path
+can pass one yet; this is the only way to exercise a non-default bundle for real today).
+
+**Deviations from the task spec:** arguably none, but one thing is worth stating plainly rather
+than let the diff speak for itself: radius/shadow/border-weight/pill values were **not** changed,
+despite the task's own framing suggesting broad re-authoring was expected. This was a considered
+conclusion from real investigation (see "real correction" above), not a shortcut — reported as
+exactly that rather than forcing a change to match the expectation.
+
+**Not run / not verified:**
+- **The actual visual review** — the headline item, Phase 2 sign-off's own item 1, explicitly not
+  claimed here. Eight real files sent to the human directly; awaiting their own look.
+- Whether `.obj-*` (`3.7c`) actually looks right on real output — still only unit-tested, per the
+  human's own instruction not to record it as more than that.
+- The `feature-inline` image-reuse prompt gap — named, not fixed, a real candidate for a future
+  task.
+- `mode: "light"` uniform across all six — named as real and load-bearing, deliberately not acted
+  on (a materially bigger decision than this task's own six named token categories).
+
+**Confidence:** High on the audit itself — every claim above is backed by a real grep, a real DB
+query, or a real render, not inference. High on the `sectionRhythmMultiplier`/`blur` decisions'
+reasoning specifically. **None, stated as none, on whether the six bundles actually look good** —
+that is precisely the one thing this task could not verify this session, and no amount of
+confidence in the token values or the structural measurements substitutes for it.
+
+**Next task:** awaiting the human's own look at the eight sent files, to be logged as
+`3.7d-VISUAL-VERIFIED` (or a real correction, if something looks wrong) before this item can be
+considered closed. Worker-claim race: flagged as the human requested — a recurring cost across
+`3.7a`/`3.7b`/`3.7c`, not encountered in `3.7d` only because this task's own regenerations never
+touched the job queue.
+---
+
 # PART E — For the human reviewing this log
 
 Signs the log is not trustworthy, worth scanning for:
