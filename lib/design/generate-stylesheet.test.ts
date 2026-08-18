@@ -62,11 +62,14 @@ function colorDeclaringSelectors(css: string): string[] {
 
 // Shape (a): a bare `.surface-*` selector, OR `.btn--solid`/`.btn--secondary` (both set
 // background+color together, self-contained regardless of ambient surface — the button variant
-// equivalent of a surface).
+// equivalent of a surface). Task 3.7g adds four more self-contained pairs to this same shape:
+// `.card`/`.card--dark` (mist/ink and paper/deepSoft — both already-validated pairs, reused, not
+// new) and `.pill--accent`/`.tile-accent` (accentInk/accent, same pair `.btn--solid` already
+// emits).
 // Shape (b): `.surface-X .text-muted`/`.text-accent`/`.btn--outline` (nested, scoped to a
 // validated surface). `a { color: inherit }` and `body` (checked separately below) are a third,
 // trivially-safe shape — they declare no new colour pairing, just the page's own default.
-const SAFE_UNSCOPED_SELECTOR = /^(\.surface-[a-z-]+|\.btn--solid|\.btn--secondary)$/;
+const SAFE_UNSCOPED_SELECTOR = /^(\.surface-[a-z-]+|\.btn--solid|\.btn--secondary|\.card|\.card--dark|\.pill--accent|\.tile-accent)$/;
 const SAFE_NESTED_SELECTOR = /^\.surface-[a-z-]+ \.(text-muted|text-accent|btn--outline)$/;
 
 describe("generateStylesheet — contrast guaranteed by construction (structural check on the actual CSS text)", () => {
@@ -97,12 +100,12 @@ describe("generateStylesheet — contrast guaranteed by construction (structural
 // VALIDATED_TEXT_PAIRS list itself, so the two can never silently drift apart.
 const EMITTED_PAIRS: { fg: string; bg: string }[] = [
   { fg: "ink", bg: "paper" }, // .surface-paper (also body's own default)
-  { fg: "ink", bg: "mist" }, // .surface-mist
+  { fg: "ink", bg: "mist" }, // .surface-mist, .card (Task 3.7g)
   { fg: "ink", bg: "accentSoft" }, // .surface-accent-soft
-  { fg: "accentInk", bg: "accent" }, // .surface-accent / .btn--solid
+  { fg: "accentInk", bg: "accent" }, // .surface-accent / .btn--solid / .pill--accent / .tile-accent (3.7g)
   { fg: "onSecondary", bg: "secondary" }, // .surface-secondary / .btn--secondary
   { fg: "paper", bg: "deep" }, // .surface-deep
-  { fg: "paper", bg: "deepSoft" }, // .surface-deep-soft
+  { fg: "paper", bg: "deepSoft" }, // .surface-deep-soft, .card--dark (Task 3.7g)
   { fg: "onDestructive", bg: "destructive" }, // .surface-destructive
   { fg: "inkMuted", bg: "paper" }, // .surface-paper .text-muted
   { fg: "inkMuted", bg: "mist" }, // .surface-mist .text-muted
@@ -232,5 +235,124 @@ describe("generateStylesheet — Task 3.7c: harvested composition vocabulary", (
     expect(css).toMatch(/\.obj-bottom\s*\{\s*--obj-y:\s*82%;\s*\}/);
     expect(css).toMatch(/\.obj-left\s*\{\s*--obj-x:\s*18%;\s*\}/);
     expect(css).toMatch(/\.obj-right\s*\{\s*--obj-x:\s*82%;\s*\}/);
+  });
+});
+
+// Task 3.7g — a real type scale, filled cards, and more accent presence. The human's own review
+// named four gaps in real rendered output; each block below is a direct, structural check against
+// one of them, not a general smoke test.
+describe("generateStylesheet — Task 3.7g: real type scale (gap 1)", () => {
+  const css = generateStylesheet(REAL_HUE_INPUT);
+
+  function ruleFor(selector: string): string {
+    const re = new RegExp(`(?:^|[,}])\\s*${selector.replace(/[.]/g, "\\.")}\\s*\\{([^}]*)\\}`, "m");
+    return re.exec(css)?.[1] ?? "";
+  }
+  function fontSizePx(rule: string): number {
+    // Every level here is either a bare rem value or a clamp(...) — the PREFERRED (middle) value
+    // is what a real mid-size viewport renders, so that's what orders the scale for this test.
+    const clampMatch = /font-size:\s*clamp\([^,]+,\s*[^,]+,\s*([\d.]+)rem\)/.exec(rule);
+    if (clampMatch) return parseFloat(clampMatch[1]) * 16;
+    const remMatch = /font-size:\s*([\d.]+)rem/.exec(rule);
+    return remMatch ? parseFloat(remMatch[1]) * 16 : 0;
+  }
+
+  it("h1 > h2 > h3 > h4 > body, strictly decreasing — the exact ordering that was missing before", () => {
+    const h1 = fontSizePx(ruleFor("h1"));
+    const h2 = fontSizePx(ruleFor("h2"));
+    const h3 = fontSizePx(ruleFor("h3"));
+    const h4 = fontSizePx(ruleFor("h4"));
+    const bodyPx = 17; // body's own font-size: 17px, unchanged by this task
+    expect(h1).toBeGreaterThan(h2);
+    expect(h2).toBeGreaterThan(h3);
+    expect(h3).toBeGreaterThan(h4);
+    expect(h4).toBeGreaterThan(bodyPx);
+  });
+
+  it("h3 (a real card/subsection heading size) is meaningfully bigger than body, not near-identical", () => {
+    const h3 = fontSizePx(ruleFor("h3"));
+    // The bug this fixes: h3 used to fall back to the browser's own ~1.17em default (~19.9px),
+    // barely distinguishable from 17px body copy. Real minimum bar: at least 20% larger.
+    expect(h3).toBeGreaterThanOrEqual(17 * 1.2);
+  });
+
+  it("h1/h2 are heavier (700) than h3-h6 (600) — real weight differentiation, not one flat 600 everywhere", () => {
+    expect(ruleFor("h1")).toMatch(/font-weight:\s*700/);
+    expect(ruleFor("h2")).toMatch(/font-weight:\s*700/);
+    expect(ruleFor("h3")).toMatch(/font-weight:\s*600/);
+  });
+
+  it("h1-h6 still declare no colour of their own — the type scale is size/weight only", () => {
+    for (const level of ["h1", "h2", "h3", "h4"]) {
+      expect(ruleFor(level)).not.toMatch(/(?<![-a-z])color\s*:/);
+    }
+  });
+
+  it(".lede and .caption exist, are bigger/smaller than body respectively, and declare no colour", () => {
+    const lede = ruleFor(".lede");
+    const caption = ruleFor(".caption");
+    expect(fontSizePx(lede)).toBeGreaterThan(17);
+    expect(caption).toMatch(/font-size:\s*0\.8125rem/);
+    expect(lede).not.toMatch(/(?<![-a-z])color\s*:/);
+    expect(caption).not.toMatch(/(?<![-a-z])color\s*:/);
+  });
+});
+
+describe("generateStylesheet — Task 3.7g: filled cards (gap 2)", () => {
+  const css = generateStylesheet(REAL_HUE_INPUT);
+
+  it(".card sets a real, self-contained background+colour pair (mist/ink) instead of none", () => {
+    expect(css).toMatch(/\.card\s*\{[^}]*background:\s*var\(--mist\);[^}]*color:\s*var\(--ink\);/);
+  });
+
+  it(".card--dark sets the dark-context pair (paper/deep-soft) and a translucent-white border, not --line", () => {
+    const rule = /\.card--dark\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(rule).toMatch(/background:\s*var\(--deep-soft\);/);
+    expect(rule).toMatch(/color:\s*var\(--paper\);/);
+    expect(rule).toMatch(/border-color:\s*rgb\(255 255 255 \/ 0\.14\);/);
+  });
+
+  it(".card keeps its real shape properties (radius/shadow/border) alongside the new fill", () => {
+    const rule = /\.card\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(rule).toMatch(/border-radius:\s*var\(--radius-card\);/);
+    expect(rule).toMatch(/box-shadow:\s*var\(--shadow-card\);/);
+  });
+});
+
+describe("generateStylesheet — Task 3.7g: accent presence beyond buttons (gap 3)", () => {
+  const css = generateStylesheet(REAL_HUE_INPUT);
+
+  it(".eyebrow::before is an unconditional, always-safe accent marker — a decoration, not text colour", () => {
+    const rule = /\.eyebrow::before\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(rule).toMatch(/background:\s*var\(--accent\);/);
+    // Decoration only — must never declare `color`, which would need scoping like .text-accent does.
+    expect(rule).not.toMatch(/(?<![-a-z])color\s*:/);
+  });
+
+  it(".pill--accent and .tile-accent are self-contained accentInk-on-accent pairs, safe anywhere", () => {
+    expect(css).toMatch(/\.pill--accent\s*\{\s*background:\s*var\(--accent\);\s*color:\s*var\(--accent-ink\);\s*\}/);
+    const tile = /\.tile-accent\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(tile).toMatch(/background:\s*var\(--accent\);/);
+    expect(tile).toMatch(/color:\s*var\(--accent-ink\);/);
+  });
+
+  it(".section--accent-top uses border-top, never `color`/`background` — a divider, not a surface", () => {
+    const rule = /\.section--accent-top\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(rule).toMatch(/border-top:\s*3px solid var\(--accent\);/);
+    expect(rule).not.toMatch(/(?<![-a-z])(color|background)\s*:/);
+  });
+});
+
+describe("generateStylesheet — Task 3.7g: CLASS_VOCABULARY stays the contract with 3.4", () => {
+  it("every new 3.7g class is documented", () => {
+    const documented = new Set(CLASS_VOCABULARY.map((c) => c.className));
+    for (const cls of [".card--dark", ".pill--accent", ".tile-accent", ".lede", ".eyebrow", ".caption", ".section--accent-top"]) {
+      expect(documented.has(cls), `${cls} not documented`).toBe(true);
+    }
+  });
+
+  it(".section's own description now instructs alternating surfaces between sections", () => {
+    const section = CLASS_VOCABULARY.find((c) => c.className === ".section");
+    expect(section?.description.toLowerCase()).toContain("alternate");
   });
 });

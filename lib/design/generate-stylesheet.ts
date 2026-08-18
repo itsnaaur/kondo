@@ -100,9 +100,9 @@ const SECTION_BASE_PX = 64;
 // documentation a model is given and the actual rules below can never say two different things.
 export const CLASS_VOCABULARY: { className: string; description: string }[] = [
   { className: ".container", description: "Centers content, caps width, adds side gutters. Wrap page-level content in this once per section." },
-  { className: ".section", description: "Vertical rhythm spacing (top/bottom padding), scaled to this client's resolved style bundle. Apply to each major page section." },
+  { className: ".section", description: "Vertical rhythm spacing (top/bottom padding), scaled to this client's resolved style bundle. Apply to each major page section — and ALTERNATE its paired .surface-* class between adjacent sections (e.g. .surface-paper, then .surface-mist, then .surface-paper again), not the same surface throughout. A page where every section shares one background reads as flat and undifferentiated, not calm." },
   { className: ".surface-paper", description: "Default light surface: white background, ink text. This is the page's own default — only write it explicitly when nesting a different surface inside paper again." },
-  { className: ".surface-mist", description: "Pale tinted surface, for alternating section backgrounds. The ONLY surface where .text-accent and .btn--outline are colour-safe." },
+  { className: ".surface-mist", description: "Pale tinted surface, for alternating section backgrounds. The ONLY surface where .text-accent and .btn--outline are colour-safe — including on a .stat's <dt> numeral or on a link, not just plain body text." },
   { className: ".surface-accent-soft", description: "Pale accent-tinted surface, for a highlighted callout or feature panel." },
   { className: ".surface-accent", description: "Solid brand-accent surface with high-contrast text. For one bold, attention-grabbing band — not a routine section background." },
   { className: ".surface-secondary", description: "Solid secondary-brand surface with high-contrast text. A less dominant alternative to .surface-accent." },
@@ -114,10 +114,13 @@ export const CLASS_VOCABULARY: { className: string; description: string }[] = [
   { className: ".btn.btn--solid", description: "Primary call-to-action button. Sets its own background and text colour together — safe on any surface." },
   { className: ".btn.btn--secondary", description: "Secondary call-to-action button. Sets its own background and text colour together — safe on any surface." },
   { className: ".btn.btn--outline", description: "Outline/ghost button (transparent background). Only colour-safe nested inside .surface-mist — has no colour rule, and renders as an unstyled outline in the surface's own text colour, anywhere else." },
-  { className: ".card", description: "Bordered, optionally-shadowed container. Sets no colour of its own — pair with a .surface-* class to give it a background." },
+  { className: ".card", description: "Filled card container — its own tinted background and text colour (self-contained, safe on any surface), plus radius/shadow/border. Use for every card in a .grid; a card with no fill disappears into the page it sits on." },
   { className: ".card--elevated", description: "Modifier on .card — swaps the flat border for a stronger drop shadow." },
+  { className: ".card--dark", description: "Modifier on .card for use inside a .surface-deep section — swaps .card's own light fill for a dark one (self-contained pair, still safe anywhere)." },
   { className: ".img", description: "Applies the resolved image corner radius. Put on <img> tags." },
-  { className: ".pill", description: "Small rounded badge/tag shape. Sets no colour of its own — pair with a .surface-* class." },
+  { className: ".pill", description: "Small rounded badge/tag shape. Sets no colour of its own — pair with a .surface-* class, or use .pill--accent." },
+  { className: ".pill--accent", description: "Modifier on .pill — fills it with the brand accent colour (self-contained pair, safe on any surface). Use for a highlighted badge or tag." },
+  { className: ".tile-accent", description: "Small square accent-filled tile (self-contained pair, safe on any surface) — a fixed-size container for a single short number, initial, or short label. Use for a row of feature/benefit markers instead of leaving icon-shaped space empty." },
   // Task 3.7c. Harvested from the three now-doomed templates' own composition CSS (lib/templates/
   // {atlas,ledger,showcase}/styles.ts) before 3.8 deletes them — see this task's own log entry for
   // the full inventory. Expressed against these same resolved tokens, not the templates' hardcoded
@@ -138,6 +141,15 @@ export const CLASS_VOCABULARY: { className: string; description: string }[] = [
   { className: ".obj-bottom", description: "Combine with a .media-* class: shifts that image's visible crop toward its bottom edge. Use when the image manifest's focalPoint.y for that image is above ~0.66." },
   { className: ".obj-left", description: "Combine with a .media-* class: shifts that image's visible crop toward its left edge. Use when the image manifest's focalPoint.x for that image is below ~0.33." },
   { className: ".obj-right", description: "Combine with a .media-* class: shifts that image's visible crop toward its right edge. Use when the image manifest's focalPoint.x for that image is above ~0.66. Omit every .obj-* class when a focalPoint is centred (~0.33-0.66 on both axes) or null." },
+  // Task 3.7g. h1-h6 already carry a real, differentiated type scale (size/weight/line-height per
+  // level) directly — no class needed, just use the semantically-correct heading level. These
+  // three fill the gaps a bare heading tag can't: an intro paragraph larger than body copy, a
+  // small label above a heading, and fine print. None declare colour — compose with .text-muted/
+  // .text-accent for colour, exactly like every other shape-only utility in this list.
+  { className: ".lede", description: "Larger intro/lead paragraph, for the sentence directly under a heading that needs more presence than body copy. Sets no colour of its own." },
+  { className: ".eyebrow", description: "Small uppercase label above a heading (e.g. \"WHY CHOOSE US\"). Always carries a short accent-coloured marker before the text — this is the one place accent colour is guaranteed regardless of surface. Sets no text colour of its own — compose with .text-muted or .text-accent." },
+  { className: ".caption", description: "Small fine-print text — an image credit, a footnote, a terms line. Sets no colour of its own." },
+  { className: ".section--accent-top", description: "Modifier on .section — adds a thin accent-coloured bar across the top of the section, as a deliberate divider between it and whatever comes before it. Use sparingly, for one or two sections that deserve emphasis, not every section." },
 ];
 
 export function generateStylesheet(input: StylesheetInput): string {
@@ -189,14 +201,48 @@ body {
 
 a { color: inherit; }
 
+/* ---------- type scale — Task 3.7g. Real per-level differentiation: harvested from all three
+   doomed templates' own type scales (they independently converged on the same shape — a big
+   display size, a smaller h2, card/row headings around 1.1-1.4rem at weight 600, body text left
+   at its own default weight) rather than every heading relying on the browser's own UA default,
+   which is why h3 (a card title) used to land within a couple of px of body copy. No colour set
+   here — same as before, colour only ever comes from an ancestor .surface-* or a scoped utility. ---------- */
+
 h1, h2, h3, h4, h5, h6 {
   font-family: var(--font-heading);
   margin: 0;
-  line-height: 1.15;
-  font-weight: 600;
 }
+h1 { font-size: clamp(2.25rem, 5vw, 3.75rem); line-height: 1.05; letter-spacing: -0.02em; font-weight: 700; }
+h2 { font-size: clamp(1.75rem, 3.5vw, 2.5rem); line-height: 1.1; letter-spacing: -0.015em; font-weight: 700; }
+h3 { font-size: clamp(1.15rem, 1.8vw, 1.375rem); line-height: 1.25; letter-spacing: -0.01em; font-weight: 600; }
+h4 { font-size: 1.15rem; line-height: 1.3; font-weight: 600; }
+h5, h6 { font-size: 0.95rem; line-height: 1.35; font-weight: 600; }
 
 p { margin: 0; }
+
+.lede { font-size: clamp(1.05rem, 1.6vw, 1.25rem); line-height: 1.6; font-weight: 400; }
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+/* A decorative rule, not text — background is always safe here regardless of surface, the same
+   reasoning .card's own border already relies on. This is the one place accent colour shows up
+   unconditionally, everywhere, not just inside .surface-mist. */
+.eyebrow::before {
+  content: "";
+  width: 20px;
+  height: 2px;
+  background: var(--accent);
+  flex: none;
+}
+
+.caption { font-size: 0.8125rem; line-height: 1.5; }
 
 :focus-visible {
   outline: var(--focus-ring-width) solid var(--ring);
@@ -256,14 +302,29 @@ p { margin: 0; }
 .btn--secondary { background: var(--secondary); color: var(--on-secondary); }
 .surface-mist .btn--outline { background: transparent; color: var(--accent); border-color: var(--accent); }
 
-/* ---------- cards, images, pills — shape only, no colour declared. ---------- */
+/* ---------- cards, images, pills ----------
+   Task 3.7g: .card now carries a real, self-contained fill (mist/ink — already one of the 12
+   validated pairs, reused here rather than adding a 13th) instead of setting no colour at all. A
+   card with the exact same background as the page it sits on was the real bug this fixes — shadow
+   and a hairline border alone aren't enough separation, confirmed by the human's own real render
+   review. .card--dark is the same self-contained shape for a .surface-deep context (paper/deep-
+   soft, also already validated), with its border colour swapped to a translucent white the same
+   way atlas's own dark-context card did — --line is tuned for a light surface and reads wrong on
+   a dark one. ---------- */
 
 .card {
+  background: var(--mist);
+  color: var(--ink);
   border-radius: var(--radius-card);
   box-shadow: var(--shadow-card);
   border: var(--border-weight) solid var(--line);
 }
 .card--elevated { box-shadow: var(--shadow-elevated); border: none; }
+.card--dark {
+  background: var(--deep-soft);
+  color: var(--paper);
+  border-color: rgb(255 255 255 / 0.14);
+}
 
 .img { border-radius: var(--radius-image); }
 
@@ -272,6 +333,21 @@ p { margin: 0; }
   padding: 0.3em 0.9em;
   border-radius: var(--radius-pill);
 }
+.pill--accent { background: var(--accent); color: var(--accent-ink); }
+
+.tile-accent {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75em;
+  height: 2.75em;
+  border-radius: var(--radius-card);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+.section--accent-top { border-top: 3px solid var(--accent); }
 
 /* ---------- Task 3.7c: composition vocabulary harvested from the doomed templates ----------
    Grid, split, stat, media, obj-* — none of these declare color or background, so they need no
