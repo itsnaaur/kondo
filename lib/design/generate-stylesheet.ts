@@ -66,6 +66,14 @@ import type { TemplateTokens } from "./resolve-tokens";
 export type StylesheetInput = {
   palette: Palette;
   tokens: TemplateTokens;
+  // Task 3.5a. TemplateTokens' own fontBody/fontHeading are already-resolved font-STACK strings
+  // (e.g. `"Playfair Display", ui-sans-serif, ...`) — the raw googleFontsUrl a browser actually
+  // needs to fetch the font files is a different value, TypographyResolution's own field, lost
+  // by the time it reaches TemplateTokens. Threaded through here directly rather than
+  // re-deriving it, so this module can emit the one real @import build plan §6.4's "self-
+  // contained <style> block" was always supposed to carry — see this task's own log entry for
+  // why this, not a <link> in 3.4's markup or a separate 3.6 task, is where it belongs.
+  googleFontsUrl: string;
 };
 
 // Deliberate, disclosed universal defaults — NOT derived from any per-client token, since
@@ -114,7 +122,9 @@ export const CLASS_VOCABULARY: { className: string; description: string }[] = [
 
 export function generateStylesheet(input: StylesheetInput): string {
   const { palette: p, tokens: t } = input;
-  return `:root {
+  return `@import url("${input.googleFontsUrl}");
+
+:root {
   --accent: ${p.accent};
   --accent-ink: ${p.accentInk};
   --accent-soft: ${p.accentSoft};

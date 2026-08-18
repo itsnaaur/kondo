@@ -11,6 +11,7 @@ import { contrastRatio } from "./contrast";
 const REAL_HUE_INPUT: StylesheetInput = {
   palette: buildPalette([{ hex: "#1d4ed8" }]),
   tokens: resolveTemplateTokens(),
+  googleFontsUrl: "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap",
 };
 
 // buildPalette([]) — the fallback path (pickHue finds nothing usable), same as what BC
@@ -18,6 +19,7 @@ const REAL_HUE_INPUT: StylesheetInput = {
 const FALLBACK_INPUT: StylesheetInput = {
   palette: buildPalette([]),
   tokens: resolveTemplateTokens({ styleBundleId: "trusted-established" }),
+  googleFontsUrl: "https://fonts.googleapis.com/css2?family=EB+Garamond:wght@400;500;600;700&family=Lato:wght@300;400;700&display=swap",
 };
 
 describe("generateStylesheet — determinism (part of this task's own done-when)", () => {
@@ -133,6 +135,20 @@ describe("generateStylesheet — exactly the 12 validated pairs are emitted, no 
       const ratio = contrastRatio(fgHex, bgHex);
       expect(ratio, `${fg} on ${bg}: ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(4.5);
     }
+  });
+});
+
+describe("generateStylesheet — Task 3.5a: @import loads the resolved Google Font, closing the gap 3.5's validator found", () => {
+  it("emits @import url(...) as the very first line, before :root", () => {
+    const css = generateStylesheet(REAL_HUE_INPUT);
+    expect(css.startsWith(`@import url("${REAL_HUE_INPUT.googleFontsUrl}");`)).toBe(true);
+    expect(css.indexOf("@import")).toBeLessThan(css.indexOf(":root"));
+  });
+
+  it("the emitted URL matches the input's own googleFontsUrl exactly, for two different pairings", () => {
+    expect(generateStylesheet(REAL_HUE_INPUT)).toContain(REAL_HUE_INPUT.googleFontsUrl);
+    expect(generateStylesheet(FALLBACK_INPUT)).toContain(FALLBACK_INPUT.googleFontsUrl);
+    expect(REAL_HUE_INPUT.googleFontsUrl).not.toBe(FALLBACK_INPUT.googleFontsUrl);
   });
 });
 
