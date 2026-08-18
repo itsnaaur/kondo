@@ -11907,6 +11907,156 @@ behavioural surface at all.
 this cleanup.
 ---
 
+### 3.11 — Tune the generation prompt
+**Timestamp:** 2026-08-19
+**Git SHA at start:** 1e7b988
+**Status:** DONE-VERIFIED — a real 10-run measurement, same client, same bundle, no tuning between
+runs, validated through the same real, unmodified, `3.10a`-authoritative `validateGeneratedHtml` used
+to establish the `3/10` baseline this task compares against.
+
+**What changed, exactly two levers, nothing else.** Same experiment shape as `3.9` — standalone
+script, own Anthropic call, forced tool use with one `html` field and one `css` field, no
+`CLASS_VOCABULARY`, no generated stylesheet, same client (BC Security), same bundle
+(`trusted-established`), same 16,000-token ceiling. The system prompt gained exactly the two things
+this task named:
+1. **Three reference compositions**, described as prose patterns to adapt, not markup to copy —
+   an offset hero with a floating credential card carrying a real stat, an asymmetric service grid
+   (varied column/row span, not uniform tiles), a split proof section (unequal columns, real
+   testimonial/stats vs. supporting image or credentials, split ratio led by content weight).
+2. **One explicit, specific contrast rule**, stated as a direct finding from real prior measurement,
+   not a general reminder: "accent-coloured text belongs only on `--paper` or `--mist` — never
+   `--accent-soft` or `--deep-soft`, even inside a more specific nested selector that overrides just
+   the background" — naming the exact shape `3.9`/`3.10a` both found in every real AA failure.
+Also stated the real token headroom directly (prior runs averaged 10-11.5k of a 16k ceiling), per
+this task's own instruction to say so in the prompt. Everything else — palette + hex, all 12
+`VALIDATED_TEXT_PAIRS` as the only permitted pairs, typography + Google Fonts URL, bundle character
+as prose, kebab-case CSS var convention (the real fix `3.9` found), real content/image manifest,
+`data-kondo-section` requirement — reconstructed unchanged from `3.9`'s own real log entry, not
+re-invented.
+
+**1. Truncation and tokens.**
+```
+Truncated (stop_reason=max_tokens): 0/10
+Token distribution: min=9674 max=11700 mean=10449
+```
+No truncation, matching `3.9`'s own 0/10. Mean token spend is essentially unchanged from `3.9`'s own
+`10837` — **the explicit "use more of your budget" instruction did not measurably raise raw token
+spend**, stated plainly rather than claimed as a win it wasn't. What DID change is section-count
+variety: `3.9`'s ten runs ranged 9-12 top-level sections; these ten range 10-22 — real, checked
+directly (`data-kondo-section` marker counts per file), not assumed from a token-count proxy.
+
+**2. Validator pass rate — the headline number, measured the same way as `3.9`, through
+`3.10a`'s authoritative rendered gate.**
+```
+Pass: 8/10 — runs 2, 3, 4, 5, 6, 7, 9, 10
+Fail: 2/10 — runs 1, 8
+Aggregate failure modes: {"contrast": 4}
+```
+Against the baseline this task named — `3.9`'s own ten outputs re-measured through this same
+validator in `3.10a` scored `3/10` — this is a real improvement, `3` to `8` of `10`, not a marginal
+one. **Zero occurrences of the specific failure shape this task's contrast rule targeted** (accent
+text on `accent-soft`/`deep-soft`) anywhere across all 10 runs — confirmed directly by reading every
+`contrast` failure message below, not inferred from the pass count alone. That lever worked exactly
+as intended.
+
+**3. The two remaining failures — investigated to a real root cause each, not left as validator
+output alone, per this session's own standing practice.**
+```
+run 1: div.proof-inner > div.proof-main > blockquote > footer ("— Auckland Transport Operations
+       Centre"): text #ffffff on background #ffffff contrasts at 1.00:1.
+run 8: section#services > ... > article.service-card.service-card--large > h3 ("Access Control"):
+       text #191d1f on background #2c75a5 contrasts at 3.39:1 (and a second, worse instance on the
+       card's own <p>, 1.06:1).
+```
+**Run 1 is a semantic-tag-reuse bug, not a contrast-rule miss.** `.proof-main blockquote footer`
+correctly sets `color: var(--paper)` for the citation text against `.proof`'s own `background:
+var(--deep)` — a genuinely safe, validated pair on its face. But a blanket base rule earlier in the
+same stylesheet, `body, section, header, footer { ...; background: var(--paper); }`, targets the
+BARE `footer` TAG — including this nested citation `<footer>`, reused semantically inside a
+`<blockquote>` rather than as the page's own footer. The specific selector only overrides `color`,
+never `background`, so the tag's own real, painted background stays opaque white — a real white
+rectangle sitting on top of the dark `.proof` section, with white text on it. Confirmed directly by
+reading the real CSS cascade order in `run-1.html`, not inferred from the failure message alone.
+
+**Run 8 is a CSS specificity tie, not a colour-choice mistake.** `.service-card--large h3 { color:
+var(--accent-ink); ... }` is declared correctly — a real, safe, validated pair for an accent-filled
+card. But the markup carries BOTH classes on one element (`<article class="service-card
+service-card--large">`), and `.service-card h3 { ...; color: var(--ink); }` — declared LATER in the
+same stylesheet, at the EXACT SAME specificity (`0,1,1` each: one class, one element) — wins the
+cascade tie by source order, silently overriding the modifier's intended `accent-ink` back to plain
+`ink` on an accent background. Confirmed directly by reading both rules' real source position in
+`run-8.html`; this is exactly the class of bug real cascade resolution catches and a same-rule static
+parser (`3.10`'s own `checkEmittedContrast`) cannot, because `.service-card--large h3`'s own rule is,
+in isolation, completely correct.
+
+**Both are real, previously-uncatalogued failure modes, distinct from what this task's contrast rule
+targeted — named honestly rather than folded into "still just contrast," since a future prompt
+tuning round would need a different, more specific instruction for each** (something like "never
+reuse `<footer>` for anything but the page's own footer" for run 1's shape; "a modifier class's own
+override rules must be declared after the base class's rules, or use a more specific selector" for
+run 8's shape). Out of this task's own scope to add — the task named one specific lever
+(accent-on-accent-soft/deep-soft) and it fully closed that one; these are new findings for whoever
+tunes next, not this task's own unmet obligation.
+
+**A real, unplanned observation, disclosed rather than left silent:** zero of the 10 runs used a CSS
+gradient anywhere (`3.9`'s own ten split exactly 5/10 gradient/no-gradient). Plausibly a real
+downstream effect of the reference-composition guidance steering toward the three named patterns
+(none of which mention gradients) rather than a deliberate instruction — named as an observed
+correlation from 10 real runs, not asserted as a proven causal mechanism from a sample this size.
+
+**Sent to the human — three best, picked from the 8 real passing runs by structural richness
+(section count, distinct class count, byte size) and by how directly they realise this task's own
+three named compositions (floating-card markup/CSS present, uneven-fr-ratio split sections present),
+checked directly in each file rather than assumed from a token count:**
+- **Run 6** — richest of the ten (21 sections, 53 distinct classes, largest file), a real, confirmed
+  `.floating-card` (`position: absolute`, offset `-2.5rem/-2.2rem`, a real "38" stat) overlapping the
+  hero image exactly as the offset-hero pattern describes, five real uneven-ratio grid splits.
+- **Run 4** — cleanest realisation of the asymmetric-grid lever (6 real uneven-fr grid-split rules,
+  the most of any run), passes outright.
+- **Run 5** — second-largest file, 22 sections, passes outright, a real split-proof section with a
+  content-led (not 50/50) column ratio.
+All three are saved in full at
+`C:\Users\acer\Documents\claude\bundle-preview\free-css-3.11\run-{4,5,6}.html`.
+
+**Files created/modified:** none in the pipeline — the experiment script
+(`scripts/tmp-3.11-tuned-free-css.ts`) was deleted after use, per this session's own established
+convention for throwaway experiment scripts (`3.9`, `3.10a`). `git status --porcelain` is clean
+after this task (no pipeline source touched).
+
+**Verification commands and output:** none run against pipeline source — no production code changed
+this task, matching `3.9`'s own precedent (an experiment, not a feature). The real verification this
+task performed was the ten live generations plus their validation through the real, unmodified
+`validateGeneratedHtml`, reported above.
+
+**Failures, retries and dead ends:** none in the script itself (typechecked clean before the real
+API calls were made, ran end to end without incident); the two real per-run failures above were
+investigated to a genuine root cause each, not treated as dead ends.
+
+**Shortcuts taken:** the "best 3" selection used structural signals (section/class/byte counts, a
+`grep` for the named composition patterns) rather than pixel-level visual judgement — the same real,
+disclosed limitation as `3.7d`/`3.7f`/`3.7g`/`3.9` (the Browser pane still cannot composite frames for
+this session). The three files themselves are real and complete; only the ranking method is a proxy.
+
+**Deviations from the task spec:** none — ten runs, no tuning between them, same client and bundle,
+measured the same way as `3.9`, pass rate reported against the named `3/10` baseline, remaining
+failure modes investigated and named, token distribution reported, three best sent.
+
+**Not run / not verified:** whether either of the two new failure modes (semantic-tag reuse,
+specificity-tie override) recurs at meaningful frequency over more than 10 runs, or generalises past
+this one client's real content shape — a real open question for a future, larger run, not answered
+by ten samples. Pixel-level visual comparison against `3.7g`'s vocabulary-constrained output remains
+the human's own call, same as every prior real-generation task this session.
+
+**Confidence:** High on the headline number (`3/10` to `8/10`, both measured through the identical,
+real, unmodified validator) and on both new failure modes (each independently confirmed by reading
+the real CSS cascade in its own saved file, not inferred from the validator's message alone). Lower
+on whether the gradient-usage drop to `0/10` is a real, reproducible effect of the new prompt or
+sampling noise at `n=10` — named as an observation, not a claim.
+
+**Next task:** holding — no next step specified; both new failure modes above are real, disclosed
+candidates for whoever tunes this prompt further, not started here.
+---
+
 # PART E — For the human reviewing this log
 
 Signs the log is not trustworthy, worth scanning for:
