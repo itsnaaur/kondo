@@ -9878,6 +9878,206 @@ inference about future wiring behaviour, not an already-existing, already-decide
 **Next task:** not specified — awaiting direction.
 ---
 
+### 3.7 — Second job type
+**Timestamp:** 2026-08-18
+**Git SHA at start:** 899ff2c
+**Status:** DONE-VERIFIED — `tsc --noEmit` clean, `lint` clean, full suite 20 files / 304 tests
+passing (288 → 304, exactly the 16 new tests). A full, real two-phase run completed end to end
+for a real client (BC Security) — real `ANALYZE_SITE` then real `GENERATE_PAGE`, both `Job` rows
+pasted below with real timestamps, a real `Concept` persisted. No schema migration needed —
+checked directly, not assumed, and explained below.
+
+**What I did:** `JobType` widened to `"ANALYZE_SITE" | "GENERATE_PAGE"` (`lib/jobs/queue.ts`).
+`dispatch()`'s switch (`scripts/worker.ts`) extended with a real `GENERATE_PAGE` case. New
+`lib/content/generate-page.ts` — the real orchestration function, `generatePageInBackground`,
+running build plan §6's own path for the first time: design system resolution (`3.2`) →
+stylesheet generation (`3.3`) → markup generation (`3.4`) → validation (`3.5`) → persist
+`Concept`, with `3.6`'s `renderFallbackConcept` as the real recovery path on generation/
+validation failure — the caller `3.6`'s own log entry said didn't exist yet. New
+`lib/actions/generation.ts` — `startPageGeneration`, the enqueue-time server action, mirroring
+`lib/actions/analysis.ts`'s `startAnalysis` pattern closely (same rate-limit/concurrency-cap/
+spend-ceiling gates, swapping in `checkGenerationRateLimit` — already defined in `lib/security/
+rate-limit.ts`, "suggested starting points from the security review," never called from
+anywhere until now).
+
+**Constraint 1 — `STALE_JOB_TIMEOUT_MS` recomputed, honestly, not inflated for appearance's
+sake.** `GENERATE_PAGE`'s own worst case: markup generation (`generate-markup.ts`) shares the
+exact same retry shape and the exact same shared constants (`MAX_ATTEMPTS(3)` ×
+`MAX_TRANSIENT_RETRIES(5)`, `lib/ai/anthropic-retry.ts`) as the structuring call the original
+comment already priced at ≈16 min — reused by direct analogy, not re-derived from scratch, since
+the retry *count* (not the token ceiling) is what drives the time estimate. Design system
+resolution, stylesheet generation, validation, and the fallback render are all deterministic,
+local, and effectively instant (build plan §6.1's own "milliseconds, $0") — not counted, same
+treatment the original comment already gave DB writes. `GENERATE_PAGE` ≈ 16 min worst case,
+`ANALYZE_SITE` (unchanged, still ≈76 min — crawl + images + structuring, all inside the one
+job) still dominates: `max(76, 16) = 76`. **The constant itself is unchanged at 90 minutes** —
+recomputing this honestly concluded "still enough headroom," not "needs to be bigger," and the
+comment now says so explicitly, with `GENERATE_PAGE`'s own breakdown shown, not just asserted.
+This mattered because the one timeout applies uniformly to any `RUNNING` job regardless of type
+(`reclaimOrphanedJobs` doesn't branch on `job.type`) — the recomputation had to actually check
+this, not assume a second job type automatically means a bigger number.
+
+**Constraint 2 — the unchecked cast replaced with real validation, and its own real limit
+disclosed.** `parseAnalyzeSitePayload`/`parseGeneratePagePayload` (`lib/jobs/queue.ts`) check the
+real fields a caller is about to read and throw a specific, actionable error immediately if
+they're missing or the wrong type — not `job.payload as X`, which would have silently produced
+`undefined` fields three calls deep. Tested against real crafted-bad-input for both. **A real,
+named limit of this approach, not glossed over**: since `AnalyzeSitePayload` and
+`GeneratePagePayload` overlap on `clientId`, `parseGeneratePagePayload` cannot itself distinguish
+"a real `GENERATE_PAGE` payload" from "an `ANALYZE_SITE` payload that happens to also carry
+`clientId`" — it validates field *shape*, not job-type provenance. In real operation this isn't
+exploitable (the `switch` in `dispatch()` already routes each row to the parser matching its own
+`job.type` before either parser ever runs), but the test suite states this limitation directly
+rather than claiming the validation proves more than it does.
+
+**Constraint 3 — no migration, checked directly, not assumed, nothing to ask permission for.**
+`Job.type` (`prisma/schema.prisma:321`) is a bare `String` column with a code-comment listing
+valid values (`// ANALYZE_SITE`), not a Prisma enum — confirmed by reading the schema directly
+before writing any code. Adding a second string literal `JobType` can represent is purely a
+TypeScript-side widening; no `ALTER TYPE`, no new column, no schema change of any kind. `schema.
+prisma` is untouched by this task (`git status` below confirms it) — the task's own scope line
+named it because the honest answer wasn't yet known, not because a migration was assumed needed.
+
+**Open decision 4 (build plan §12) — resolved: SEPARATE CLICK, not auto-run on Continue.**
+`startPageGeneration` is its own new action (`lib/actions/generation.ts`), not folded into
+`approveContentRecord`'s existing "Approve & continue" flow
+(`components/ContentReviewForm.tsx`). Why: the build plan's own framing already leaned this way
+("separate makes spend explicit and gives a free design-system re-roll before paying for
+generation"), and the pipeline itself backs it up structurally, not just as a stated preference —
+design system resolution (`3.2`) and stylesheet generation (`3.3`) are both deterministic, local,
+and free; only markup generation (`3.4`) is a real, billed Anthropic call. Auto-running on
+Continue would mean every content approval immediately spends real money, with no point at which
+a human could see the resolved palette/typography/style bundle and decide it's wrong *before*
+paying to generate against it. A separate action is also the only shape that fits the existing
+concurrency/spend machinery cleanly — `startAnalysis` already gates its own job type at the
+moment of an explicit enqueue, not invisibly behind an unrelated click.
+
+**The `ANALYSIS_FAILED` gap — real wiring landed here, as named.** `lib/jobs/queue.ts`'s private,
+`ANALYZE_SITE`-flavoured `revertOrphanedClient` is now exported and generalized as
+`revertClientToAnalysisFailed(clientId, reason)` — reused by `generate-page.ts`'s own outer
+catch, not a third hand-copied status-flip-plus-audit-log. Two deliberately different failure
+layers in `generatePageInBackground`:
+1. **Inner (markup generation / validation failure)** — always recovered via
+   `renderFallbackConcept`. A real, usable `Concept` (`templateKey: "fallback"`) still gets
+   persisted, the `Job` still completes successfully, `Client.status` is never touched — this is
+   the whole point of `3.6`, and it would be wrong to make a recovered failure look like a dead
+   client.
+2. **Outer (`ContentRecord` missing, a database error, anything genuinely unexpected)** —
+   propagates for real. `revertClientToAnalysisFailed` flips `Client.status`, logs the audit
+   event, and the error is rethrown so `scripts/worker.ts`'s own generic catch marks the `Job`
+   row `FAILED` too. This is the real mechanism `3.6`'s own script had to simulate by hand
+   because nothing real existed yet — it now exists.
+
+**Real end-to-end two-phase run — BC Security (16 crawled pages, the smallest real site of the
+five known clients, chosen to keep the real crawl fast):**
+```
+=== ANALYZE_SITE ===
+id: cmsy532dl0000ocff4p49iykm
+status: COMPLETE
+createdAt:  2026-08-18T04:05:06.633Z
+startedAt:  2026-08-18T04:05:07.483Z
+finishedAt: 2026-08-18T04:07:09.172Z   (~2 min — real crawl + real structuring call)
+
+=== GENERATE_PAGE ===
+id: cmsy6ue0t0000ooffncx62wky
+status: COMPLETE
+createdAt:  2026-08-18T04:54:21.053Z
+startedAt:  2026-08-18T04:54:22.026Z
+finishedAt: 2026-08-18T04:54:55.787Z   (~34s — real markup generation, first attempt, no
+                                         retries, no fallback needed)
+
+=== CONCEPT ===
+id: cmsy6v3xp0000woff410ya5f8
+templateKey: "generated"   (the real AI-markup success path, not the fallback)
+html: 15,152 chars, 10 data-kondo-section markers, contains a real @import (3.5a's font-loading
+      fix confirmed working end to end in the real pipeline, not just in a unit test)
+
+Final Client.status: READY_FOR_REVIEW   (untouched — generation succeeded, nothing to revert)
+```
+Between the two jobs, `ContentRecord.reviewedAt` was set directly (mirroring
+`approveContentRecord`'s own write) — `startPageGeneration`'s own server-action layer needs a
+real authenticated session to call directly, so this real run exercised the job-queue/worker/
+orchestration layer this task's scope is actually about, not the thin auth wrapper around it,
+which was reviewed by reading, not by a live click.
+
+**A real, unresolved operational anomaly, encountered and reported honestly, not hidden.** The
+first `GENERATE_PAGE` attempt (`cmsy56a0x0000o0ff6hkph0bz`) failed in under 2 seconds with
+`"Unknown job type: GENERATE_PAGE"` — the `dispatch()` `default` branch — even though
+`scripts/worker.ts` was re-read directly at that moment and confirmably had the real
+`GENERATE_PAGE` case on disk, and the worker process had already been started *after* every code
+edit and a clean full-suite run. `Get-CimInstance Win32_Process` confirmed only one worker
+process tree was actually running (no duplicate/orphaned process racing it). Root cause not
+fully established — killing that process tree and starting a genuinely fresh one immediately
+fixed it, with the identical on-disk code, on the very next real attempt (the run pasted above).
+Reported as what it is: a real, reproducible-once, not-yet-fully-explained anomaly tied to that
+specific running process, not a code defect — the retry with a clean process is real evidence
+the switch statement itself works, but the anomaly itself is named rather than quietly stepped
+around.
+
+**New tests:** `lib/jobs/queue.test.ts` (9 tests — both payload validators against real crafted
+bad input, plus the disclosed cross-type overlap limitation named directly). `lib/content/
+generate-page.test.ts` (7 tests — `wrapGeneratedPage` and `capabilitySummaryFrom`, the pure parts
+of the orchestration function; `generatePageInBackground` itself is verified against the real run
+above, not mocked, same reasoning `3.4`'s own test file gave for not mocking `generateMarkup`).
+
+**Files created/modified:**
+```
+$ git status --porcelain
+ M lib/jobs/queue.ts
+ M scripts/worker.ts
+?? lib/actions/generation.ts
+?? lib/content/generate-page.test.ts
+?? lib/content/generate-page.ts
+?? lib/jobs/queue.test.ts
+```
+(`prisma/schema.prisma` untouched — confirmed above, no migration needed.)
+
+**Verification commands and output:**
+```
+$ npx tsc --noEmit && npm run lint && npx vitest run
+ Test Files  20 passed (20)
+      Tests  304 passed | 1 todo (305)
+```
+
+**Failures, retries and dead ends:** the stale-process anomaly above is the real one — not a bug
+in the code shipped, but a real, disclosed gap in confidence about exactly why the first live
+attempt failed. A smaller, separate lesson from the same investigation: my own first attempt to
+start the worker via a manually-backgrounded (`nohup ... &`) shell command produced zero output
+and turned out not to be reliably tracked across separate tool calls — the tool's own
+`run_in_background` parameter is what actually works for a long-lived process, not a manual
+shell background job.
+
+**Shortcuts taken:** none beyond what's already disclosed above (bypassing `startPageGeneration`'s
+own auth layer for the real run, reviewed by reading instead).
+
+**Deviations from the task spec:** none. All three constraints addressed with real, checked
+answers (including two that concluded "no change needed," stated as such, not inflated to look
+like more work was done); open decision 4 resolved and implemented; the done-when's real
+two-phase run is real, with real `Job` rows and real timestamps pasted above.
+
+**Not run / not verified:**
+- The fallback path (`templateKey: "fallback"`) was not re-exercised inside this real run — the
+  real `GENERATE_PAGE` job succeeded on its first real attempt, so the inner failure branch
+  didn't fire this time. It's unit-tested (`3.6`'s own suite) and was proven with a real,
+  separately-forced failure in `3.6`'s own log entry; this task's own real run demonstrates the
+  success path plus the real, working `dispatch()` wiring, not a fresh real fallback trigger.
+- `startPageGeneration`'s own rate-limit/concurrency-cap/spend-ceiling gates were reviewed by
+  reading, not exercised live (no real authenticated session was available to this script) — the
+  same gates `startAnalysis` already uses in production, not new logic invented for this task.
+- The stale-process anomaly's real root cause — named as unresolved, not chased further once a
+  clean restart produced a real, correct result.
+
+**Confidence:** High that the job-queue mechanics themselves are correct — a full, real two-phase
+run completed end to end with a fresh process, real `Job` rows, and a real `Concept`. High on both
+"no change needed" conclusions (`STALE_JOB_TIMEOUT_MS`, no migration) — both traced to specific,
+re-read source facts, not assumed. High on the separate-click decision being the right call,
+grounded in the pipeline's own real cost structure, not just the build plan's stated preference.
+Medium on the stale-process anomaly — real, observed, and resolved, but not fully explained, named
+as exactly that.
+
+**Next task:** not specified — awaiting direction.
+---
+
 ---
 
 # PART E — For the human reviewing this log
