@@ -10078,6 +10078,110 @@ as exactly that.
 **Next task:** not specified — awaiting direction.
 ---
 
+### 3.7a — Resolve or bound the worker anomaly
+**Timestamp:** 2026-08-18
+**Git SHA at start:** ac0cd28
+**Status:** DONE-VERIFIED — hypothesis tested directly and confirmed on the first attempt, per
+instruction not chased further. `tsc --noEmit` clean, `lint` clean, `scripts/worker.ts`'s header
+now records the finding.
+
+**The test, exactly as specified.** `dispatch()`'s `GENERATE_PAGE` case was temporarily removed
+from `scripts/worker.ts`, a worker started against that reverted file, confirmed running
+(`[worker] started, polling for jobs...`). While that process was still alive, `dispatch()` was
+edited back to its real, correct state — the `GENERATE_PAGE` case restored on disk, confirmed
+directly with a fresh `grep`. A real `GENERATE_PAGE` job was then enqueued for BC Security
+(already reviewed, from `3.7`'s own real run) and picked up by that same, still-running,
+pre-edit process.
+
+**Result: reproduced, on the first attempt.**
+```
+$ (poll real Job row)
+cmsy7560h0000egff5tuydyb1 status=FAILED lastError=Unknown job type: GENERATE_PAGE
+```
+The identical error signature from the original `3.7` incident, this time from a fully
+understood, deliberately controlled cause: the worker process loaded `dispatch()`'s switch once,
+at startup, and — exactly as any long-running Node process without a `--watch` flag would —
+never re-read the file again. The edit that restored the real case landed on disk correctly (the
+enqueue script, itself a fresh process, saw and used the correct code path to construct the job),
+but the *already-running* worker kept executing whatever it had loaded when it started. This is
+not a subtle bug in `tsx` specifically — it is the ordinary, expected behaviour of any
+interpreted or compiled long-running process with no explicit reload mechanism, and it directly
+explains why my own `3.7` investigation found "only one process running, confirmed correct code
+on disk, yet a live failure" — those two facts were never in tension; a live process can be
+correct-on-disk and still stale-in-memory at the same time, which is exactly what happened.
+
+**One related, secondary observation, named but not chased further (out of this task's own
+scope):** the worker's own visible stdout log during this test showed only its startup line —
+the `"[worker] processing..."` line `processJob()` logs via plain `console.log` before dispatch
+ever runs did not appear in the captured output, even though the job demonstrably *was* claimed
+and processed (the DB row proves it). This is the same gap that likely caused `3.7`'s own
+wait-loop to sit for 42 minutes without detecting the original failure — the definitive evidence
+in both cases came from querying the real `Job` row directly, not from the process's own log
+output, which does not appear to be fully or reliably captured by this tooling for a
+long-running background task. Named here because it's a real, observed limitation relevant to
+how this investigation was actually resolved, not because this task's own scope is to fix it.
+
+**What I did per constraint 2 — recorded, not just concluded.** `scripts/worker.ts`'s own header
+comment now states directly: this file is loaded once at process start; an already-running
+worker never re-reads its own source or its dependencies after startup; editing `dispatch()` (or
+anything it imports) while a local dev worker is already running has no effect on that live
+process; restart the local worker after any change to this file or its dependencies. Stated as a
+dev-loop hazard specifically, not a production concern — a real deploy (Railway, Fly, Render)
+always starts a fresh process from the newly deployed code, so a live deployment can never be
+mid-edit the way a local dev session can.
+
+**Files created/modified:**
+```
+$ git status --porcelain
+ M scripts/worker.ts
+```
+(header comment only — `dispatch()`'s own switch is back to exactly its real `3.7` state, byte-
+identical; no other file touched.)
+
+**Verification commands and output:**
+```
+$ npx tsc --noEmit && npm run lint && npx vitest run
+ Test Files  20 passed (20)
+      Tests  304 passed | 1 todo (305)
+```
+(unchanged from `3.7`'s own final count — this task added no new source files, only the one
+header comment.)
+
+**Real DB state left behind, disclosed rather than silently cleaned up.** The test's own
+deliberately-forced failure produced one real `Job` row (`cmsy7560h0000egff5tuydyb1`, `status:
+FAILED`, `lastError: "Unknown job type: GENERATE_PAGE"`) for BC Security — checked directly and
+confirmed it created no `Concept` (the failure happened before that code path could ever run) and
+left `Client.status`/`ContentRecord` completely untouched. Unlike `3.6`'s own forced-failure
+script (which reverted its own real DB writes because a fake `ANALYSIS_FAILED` status on a real
+client's dashboard would have been actively misleading), this `Job` row was left in place — it is
+accurate, fully-explained history of a real, understood test, not a fabricated state that could
+mislead anyone reading BC Security's real record; a real `"generated"` `Concept` from `3.7`'s own
+successful run already sits alongside it as the client's real, current state.
+
+**Failures, retries and dead ends:** none — the hypothesis reproduced on the first attempt, per
+instruction not to chase this beyond one try.
+
+**Shortcuts taken:** none.
+
+**Deviations from the task spec:** none. The hypothesis was tested directly, exactly as
+specified; it was confirmed, so branch 2 (record it in the header) was the one taken, not branch
+3 (bound it as unreproduced) — both were prepared for, only one was needed.
+
+**Not run / not verified:** whether the exact same class of staleness could ever manifest in a
+production deploy under some unusual rolling-restart configuration where an old process briefly
+overlaps a new one — named as a theoretical edge case, not investigated, since the task's own
+scope was one direct test of the stated hypothesis against the actual local dev workflow that
+produced the original anomaly, not a general audit of every possible deployment topology.
+
+**Confidence:** High — this is about as direct a confirmation as a hypothesis test gets: the
+exact error signature reproduced under a fully controlled, understood setup on the first attempt,
+with a mechanism (no hot-reload in a long-running process) that requires no further speculation
+to explain. The `3.7` incident is now a bounded, understood dev-loop hazard, not an open question.
+
+**Next task:** `3.8` — the deletions. Awaiting the human's own written sign-off before starting,
+per this task's own instruction.
+---
+
 ---
 
 # PART E — For the human reviewing this log
