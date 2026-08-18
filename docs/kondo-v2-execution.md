@@ -12057,6 +12057,129 @@ sampling noise at `n=10` — named as an observation, not a claim.
 candidates for whoever tunes this prompt further, not started here.
 ---
 
+### 3.12 — Close the two remaining failure modes
+**Timestamp:** 2026-08-19
+**Git SHA at start:** 74c7cfb
+**Status:** DONE-VERIFIED — a real 10-run measurement, same client, same bundle, no tuning between
+runs, same validator as `3.11`. **The stated goal was not met: the pass rate went DOWN, `8/10` to
+`7/10`, not up.** Reported exactly as measured, not adjusted to match the expected direction — both
+specifically-targeted failure modes were fully eliminated (a real, confirmed result), but a
+same-family contrast violation reappeared through a third, different mechanism neither `3.11` nor
+this task's own two new rules addressed, plus one unrelated new failure mode. Investigated to a real
+root cause each before writing any of this, not reported off the validator's message alone.
+
+**What changed — exactly two rules added to `3.11`'s own prompt, nothing else re-tuned.** Both
+named directly from `3.11`'s own two investigated failures:
+1. "Never set `background` inside a blanket multi-tag reset rule ... for any tag name that could be
+   reused in a different semantic context elsewhere on the page ... Scope background colours to
+   classes, never to a bare tag selector shared across more than one real use."
+2. "When a modifier class ... is meant to override a property the base class also sets for the same
+   descendant shape ... the two rules have IDENTICAL CSS specificity if they differ only by class
+   name — the LATER-declared rule silently wins the tie ... Always declare a modifier's own override
+   rules AFTER the base class's rules ... for every property the modifier changes."
+Every other prompt section — palette, `VALIDATED_TEXT_PAIRS`, typography, bundle character, the
+three reference compositions, the accent-on-`accent-soft`/`deep-soft` contrast rule, the token-
+headroom note — copied verbatim from `3.11`, not re-worded.
+
+**1. Truncation and tokens.**
+```
+Truncated: 0/10
+Token distribution: min=9455 max=11626 mean=10641
+```
+No truncation, matching `3.9`/`3.11`. Mean token spend essentially flat again (`10641` vs `3.11`'s
+`10449` vs `3.9`'s `10837`) — three real runs in a row now showing the token-headroom note does not
+meaningfully move raw spend.
+
+**2. Validator pass rate — the real, measured result, not the expected one.**
+```
+Pass: 7/10 — runs 2, 3, 5, 7, 8, 9, 10
+Fail: 3/10 — runs 1, 4, 6
+Aggregate failure modes: {"image-provenance": 1, "contrast": 2}
+```
+Against `3.11`'s own `8/10`, this is a real, one-run regression, not an improvement — stated
+directly rather than reframed. **Zero recurrence of either failure mode this task specifically
+targeted** — no blanket-tag-reset background bleed, no specificity-tie override — confirmed by
+reading every one of the three real failures below; that half of the result is a genuine, clean win.
+What did NOT hold was the implicit premise behind the task: that closing two known bugs would raise
+the pass rate. It did not, in this sample.
+
+**3. Both real failures investigated to their actual mechanism, not read off the validator's message.**
+
+**Runs 4 and 6 — the same accent-on-`deep-soft` shape from `3.9` reappeared, but via a THIRD
+mechanism, not either of `3.12`'s own two targeted ones.** Real CSS, run 4:
+```css
+.eyebrow{ ...; color:var(--accent); background:transparent; margin:0 0 .75em; }
+.eyebrow-onmist{color:var(--accent);}
+.eyebrow-onaccent{color:var(--paper);}
+```
+`.eyebrow-onmist` is a genuine no-op — identical to the base `.eyebrow` rule it's named after, both
+`color: var(--accent)`. The model built this class specifically to look context-scoped ("onmist"),
+then used the exact same `class="eyebrow eyebrow-onmist"` pairing inside `#proof` — a real,
+confirmed `deep-soft` section, not mist — alongside a second, correct use inside a genuinely light
+`.care-section`. Run 6 is more striking: the model DID build a real dark-context variant,
+`.eyebrow--dark{color:var(--paper);}`, right next to `.eyebrow--onmist{color:var(--accent);}` — and
+then applied `eyebrow--onmist` (the wrong one) inside its own `#proof` section anyway. **This is not
+a cascade/specificity bug at all — both classes compute exactly what they say. It's the model
+building the right, context-aware tool and then picking the wrong instance of it in one specific
+section.** A new, third mechanism for the same underlying contrast constraint, not covered by
+either `3.11`'s contrast rule (which only named the accent-soft/deep-soft BACKGROUND, not "you may
+build multiple accent-text variants and misapply one") or this task's own two new rules (neither is
+about variant selection).
+
+**Run 1 — a new, unrelated failure mode: an image URL that doesn't exist.** `validateGeneratedHtml`
+flagged `...65761665-a0a4-4ccf-887d-4cea92278121-site-image-3.jpg` as absent from the manifest.
+Checked directly against the real manifest, not assumed: the real asset with that UUID prefix is
+`...65761665-a0a4-4ccf-887d-4cea92278121-site-image-4.jpg` (index 4, not 3) — the model kept the
+correct asset UUID but substituted the wrong trailing index number, landing on a URL that resembles
+a real one (other real assets in the manifest DO end in `-site-image-3.jpg`, just with different
+UUID prefixes) but corresponds to nothing. Not a reuse (the URL appears exactly once in the file) —
+a genuine transcription slip. **First time this exact failure shape has appeared in any of this
+session's real generation measurements** (`3.9`'s own finding was "zero image-reuse across all 10
+runs"; this is a different failure class — fabrication, not reuse — never previously observed).
+
+**Sent: none.** This task's own instruction was to report the rate and new failure modes, not to
+pick a best-3 — no send requested, none made.
+
+**Files created/modified:** none in the pipeline — the two throwaway scripts
+(`scripts/tmp-3.12-tuned-free-css-v2.ts`, and a small `scripts/tmp-3.12-check-image.ts` used only to
+confirm the real manifest contents for the image-provenance investigation) were both deleted after
+use. `git status --porcelain` is clean.
+
+**Verification commands and output:** none against pipeline source — no production code changed,
+same as `3.9`/`3.11`'s own precedent. The real verification was the ten live generations plus
+validation through the real, unmodified `validateGeneratedHtml`, reported above, plus a direct
+Prisma query confirming the real manifest contents for the image-provenance root-cause check.
+
+**Failures, retries and dead ends:** none in the script itself. All three real per-run failures were
+investigated to a genuine, confirmed mechanism rather than left as a validator message.
+
+**Shortcuts taken:** none.
+
+**Deviations from the task spec:** none in method — ten runs, no tuning between them, same client
+and bundle, measured the same way, rate reported against the named `8/10` baseline, new failure
+modes named. The RESULT deviates from what the task's own framing expected (closing two known bugs
+implicitly expected to raise the rate); that deviation is the honest finding, not a deviation in how
+the task was executed.
+
+**Not run / not verified:** whether `7/10` vs `8/10` is a real effect of the two new rules
+(e.g. diverting the model's attention, or the reference compositions pushing more pages toward a
+dark `#proof`/testimonial section where this exact mistake has room to occur) or pure sampling noise
+at `n=10` — a real open question this sample size cannot answer on its own. Whether the image-
+transcription failure recurs at any meaningful rate — seen exactly once across 30 total runs now
+(`3.9`, `3.11`, `3.12` combined) — also unanswered at this sample size.
+
+**Confidence:** High on every number and mechanism reported (the pass/fail counts are direct
+validator output; both real root causes were confirmed by reading the actual saved CSS/markup, not
+inferred). Lower on whether `7/10` is the "true" rate for this prompt version versus `8/10` being
+optimistic or `7/10` being pessimistic — one 10-run sample in each direction is not enough to
+separate a real regression from noise, stated as a real limit on this task's own confidence rather
+than smoothed over.
+
+**Next task:** `3.13`, per the human's own direction — holding on any further prompt tuning beyond
+what `3.13` itself calls for; the variant-misapplication and image-transcription findings above are
+named for whoever picks that up, not started here.
+---
+
 # PART E — For the human reviewing this log
 
 Signs the log is not trustworthy, worth scanning for:
