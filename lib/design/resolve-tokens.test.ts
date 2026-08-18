@@ -22,15 +22,24 @@ import bundles from "./data/style-bundles.json";
 //
 // blur IS DELIBERATELY EXCLUDED FROM EVERY GOLDEN BELOW — not an oversight. All 6 of Task 2.3's
 // style bundles declare blur: "0px", but not because six independent design judgements agreed on
-// "no blur" — none of the six bundles actually explored blur as a design axis at all (see
-// 2.3-CARRY-FORWARD and this task's own log entry). Freezing "0px" now would create a diff this
-// task already knows is coming the moment 2.3's bundles are revisited — noise, not the reviewed-
-// diff signal goldens exist to provide. Radius/shadow/border-weight/spacing values ARE frozen
-// despite also being visually unverified (2.3-CARRY-FORWARD's other open item) — those vary
-// meaningfully per bundle with a stated rationale each, a real distinguishing choice not yet
-// confirmed to look good, which is a different, weaker uncertainty than blur's "never actually
-// chosen." See the last describe block below for blur's own current-value check, kept separate
-// and explicitly not part of the frozen comparison.
+// "no blur" — none of the six bundles actually explored blur as a design axis at all (2.3-CARRY-
+// FORWARD). Freezing "0px" now would create a diff this task already knows is coming the moment
+// 2.3's bundles are revisited — noise, not the reviewed-diff signal goldens exist to provide.
+//
+// 2.3-CARRY-FORWARD RESOLVED IN TASK 3.7D, BOTH ITEMS, NOT THE SAME WAY. Radius/shadow/border-
+// weight were re-audited against a real render of real client content (BC Security, through
+// lib/design/generate-stylesheet.ts's own real .card/.card--elevated output) and found genuinely
+// differentiated, not placeholder — kept unchanged; see style-bundles.json's own per-bundle
+// harvestedFrom entries for the specific reasoning. sectionRhythmMultiplier WAS a real placeholder
+// (six values clustered in a narrow 0.9-1.1 band, not a considered per-bundle spacing choice) and
+// was widened to 0.78-1.25 — the golden values below are regenerated to match. blur stays "0px"
+// for all six, still not a considered per-bundle choice, but now for a stated reason rather than
+// silence: lib/design/generate-stylesheet.ts has no CSS rule that reads --surface-blur at all
+// (confirmed by grep) — its only prior consumer was lib/templates/showcase/styles.ts's own sticky-
+// nav backdrop-filter, deleted in 3.8. Authoring six different blur values now would be six
+// invisible, unverifiable numbers, which is worse than the honest "not yet a real axis" this
+// comment already stated — deferred to whenever a real translucent-surface consumer exists in the
+// surviving system, not fixed by inventing one for this task alone.
 
 type TypographyGolden = {
   pairingId: number;
@@ -125,13 +134,17 @@ describe("golden: resolveTypography — no-match neutral default", () => {
 // isolates what each bundle actually changes. surfaceBlur is intentionally absent from every
 // entry — see this file's header comment — asserted with toMatchObject, not toEqual, so its
 // absence here means "not checked," not "expected to be undefined."
+// Task 3.7d — bandMultiplier values regenerated from the real resolver after re-authoring
+// sectionRhythmMultiplier (0.9-1.1 -> 0.78-1.25 spread); radius/shadow/borderWeight/focusRingWidth
+// unchanged, re-audited against a real render and kept — see style-bundles.json's own per-bundle
+// harvestedFrom entries.
 const GOLDEN_BUNDLE_TOKENS: Record<string, Record<string, string | number>> = {
-  "crisp-formal": { radiusBtn: "2px", radiusCard: "2px", radiusImage: "2px", radiusPill: "999px", shadowCard: "none", shadowElevated: "0 20px 40px -28px rgba(16, 24, 40, 0.16)", borderWeight: "1px", focusRingWidth: "2px", bandMultiplier: 1.1 },
-  "warm-approachable": { radiusBtn: "10px", radiusCard: "12px", radiusImage: "14px", radiusPill: "999px", shadowCard: "0 8px 20px -10px rgba(16, 24, 40, 0.14)", shadowElevated: "0 14px 32px -16px rgba(16, 24, 40, 0.18)", borderWeight: "1px", focusRingWidth: "2px", bandMultiplier: 0.95 },
-  "trusted-established": { radiusBtn: "3px", radiusCard: "4px", radiusImage: "4px", radiusPill: "999px", shadowCard: "0 12px 28px -14px rgba(16, 24, 40, 0.24)", shadowElevated: "0 22px 46px -20px rgba(16, 24, 40, 0.28)", borderWeight: "1.5px", focusRingWidth: "2px", bandMultiplier: 1 },
-  "clinical-precise": { radiusBtn: "6px", radiusCard: "6px", radiusImage: "6px", radiusPill: "999px", shadowCard: "0 4px 12px -6px rgba(16, 24, 40, 0.10)", shadowElevated: "0 10px 24px -12px rgba(16, 24, 40, 0.14)", borderWeight: "1px", focusRingWidth: "3px", bandMultiplier: 1.05 },
-  "grounded-property": { radiusBtn: "3px", radiusCard: "8px", radiusImage: "8px", radiusPill: "999px", shadowCard: "0 18px 40px -22px rgba(16, 24, 40, 0.20)", shadowElevated: "0 26px 52px -24px rgba(16, 24, 40, 0.24)", borderWeight: "1px", focusRingWidth: "2px", bandMultiplier: 1 },
-  "structural-industrial": { radiusBtn: "2px", radiusCard: "2px", radiusImage: "2px", radiusPill: "4px", shadowCard: "none", shadowElevated: "none", borderWeight: "1.5px", focusRingWidth: "2px", bandMultiplier: 0.9 },
+  "crisp-formal": { radiusBtn: "2px", radiusCard: "2px", radiusImage: "2px", radiusPill: "999px", shadowCard: "none", shadowElevated: "0 20px 40px -28px rgba(16, 24, 40, 0.16)", borderWeight: "1px", focusRingWidth: "2px", bandMultiplier: 1.25 },
+  "warm-approachable": { radiusBtn: "10px", radiusCard: "12px", radiusImage: "14px", radiusPill: "999px", shadowCard: "0 8px 20px -10px rgba(16, 24, 40, 0.14)", shadowElevated: "0 14px 32px -16px rgba(16, 24, 40, 0.18)", borderWeight: "1px", focusRingWidth: "2px", bandMultiplier: 0.88 },
+  "trusted-established": { radiusBtn: "3px", radiusCard: "4px", radiusImage: "4px", radiusPill: "999px", shadowCard: "0 12px 28px -14px rgba(16, 24, 40, 0.24)", shadowElevated: "0 22px 46px -20px rgba(16, 24, 40, 0.28)", borderWeight: "1.5px", focusRingWidth: "2px", bandMultiplier: 0.92 },
+  "clinical-precise": { radiusBtn: "6px", radiusCard: "6px", radiusImage: "6px", radiusPill: "999px", shadowCard: "0 4px 12px -6px rgba(16, 24, 40, 0.10)", shadowElevated: "0 10px 24px -12px rgba(16, 24, 40, 0.14)", borderWeight: "1px", focusRingWidth: "3px", bandMultiplier: 1.1 },
+  "grounded-property": { radiusBtn: "3px", radiusCard: "8px", radiusImage: "8px", radiusPill: "999px", shadowCard: "0 18px 40px -22px rgba(16, 24, 40, 0.20)", shadowElevated: "0 26px 52px -24px rgba(16, 24, 40, 0.24)", borderWeight: "1px", focusRingWidth: "2px", bandMultiplier: 1.2 },
+  "structural-industrial": { radiusBtn: "2px", radiusCard: "2px", radiusImage: "2px", radiusPill: "4px", shadowCard: "none", shadowElevated: "none", borderWeight: "1.5px", focusRingWidth: "2px", bandMultiplier: 0.78 },
 };
 
 describe("golden: resolveTemplateTokens — each of the six style bundles (blur excluded, see header)", () => {
