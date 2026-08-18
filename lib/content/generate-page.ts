@@ -174,7 +174,10 @@ export async function generatePageInBackground(clientId: string, createdByUserId
         tokens: system.tokens,
         googleFontsUrl: system.typography.googleFontsUrl,
       });
-      const validation = validateGeneratedHtml({
+      // Task 3.10a. Now awaited — validateGeneratedHtml's own contrast gate renders the real page
+      // in headless Chromium (checkRenderedContrast), which cannot run synchronously. Real,
+      // measured added cost per call: see that task's own log entry.
+      const validation = await validateGeneratedHtml({
         html: markupResult.html,
         css,
         allowedImages: manifest,

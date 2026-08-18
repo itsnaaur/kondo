@@ -52,9 +52,10 @@ import { parseFragment, type ParserError } from "parse5";
 import * as cheerio from "cheerio";
 import type { Palette } from "@/lib/content/normalize-brand-colors";
 import { relativeLuminance } from "@/lib/design/contrast";
-import { VALIDATED_TEXT_PAIRS, paletteColorToHex } from "@/lib/design/validated-text-pairs";
+import { paletteColorToHex } from "@/lib/design/validated-text-pairs";
 import { contrastRatio } from "@/lib/design/contrast";
 import type { ManifestImage } from "@/lib/content/generate-markup";
+import { checkRenderedContrast } from "./validate-rendered-contrast";
 
 export type ValidationFailure = { check: string; message: string };
 export type ValidationResult = { valid: true } | { valid: false; failures: ValidationFailure[] };
@@ -258,28 +259,37 @@ function checkSurfaceClassContrast($: cheerio.CheerioAPI, palette: Palette): Val
   return failures;
 }
 
-// ---------- 5b. Real contrast validation of the EMITTED CSS text (Task 3.10) ----------
+// ---------- 5b. Static contrast analysis of the EMITTED CSS text (Task 3.10; DEMOTED by 3.10a) --
 //
 // Task 3.9 found the real gap: checkSurfaceClassContrast above only recomputes a ratio for
 // elements carrying one of eight HARDCODED class names — a model given no CLASS_VOCABULARY (3.9's
 // own free-CSS experiment) has no reason to ever use those exact strings, and across 91 real
 // colour declarations in that experiment's 10 runs, none did; the pair-matching logic above never
-// fired once. This function validates what the model actually emitted, in its own <style> block,
-// instead of assuming our own generated CSS is what's on the page.
+// fired once. Task 3.10 built this function to validate what the model actually emitted instead of
+// assuming our own generated CSS is what's on the page — by parsing same-rule colour+background
+// co-declarations only.
 //
-// KEPT AS A SEPARATE BRANCH, NOT A REPLACEMENT for checkSurfaceClassContrast — deliberate, not an
-// oversight. generate-stylesheet.ts's own scoped utilities (.text-muted, .text-accent,
-// .btn--outline) are safe by SELECTOR NESTING under one specific ancestor .surface-* class (e.g.
+// NO LONGER PART OF THE AUTHORITATIVE GATE — Task 3.10a's own real measurement against 3.9's ten
+// real outputs found this approach itself was the wrong tool: hand-composed CSS overwhelmingly
+// nests selectors (a section's own background declared in a DIFFERENT rule than its heading's own
+// colour) rather than co-declaring on one selector, which this function cannot resolve without
+// reimplementing real CSS cascade resolution. Real result: 20% coverage, 10/10 real runs hard-
+// failed, including one 3.9's own independent analysis found completely clean. "A validator that
+// rejects a correct page is worse than none" (3.10a's own instruction) — validateGeneratedHtml no
+// longer includes this function's failures in its own result. checkRenderedContrast
+// (validate-rendered-contrast.ts) is the real, authoritative contrast gate now, described below
+// this function. This one stays exported and tested — a real, fast, zero-browser-launch pre-pass a
+// future caller MAY still choose to run for cheap, partial, EARLY signal (it still catches a
+// genuine same-rule contrast failure or an outright-invented colour correctly; it just cannot be
+// trusted to fail a page for what it cannot resolve) — but it is explicitly not what decides
+// validity anymore. Kept as a branch alongside checkSurfaceClassContrast for the same reason 3.10
+// gave: generate-stylesheet.ts's own scoped utilities (.text-muted, .text-accent, .btn--outline)
+// are safe by SELECTOR NESTING under one specific ancestor .surface-* class (e.g.
 // `.surface-mist .text-accent { color: var(--accent); }`), not by same-rule co-declaration — this
 // function only resolves same-rule pairs, so without an explicit exemption it would flag every one
 // of those three real, already-safe utilities as unresolvable the moment a real stylesheet reaches
-// it (confirmed directly: this exact regression fires against a real generateStylesheet() output
-// in this task's own test suite unless exempted — NESTED_UTILITY_SKIP_RE below is that exemption,
-// mirroring generate-stylesheet.test.ts's own SAFE_NESTED_SELECTOR allow-list exactly, the same
-// three names, not a fourth hand-copied list). Reimplementing real CSS cascade/selector resolution
-// to subsume that one nesting pattern generally would be a materially larger, riskier task than
-// this one's own scope — so the known-safe shape stays carved out by name, and every other rule —
-// arbitrary free-authored CSS included — goes through the real, per-declaration check below.
+// it. NESTED_UTILITY_SKIP_RE below is that exemption, mirroring generate-stylesheet.test.ts's own
+// SAFE_NESTED_SELECTOR allow-list exactly, the same three names, not a fourth hand-copied list.
 const NESTED_UTILITY_SKIP_RE = /^\.surface-[a-z-]+ \.(text-muted|text-accent|btn--outline)$/;
 // "inherit"/"currentColor" declare no NEW colour of their own — same shape as generate-
 // stylesheet.ts's own `a { color: inherit; }`, already established as never a pairing risk.
@@ -400,12 +410,21 @@ export function checkEmittedContrast(css: string, palette: Palette): { failures:
   return { failures, coverage: { resolved, total } };
 }
 
-function checkContrast($: cheerio.CheerioAPI, css: string, palette: Palette): ValidationFailure[] {
-  return [
-    ...checkInlineColorStyles($),
-    ...checkSurfaceClassContrast($, palette),
-    ...checkEmittedContrast(css, palette).failures,
-  ];
+// ---------- 5c. Real, rendered contrast validation (Task 3.10a) — the authoritative gate ----------
+//
+// checkInlineColorStyles and checkSurfaceClassContrast stay: both are cheap (no browser launch),
+// deterministic, and zero-false-positive against real pipeline output — a genuine inline style or
+// an unsafe named .surface-* class is a real, unambiguous defect either way it's found. Task 3.10's
+// own checkEmittedContrast is deliberately EXCLUDED from this authoritative list (see its own
+// header comment above) — its real, measured 20%-coverage/10-of-10-hard-fail result against 3.9's
+// real data means including it here would reject correct pages, the exact failure mode this task
+// exists to fix. checkRenderedContrast (validate-rendered-contrast.ts) is what actually decides
+// contrast validity now: it renders the real page in headless Chromium and reads real, computed
+// styles, resolving inheritance/cascade/gradients the way a real browser does rather than
+// approximating them from CSS text.
+async function checkContrast($: cheerio.CheerioAPI, html: string, css: string, palette: Palette): Promise<ValidationFailure[]> {
+  const rendered = await checkRenderedContrast(html, css);
+  return [...checkInlineColorStyles($), ...checkSurfaceClassContrast($, palette), ...rendered.failures];
 }
 
 // ---------- 6. Mode coherence ----------
@@ -482,7 +501,13 @@ function checkGoogleFontsImport(css: string, expectedUrl: string): ValidationFai
 
 // ---------- top-level entry point ----------
 
-export function validateGeneratedHtml(input: ValidateGeneratedHtmlInput): ValidationResult {
+// Task 3.10a made this async — the one, disclosed, necessary consequence of the rendered contrast
+// check becoming the real gate (checkRenderedContrast launches a real headless browser, which
+// cannot be done synchronously). Every caller updated: generate-page.ts's own real call site now
+// awaits it, and every test in this file's own suite that exercises validateGeneratedHtml directly
+// does too — see this task's own log entry for the real, measured cost of that change against both
+// the production path and this file's own test suite runtime.
+export async function validateGeneratedHtml(input: ValidateGeneratedHtmlInput): Promise<ValidationResult> {
   const $ = cheerio.load(input.html);
 
   const failures: ValidationFailure[] = [
@@ -490,7 +515,7 @@ export function validateGeneratedHtml(input: ValidateGeneratedHtmlInput): Valida
     ...checkSectionMarkers($),
     ...checkBannedContent($),
     ...checkImages($, input.allowedImages),
-    ...checkContrast($, input.css, input.palette),
+    ...(await checkContrast($, input.html, input.css, input.palette)),
     ...checkModeCoherence(input.palette, input.styleBundleMode),
     ...checkNoEmptySections($),
     ...checkGoogleFontsImport(input.css, input.typographyGoogleFontsUrl),

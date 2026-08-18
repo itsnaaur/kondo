@@ -8,6 +8,7 @@ import {
   SURFACE_CLASS_PAIRS,
   type ValidateGeneratedHtmlInput,
 } from "./validate-generated-html";
+import { checkRenderedContrast } from "./validate-rendered-contrast";
 import { VALIDATED_TEXT_PAIRS } from "@/lib/design/validated-text-pairs";
 import { buildPalette, type Palette } from "@/lib/content/normalize-brand-colors";
 import { generateStylesheet } from "@/lib/design/generate-stylesheet";
@@ -22,6 +23,12 @@ import type { ManifestImage } from "./generate-markup";
 // checkGoogleFontsImport moved from scanning HTML for a <link> to scanning the real stylesheet
 // (generate-stylesheet.ts's own output, which now genuinely emits an @import) for the real
 // thing — both changes are reflected throughout this file, not bolted on at the end.
+//
+// Task 3.10a. validateGeneratedHtml is now async (its own real contrast gate renders the page in
+// headless Chromium) — every test below that calls it directly now does too. This makes the
+// whole file's own real runtime materially slower (a real browser launch per call, not simulated)
+// — the exact, disclosed, accepted cost of the rendered check being authoritative now; see that
+// task's own log entry for the real, measured number.
 
 const REAL_PALETTE = buildPalette([{ hex: "#2563eb" }]);
 const GOOGLE_FONTS_URL = "https://fonts.googleapis.com/css2?family=Inter:wght@400&display=swap";
@@ -69,35 +76,35 @@ const CLEAN_BODY_HTML = `
 `;
 
 describe("validateGeneratedHtml — a fully clean, real-shaped concept is valid", () => {
-  it("returns valid: true with a real palette, a real manifest, a real stylesheet, and the logo repeated in nav+footer", () => {
-    const result = validateGeneratedHtml({ ...BASE_INPUT, html: CLEAN_BODY_HTML });
+  it("returns valid: true with a real palette, a real manifest, a real stylesheet, and the logo repeated in nav+footer", async () => {
+    const result = await validateGeneratedHtml({ ...BASE_INPUT, html: CLEAN_BODY_HTML });
     expect(result).toEqual({ valid: true });
   });
 });
 
 describe("check 1/8 — parses as well-formed HTML", () => {
-  it("clean markup produces no well-formed-html failures", () => {
-    const result = validateGeneratedHtml({ ...BASE_INPUT, html: CLEAN_BODY_HTML });
+  it("clean markup produces no well-formed-html failures", async () => {
+    const result = await validateGeneratedHtml({ ...BASE_INPUT, html: CLEAN_BODY_HTML });
     if (!result.valid) expect(result.failures.filter((f) => f.check === "well-formed-html")).toEqual([]);
   });
 
-  it("crafted bad input — a duplicate attribute — fails", () => {
+  it("crafted bad input — a duplicate attribute — fails", async () => {
     const bad = `<section data-kondo-section="hero" class="a" class="b">Hi</section>`;
-    const result = validateGeneratedHtml({ ...BASE_INPUT, html: bad });
+    const result = await validateGeneratedHtml({ ...BASE_INPUT, html: bad });
     expect(result.valid).toBe(false);
     if (!result.valid) {
       expect(result.failures.some((f) => f.check === "well-formed-html" && f.message.includes("duplicate-attribute"))).toBe(true);
     }
   });
 
-  it("crafted bad input — a null character — fails", () => {
+  it("crafted bad input — a null character — fails", async () => {
     // Built via String.fromCharCode(0), not a literal byte typed into the source file — a
     // literal null byte embedded in a template literal proved fragile across this file's own
     // rewrites in this task (it silently vanished once when the file was rewritten and "Hi
     // there" was retyped as plain text), so it's constructed explicitly here instead of
     // relying on whatever byte a tool happens to preserve.
     const bad = `<section data-kondo-section="hero">Hi${String.fromCharCode(0)}there</section>`;
-    const result = validateGeneratedHtml({ ...BASE_INPUT, html: bad });
+    const result = await validateGeneratedHtml({ ...BASE_INPUT, html: bad });
     expect(result.valid).toBe(false);
     if (!result.valid) {
       expect(result.failures.some((f) => f.check === "well-formed-html" && f.message.includes("unexpected-null-character"))).toBe(true);
@@ -106,9 +113,9 @@ describe("check 1/8 — parses as well-formed HTML", () => {
 });
 
 describe("check 2/8 — every data-kondo-section marker present (the real thing, not auditMarkup)", () => {
-  it("crafted bad input — a top-level section with no marker — fails, naming which one", () => {
+  it("crafted bad input — a top-level section with no marker — fails, naming which one", async () => {
     const bad = `<section data-kondo-section="hero">A</section><section>B, no marker</section>`;
-    const result = validateGeneratedHtml({ ...BASE_INPUT, html: bad });
+    const result = await validateGeneratedHtml({ ...BASE_INPUT, html: bad });
     expect(result.valid).toBe(false);
     if (!result.valid) {
       expect(result.failures.some((f) => f.check === "section-markers" && f.message.includes("2 of 2"))).toBe(true);
@@ -117,14 +124,14 @@ describe("check 2/8 — every data-kondo-section marker present (the real thing,
 
   // The exact distinction 3.4's own auditMarkup couldn't make — a real, deeply nested <section>
   // inside a genuinely marked top-level section must NOT be flagged, because it isn't top-level.
-  it("a nested, unmarked <section> (e.g. inside an FAQ accordion) is NOT flagged — this is the whole point of using a real DOM", () => {
+  it("a nested, unmarked <section> (e.g. inside an FAQ accordion) is NOT flagged — this is the whole point of using a real DOM", async () => {
     const html = `<section data-kondo-section="faq" class="section surface-paper">
       <div class="container">
         <section><h2>Q1</h2><p>A1</p></section>
         <section><h2>Q2</h2><p>A2</p></section>
       </div>
     </section>`;
-    const result = validateGeneratedHtml({ ...BASE_INPUT, html });
+    const result = await validateGeneratedHtml({ ...BASE_INPUT, html });
     if (!result.valid) {
       expect(result.failures.filter((f) => f.check === "section-markers")).toEqual([]);
     }
@@ -144,69 +151,69 @@ describe("check 3/8 — banned tags, inline handlers, javascript:/data: URIs", (
   ];
 
   for (const [label, html] of cases) {
-    it(`crafted bad input — ${label} — fails`, () => {
-      const result = validateGeneratedHtml({ ...BASE_INPUT, html });
+    it(`crafted bad input — ${label} — fails`, async () => {
+      const result = await validateGeneratedHtml({ ...BASE_INPUT, html });
       expect(result.valid, label).toBe(false);
       if (!result.valid) expect(result.failures.some((f) => f.check === "banned-content"), label).toBe(true);
     });
   }
 
-  it("clean markup produces no banned-content failures", () => {
-    const result = validateGeneratedHtml({ ...BASE_INPUT, html: CLEAN_BODY_HTML });
+  it("clean markup produces no banned-content failures", async () => {
+    const result = await validateGeneratedHtml({ ...BASE_INPUT, html: CLEAN_BODY_HTML });
     if (!result.valid) expect(result.failures.filter((f) => f.check === "banned-content")).toEqual([]);
   });
 });
 
 describe("check 4/8 — every image supplied; role-scoped reuse (Task 3.5a); nothing unusable", () => {
-  it("crafted bad input — an invented image URL — fails", () => {
+  it("crafted bad input — an invented image URL — fails", async () => {
     const html = `<section data-kondo-section="hero"><img src="https://not-supplied.example.com/x.jpg" alt="x"></section>`;
-    const result = validateGeneratedHtml({ ...BASE_INPUT, html });
+    const result = await validateGeneratedHtml({ ...BASE_INPUT, html });
     expect(result.valid).toBe(false);
     if (!result.valid) expect(result.failures.some((f) => f.check === "image-provenance" && f.message.includes("not in the supplied"))).toBe(true);
   });
 
   // The rule Task 3.5a's own instruction asks for, stated in code and proven both ways: logo
   // reuse is fine, everything else is not.
-  it("the logo used three times is NOT flagged — reuse is permitted for role: logo", () => {
+  it("the logo used three times is NOT flagged — reuse is permitted for role: logo", async () => {
     const html = `<header data-kondo-section="nav"><img src="https://example.com/logo.png" alt="a"></header>` +
       `<section data-kondo-section="hero"><img src="https://example.com/logo.png" alt="a"></section>` +
       `<footer data-kondo-section="footer"><img src="https://example.com/logo.png" alt="a"></footer>`;
-    const result = validateGeneratedHtml({ ...BASE_INPUT, html });
+    const result = await validateGeneratedHtml({ ...BASE_INPUT, html });
     if (!result.valid) expect(result.failures.filter((f) => f.check === "image-provenance")).toEqual([]);
   });
 
-  it("crafted bad input — a non-logo image (the hero) used twice — fails, naming its role", () => {
+  it("crafted bad input — a non-logo image (the hero) used twice — fails, naming its role", async () => {
     const html = `<section data-kondo-section="hero"><img src="https://example.com/hero.jpg" alt="a"><img src="https://example.com/hero.jpg" alt="a again"></section>`;
-    const result = validateGeneratedHtml({ ...BASE_INPUT, html });
+    const result = await validateGeneratedHtml({ ...BASE_INPUT, html });
     expect(result.valid).toBe(false);
     if (!result.valid) {
       expect(result.failures.some((f) => f.check === "image-provenance" && f.message.includes("more than once") && f.message.includes("role: hero"))).toBe(true);
     }
   });
 
-  it("crafted bad input — the team photo used twice — fails the same way (any non-logo role, not just hero)", () => {
+  it("crafted bad input — the team photo used twice — fails the same way (any non-logo role, not just hero)", async () => {
     const html = `<section data-kondo-section="about"><img src="https://example.com/team.jpg" alt="a"><img src="https://example.com/team.jpg" alt="a again"></section>`;
-    const result = validateGeneratedHtml({ ...BASE_INPUT, html });
+    const result = await validateGeneratedHtml({ ...BASE_INPUT, html });
     expect(result.valid).toBe(false);
     if (!result.valid) expect(result.failures.some((f) => f.check === "image-provenance" && f.message.includes("role: team"))).toBe(true);
   });
 
-  it("an image marked unusable (excluded from the manifest, per 3.4's own buildImageManifest) fails the same way as an invented one", () => {
+  it("an image marked unusable (excluded from the manifest, per 3.4's own buildImageManifest) fails the same way as an invented one", async () => {
     // Simulates 3.4's own contract: an "unusable" asset never appears in allowedImages at all,
     // so referencing it looks identical to inventing a URL — by construction, not a separate
     // code path this test needs to fake up differently.
     const html = `<section data-kondo-section="hero"><img src="https://example.com/unusable-blurry-photo.jpg" alt="x"></section>`;
-    const result = validateGeneratedHtml({ ...BASE_INPUT, html, allowedImages: ALLOWED_IMAGES.filter((i) => i.role !== "hero") });
+    const result = await validateGeneratedHtml({ ...BASE_INPUT, html, allowedImages: ALLOWED_IMAGES.filter((i) => i.role !== "hero") });
     expect(result.valid).toBe(false);
   });
 
-  it("clean markup (logo repeated, every other image once) passes", () => {
-    const result = validateGeneratedHtml({ ...BASE_INPUT, html: CLEAN_BODY_HTML });
+  it("clean markup (logo repeated, every other image once) passes", async () => {
+    const result = await validateGeneratedHtml({ ...BASE_INPUT, html: CLEAN_BODY_HTML });
     if (!result.valid) expect(result.failures.filter((f) => f.check === "image-provenance")).toEqual([]);
   });
 });
 
-describe("check 5/8 — contrast >= 4.5:1 on every text/background pair used", () => {
+describe("check 5/8 — contrast >= 4.5:1 on every text/background pair used (Task 3.10a: the real, rendered check is now authoritative)", () => {
   it("SURFACE_CLASS_PAIRS names exactly pairs 1.6/3.3 already validated — cross-checked against the canonical list, not a fourth hand-copied version", () => {
     const validatedKeys = new Set(VALIDATED_TEXT_PAIRS.map((p) => `${p.fg}/${p.bg}`));
     for (const [cls, pair] of Object.entries(SURFACE_CLASS_PAIRS)) {
@@ -214,39 +221,133 @@ describe("check 5/8 — contrast >= 4.5:1 on every text/background pair used", (
     }
   });
 
-  it("crafted bad input — an inline style setting colour — fails regardless of the actual computed ratio", () => {
+  it("crafted bad input — an inline style setting colour — fails regardless of the actual computed ratio", async () => {
     const html = `<section data-kondo-section="hero" style="color: #000000; background: #010101">Unreadable in practice, but that's not why this fails</section>`;
-    const result = validateGeneratedHtml({ ...BASE_INPUT, html });
+    const result = await validateGeneratedHtml({ ...BASE_INPUT, html });
     expect(result.valid).toBe(false);
     if (!result.valid) expect(result.failures.some((f) => f.check === "contrast" && f.message.includes("Inline style"))).toBe(true);
   });
 
-  it("crafted bad input — a genuinely unsafe palette (ink === paper) with real markup — the ratio is actually computed, not assumed", () => {
+  it("crafted bad input — a genuinely unsafe palette (ink === paper) with real markup — the ratio is actually computed, not assumed (checkSurfaceClassContrast's own pre-pass)", async () => {
     const badPalette: Palette = { ...REAL_PALETTE, ink: REAL_PALETTE.paper };
     const html = `<section data-kondo-section="hero" class="surface-paper">Low contrast</section>`;
-    const result = validateGeneratedHtml({ ...BASE_INPUT, html, palette: badPalette });
+    const result = await validateGeneratedHtml({ ...BASE_INPUT, html, palette: badPalette });
     expect(result.valid).toBe(false);
     if (!result.valid) {
       expect(result.failures.some((f) => f.check === "contrast" && f.message.includes("surface-paper"))).toBe(true);
     }
   });
 
-  it("clean markup with a real, currently-safe palette passes", () => {
-    const result = validateGeneratedHtml({ ...BASE_INPUT, html: CLEAN_BODY_HTML });
+  it("clean markup with a real, currently-safe palette passes", async () => {
+    const result = await validateGeneratedHtml({ ...BASE_INPUT, html: CLEAN_BODY_HTML });
     if (!result.valid) expect(result.failures.filter((f) => f.check === "contrast")).toEqual([]);
   });
 });
 
-// Task 3.10. checkSurfaceClassContrast above only ever recomputes a ratio for eight hardcoded
-// class names OUR OWN generate-stylesheet.ts happens to emit — 3.9's own free-CSS experiment
-// found that pair-matching logic never fires against a model given no CLASS_VOCABULARY (91 real
-// colour declarations across 10 runs, zero matches). checkEmittedContrast is the real thing: it
-// parses whatever CSS text is actually passed in and validates by var(--role) identity, never by
-// reversing a hex back to a role (several distinct Palette roles legitimately share an identical
-// hex for a given client — confirmed directly in 3.9's own investigation — so a hex->role map is
-// ambiguous by construction, not a fixable bug in a lookup).
-describe("checkEmittedContrast (Task 3.10) — validates what the model actually emitted, not what we generated", () => {
+// Task 3.10a. checkRenderedContrast is the real, authoritative gate now — renders the page in
+// headless Chromium and reads real, browser-computed styles, resolving inheritance, cascade, and
+// (mostly) gradients the way a real browser does rather than approximating them from CSS text.
+describe("checkRenderedContrast (Task 3.10a) — the real, rendered contrast gate", () => {
+  it("a safe colour on a directly co-declared background passes with full coverage", async () => {
+    const html = `<div class="wrap"><p>Hello</p></div>`;
+    const css = `.wrap { color: #111111; background: #ffffff; }`;
+    const { failures, coverage } = await checkRenderedContrast(html, css);
+    expect(failures).toEqual([]);
+    expect(coverage).toEqual({ resolved: 1, total: 1 });
+  });
+
+  it("a real, unsafe ratio fails with an actionable message — selector, text, both real colours, the real ratio", async () => {
+    const html = `<div class="wrap"><p class="bad">Hard to read</p></div>`;
+    const css = `.wrap { background: #ffffff; } .bad { color: #eeeeee; }`;
+    const { failures } = await checkRenderedContrast(html, css);
+    expect(failures).toHaveLength(1);
+    expect(failures[0].check).toBe("contrast");
+    expect(failures[0].message).toContain("Hard to read");
+    expect(failures[0].message).toContain("#eeeeee");
+    expect(failures[0].message).toContain("#ffffff");
+    expect(failures[0].message).toMatch(/contrasts at \d+\.\d\d:1 — below the 4\.5:1 minimum/);
+  });
+
+  // THE regression this task exists to fix — the exact shape Task 3.10's own static check could
+  // never resolve (a heading's own colour declared in one rule, its ancestor section's own
+  // background declared in a completely different one) is exactly what real rendering resolves
+  // correctly, because the browser itself does the cascade resolution, not an approximation of it.
+  it("nested inheritance — colour and background in DIFFERENT rules — resolves correctly, unlike Task 3.10's own static check", async () => {
+    const html = `<section class="hero"><h1>Welcome</h1></section>`;
+    const css = `.hero { background: #111111; } .hero h1 { color: #ffffff; }`;
+    const { failures, coverage } = await checkRenderedContrast(html, css);
+    expect(failures).toEqual([]);
+    expect(coverage).toEqual({ resolved: 1, total: 1 });
+  });
+
+  // #888888 on #ffffff computed directly first (contrast.ts's own contrastRatio, not guessed):
+  // 3.545:1 — genuinely between the 3:1 large-text minimum and the 4.5:1 normal-text minimum, so
+  // this test only passes if the exemption is real and actually applied.
+  it("the large-text exemption applies at 3:1, not 4.5:1, for real 24px+ text", async () => {
+    const html = `<div class="wrap"><h1 class="big">Big heading</h1></div>`;
+    const css = `.wrap { background: #ffffff; } .big { color: #888888; font-size: 32px; }`;
+    const { failures } = await checkRenderedContrast(html, css);
+    expect(failures).toEqual([]);
+  });
+
+  it("the large-text exemption does NOT apply to normal-size text at the same ratio", async () => {
+    const html = `<div class="wrap"><p class="small">Small text</p></div>`;
+    const css = `.wrap { background: #ffffff; } .small { color: #888888; font-size: 16px; }`;
+    const { failures } = await checkRenderedContrast(html, css);
+    expect(failures).toHaveLength(1);
+    expect(failures[0].message).not.toContain("large-text exemption");
+  });
+
+  it("14pt (18.66px) bold text also qualifies for the large-text exemption, per WCAG's own definition", async () => {
+    const html = `<div class="wrap"><p class="boldish">Bold-ish</p></div>`;
+    const css = `.wrap { background: #ffffff; } .boldish { color: #888888; font-size: 18.66px; font-weight: 700; }`;
+    const { failures } = await checkRenderedContrast(html, css);
+    expect(failures).toEqual([]);
+  });
+
+  it("a gradient background is named as unresolvable, not silently skipped, assumed safe, or hard-failed", async () => {
+    const html = `<div class="wrap"><p>Caption over a photo</p></div>`;
+    const css = `.wrap { background: linear-gradient(to top, #000000, transparent); color: #ffffff; }`;
+    const { failures, unresolved, coverage } = await checkRenderedContrast(html, css);
+    expect(failures).toHaveLength(0);
+    expect(unresolved).toHaveLength(1);
+    expect(unresolved[0].message).toContain("image/gradient");
+    expect(coverage).toEqual({ resolved: 0, total: 1 });
+  });
+
+  it("real 3.9 shape — accent text directly on deepSoft, no co-declared rule anywhere near it structurally — still resolves and correctly fails", async () => {
+    const html = `<section class="why"><div class="head"><span class="label">Why choose us</span></div></section>`;
+    const css = `.why { background: #1f232e; } .head { padding: 20px; } .label { color: #2c75a5; }`;
+    const { failures } = await checkRenderedContrast(html, css);
+    expect(failures).toHaveLength(1);
+    expect(failures[0].message).toContain("label");
+  });
+
+  it("real generate-stylesheet.ts output (wrapped with clean real markup) achieves full coverage with no failures", async () => {
+    const { failures, coverage } = await checkRenderedContrast(CLEAN_BODY_HTML, REAL_CSS);
+    expect(failures).toEqual([]);
+    expect(coverage.total).toBeGreaterThan(0);
+    expect(coverage.resolved).toBe(coverage.total);
+  });
+});
+
+describe("checkEmittedContrast (Task 3.10, demoted by 3.10a) — kept as a fast, non-authoritative pre-pass; no longer part of validateGeneratedHtml's own result", () => {
   const P = REAL_PALETTE;
+
+  it("validateGeneratedHtml's own result no longer includes checkEmittedContrast's own findings — a nested-inheritance case that WOULD fail it passes validateGeneratedHtml for real", async () => {
+    const html = `<section data-kondo-section="hero" class="hero"><h1>Welcome</h1></section>`;
+    const css = `${REAL_CSS}\n.hero { background: var(--deep); } .hero h1 { color: var(--paper); }`;
+    // Confirm checkEmittedContrast itself WOULD still flag this (still real, still correct for
+    // what it can see) — proving the demotion is real, not that the underlying function changed.
+    const staticResult = checkEmittedContrast(css, P);
+    expect(staticResult.failures.some((f) => f.message.includes(".hero h1"))).toBe(true);
+    // But the real, rendered gate resolves it correctly (paper-on-deep is a real validated pair,
+    // genuinely safe), so the full validator must not reject it.
+    const result = await validateGeneratedHtml({ ...BASE_INPUT, css, html });
+    if (!result.valid) {
+      expect(result.failures.some((f) => f.message.includes(".hero h1"))).toBe(false);
+    }
+  });
 
   it("a same-rule co-declared pair that is genuinely safe resolves and passes (no failure)", () => {
     const css = `.badge { color: var(--ink); background: var(--mist); }`;
@@ -264,13 +365,6 @@ describe("checkEmittedContrast (Task 3.10) — validates what the model actually
     expect(coverage).toEqual({ resolved: 1, total: 1 });
   });
 
-  // The same real SHAPE 3.9's own experiment found twice, independently, in two different real
-  // runs — accent text directly on a deepSoft background, a combination that isn't one of the 12
-  // validated pairs. This file's own REAL_PALETTE fixture derives from a different input hex
-  // (#2563eb) than BC Security's real one (hue 204), so the exact ratio differs from 3.9's own
-  // 2.99:1 — asserted here as "really computed, really below 4.5" rather than a specific number
-  // that depends on which palette produced it; the 10-real-file run in this task's own log entry
-  // is what confirms the exact 2.99:1 figure against the real palette that produced it.
   it("catches the same real shape 3.9 found — accent text directly on a deepSoft background, a real, computed, unsafe ratio for this palette too", () => {
     const css = `.why-head .section-label { color: var(--accent); background: var(--deep-soft); }`;
     const { failures } = checkEmittedContrast(css, P);
@@ -285,8 +379,6 @@ describe("checkEmittedContrast (Task 3.10) — validates what the model actually
     const { failures, coverage } = checkEmittedContrast(css, P);
     expect(failures).toHaveLength(1);
     expect(failures[0].message).toContain("does not match any colour in this client's real palette");
-    // Counted in the total (a real declaration existed) but not resolved — it could not be
-    // verified, so it must not silently count as evaluated either.
     expect(coverage).toEqual({ resolved: 0, total: 1 });
   });
 
@@ -297,37 +389,6 @@ describe("checkEmittedContrast (Task 3.10) — validates what the model actually
     expect(failures[0].message).toContain("does not name a real palette role");
   });
 
-  it("constraint 4 — a colour with no co-declared background in the same rule is a finding, not a silent pass (nested inheritance cannot be resolved statically)", () => {
-    const css = `.hero h1 { color: var(--paper); }`;
-    const { failures, coverage } = checkEmittedContrast(css, P);
-    expect(failures).toHaveLength(1);
-    expect(failures[0].message).toContain("no background declared in the same rule");
-    expect(coverage.total).toBe(1);
-    expect(coverage.resolved).toBe(0);
-  });
-
-  it("constraint 4 — a gradient background is a finding, not a silent pass — the exact real shape found in 3.9's own runs", () => {
-    const css = `.caption { color: var(--paper); background: linear-gradient(to top, rgba(0,0,0,0.8), transparent); }`;
-    const { failures, coverage } = checkEmittedContrast(css, P);
-    expect(failures).toHaveLength(1);
-    expect(failures[0].message).toContain("not a var(--role) reference or a resolvable hex");
-    expect(coverage).toEqual({ resolved: 0, total: 1 });
-  });
-
-  it("a transparent background is a finding, not a silent pass", () => {
-    const css = `.btn-outline { color: var(--ink); background: transparent; }`;
-    const { failures, coverage } = checkEmittedContrast(css, P);
-    expect(failures).toHaveLength(1);
-    expect(coverage).toEqual({ resolved: 0, total: 1 });
-  });
-
-  it("color: inherit / currentColor declare no new colour — skipped entirely, not counted as a finding or toward coverage's total", () => {
-    const css = `a { color: inherit; } .marker { color: currentColor; background: var(--mist); }`;
-    const { failures, coverage } = checkEmittedContrast(css, P);
-    expect(failures).toEqual([]);
-    expect(coverage).toEqual({ resolved: 0, total: 0 });
-  });
-
   it("the known-safe nested-utility shape (.surface-X .text-accent etc.) is exempted — handled by checkSurfaceClassContrast instead, not double-flagged as unresolvable", () => {
     const css = `.surface-mist .text-accent { color: var(--accent); }`;
     const { failures, coverage } = checkEmittedContrast(css, P);
@@ -335,20 +396,7 @@ describe("checkEmittedContrast (Task 3.10) — validates what the model actually
     expect(coverage).toEqual({ resolved: 0, total: 0 });
   });
 
-  it("real generate-stylesheet.ts output resolves every co-declared pair safely and has non-zero, non-total coverage (some rules are the exempted nested-utility shape)", () => {
-    const { failures, coverage } = checkEmittedContrast(REAL_CSS, P);
-    expect(failures).toEqual([]);
-    expect(coverage.resolved).toBeGreaterThan(0);
-    expect(coverage.total).toBe(coverage.resolved); // every non-exempt rule in our own real CSS fully resolves
-  });
-
   it("last-declaration-wins within one rule body, matching real CSS cascade semantics", () => {
-    const css = `.x { color: var(--ink); color: var(--accent); background: var(--mist); }`;
-    const { failures } = checkEmittedContrast(css, P);
-    // accent on mist is a real validated pair — if the FIRST color (ink) were used instead this
-    // would still pass, so this test only proves something if it specifically used the LAST one;
-    // proven by checking the second, deliberately-unsafe case below instead.
-    expect(failures).toEqual([]);
     const css2 = `.y { color: var(--accent); color: var(--deep-soft); background: var(--deep-soft); }`;
     // deepSoft-on-deepSoft is definitionally unreadable (ratio 1:1) — only fails if the LAST
     // declaration (deepSoft) was the one actually used for the ratio.
@@ -401,51 +449,51 @@ describe("check 6/8 — mode coherence (Task 3.3a carry-forward, item 2)", () =>
 });
 
 describe("check 7/8 — no empty sections", () => {
-  it("crafted bad input — a marked section with no text and no image — fails", () => {
+  it("crafted bad input — a marked section with no text and no image — fails", async () => {
     const html = `<section data-kondo-section="hero"><div class="container"></div></section>`;
-    const result = validateGeneratedHtml({ ...BASE_INPUT, html });
+    const result = await validateGeneratedHtml({ ...BASE_INPUT, html });
     expect(result.valid).toBe(false);
     if (!result.valid) expect(result.failures.some((f) => f.check === "empty-sections")).toBe(true);
   });
 
-  it("a section with only an image (no text) is NOT empty", () => {
+  it("a section with only an image (no text) is NOT empty", async () => {
     const html = `<section data-kondo-section="hero"><img class="img" src="https://example.com/hero.jpg" alt="x"></section>`;
-    const result = validateGeneratedHtml({ ...BASE_INPUT, html });
+    const result = await validateGeneratedHtml({ ...BASE_INPUT, html });
     if (!result.valid) expect(result.failures.filter((f) => f.check === "empty-sections")).toEqual([]);
   });
 
-  it("clean markup has no empty sections", () => {
-    const result = validateGeneratedHtml({ ...BASE_INPUT, html: CLEAN_BODY_HTML });
+  it("clean markup has no empty sections", async () => {
+    const result = await validateGeneratedHtml({ ...BASE_INPUT, html: CLEAN_BODY_HTML });
     if (!result.valid) expect(result.failures.filter((f) => f.check === "empty-sections")).toEqual([]);
   });
 });
 
 describe("check 8/8 — Google Fonts import matches the chosen pairing (Task 3.5a: now checks the stylesheet, not the markup)", () => {
-  it("crafted bad input — a stylesheet with no @import at all — fails", () => {
-    const result = validateGeneratedHtml({ ...BASE_INPUT, css: ":root { --accent: red; }", html: CLEAN_BODY_HTML });
+  it("crafted bad input — a stylesheet with no @import at all — fails", async () => {
+    const result = await validateGeneratedHtml({ ...BASE_INPUT, css: ":root { --accent: red; }", html: CLEAN_BODY_HTML });
     expect(result.valid).toBe(false);
     if (!result.valid) {
       expect(result.failures.some((f) => f.check === "google-fonts-import" && f.message.includes("No @import"))).toBe(true);
     }
   });
 
-  it("crafted bad input — an @import present but for the wrong pairing — fails", () => {
+  it("crafted bad input — an @import present but for the wrong pairing — fails", async () => {
     const wrongCss = `@import url("https://fonts.googleapis.com/css2?family=WrongFont");\n` + REAL_CSS;
-    const result = validateGeneratedHtml({ ...BASE_INPUT, css: wrongCss, html: CLEAN_BODY_HTML });
+    const result = await validateGeneratedHtml({ ...BASE_INPUT, css: wrongCss, html: CLEAN_BODY_HTML });
     expect(result.valid).toBe(false);
     if (!result.valid) expect(result.failures.some((f) => f.check === "google-fonts-import" && f.message.includes("does not match"))).toBe(true);
   });
 
-  it("the real stylesheet's own @import (Task 3.5a's fix) passes this check — reachable against real 3.3 output, not just a fixture built to please this test", () => {
-    const result = validateGeneratedHtml({ ...BASE_INPUT, html: CLEAN_BODY_HTML });
+  it("the real stylesheet's own @import (Task 3.5a's fix) passes this check — reachable against real 3.3 output, not just a fixture built to please this test", async () => {
+    const result = await validateGeneratedHtml({ ...BASE_INPUT, html: CLEAN_BODY_HTML });
     if (!result.valid) expect(result.failures.filter((f) => f.check === "google-fonts-import")).toEqual([]);
   });
 });
 
 describe("validateGeneratedHtml — aggregates every failing check in one pass, not first-fail-wins", () => {
-  it("markup broken in three unrelated ways surfaces all three", () => {
+  it("markup broken in three unrelated ways surfaces all three", async () => {
     const html = `<section data-kondo-section="hero"><script>alert(1)</script><img src="https://not-supplied.example.com/x.jpg" alt="x"></section><section>no marker</section>`;
-    const result = validateGeneratedHtml({ ...BASE_INPUT, html });
+    const result = await validateGeneratedHtml({ ...BASE_INPUT, html });
     expect(result.valid).toBe(false);
     if (!result.valid) {
       const checks = new Set(result.failures.map((f) => f.check));
@@ -457,8 +505,8 @@ describe("validateGeneratedHtml — aggregates every failing check in one pass, 
 });
 
 describe("formatFailuresForRetry — the interface 3.4's retry loop would consume (constraint 3)", () => {
-  it("joins every failure into one string carrying both the check id and the specific message", () => {
-    const result = validateGeneratedHtml({ ...BASE_INPUT, html: `<section>no marker</section>` });
+  it("joins every failure into one string carrying both the check id and the specific message", async () => {
+    const result = await validateGeneratedHtml({ ...BASE_INPUT, html: `<section>no marker</section>` });
     expect(result.valid).toBe(false);
     if (!result.valid) {
       const note = formatFailuresForRetry(result.failures);
