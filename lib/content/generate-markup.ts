@@ -237,6 +237,15 @@ function buildSystemPrompt(classVocabulary: { className: string; description: st
     "lowercase, hyphenated identifier. Existing convention, not a mandatory list — use whichever " +
     `keys genuinely describe this page's real sections: ${KNOWN_SECTION_KEYS.join(", ")}.\n` +
     "- Give every <img> real, specific alt text — use the manifest's own caption where one is present.\n" +
+    "- EVERY IMAGE IN THE MANIFEST MAY BE USED AT MOST ONCE ON THE WHOLE PAGE, WITH EXACTLY ONE " +
+    "EXCEPTION: an image with role \"logo\" may be used any number of times (e.g. once in the nav, " +
+    "once in the footer — that's normal, not a violation). Every other role — hero, " +
+    "section-background, gallery, team, feature-inline — may appear in your markup at most once, " +
+    "full stop, even if it's the single best-fitting image for two different sections. If you find " +
+    "yourself wanting to place the same non-logo URL a second time, that means one of those two " +
+    "sections needs a different image from the manifest instead, or no image at all — never the " +
+    "same URL twice. Before you finish, mentally check every non-logo <img src> you wrote against " +
+    "every other one: no two may match.\n" +
     "- Output body-level markup only. No <html>, <head>, or <body> wrapper tags — those are added " +
     "separately by the page shell."
   );
@@ -265,9 +274,30 @@ function buildUserText(design: MarkupDesignInput, content: MarkupContentInput, i
     JSON.stringify(content, null, 2),
     "",
     "IMAGE MANIFEST (only reference these exact URLs; never invent one):",
+    roleCountSummary(images),
     JSON.stringify(images, null, 2)
   );
   return lines.join("\n");
+}
+
+// Task 3.7e. A real, measured baseline (10 real generations, unmodified prompt) found a 50%
+// validation-failure rate, 100% of it the model reusing one non-logo image across two sections —
+// and every failure reused the SAME image, the one with the single best/most distinctive caption
+// in the manifest, not an ambiguous one. That rules out "the model can't tell two similar images
+// apart" as the driver and points at "the model wants to reuse its favourite image and has no
+// rule stopping it" instead — this line restates the same per-role counts the rule above already
+// covers, concretely, right where the model is about to read the images it can pick from, so
+// "5 feature-inline images, use each at most once" is impossible to miss the way one rule buried
+// in a longer list can be.
+function roleCountSummary(images: ManifestImage[]): string {
+  const counts = new Map<string, number>();
+  for (const img of images) counts.set(img.role, (counts.get(img.role) ?? 0) + 1);
+  const parts: string[] = [];
+  for (const [role, count] of counts) {
+    if (role === "logo") continue; // reuse is fine for logo — no count warning needed
+    parts.push(count > 1 ? `${count} different "${role}" images below — use each at most once, never the same one twice` : `1 "${role}" image below`);
+  }
+  return parts.length ? `(${parts.join("; ")}.)` : "";
 }
 
 function buildMarkupTool(): Anthropic.Tool {
