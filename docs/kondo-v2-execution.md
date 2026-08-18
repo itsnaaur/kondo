@@ -10182,6 +10182,223 @@ to explain. The `3.7` incident is now a bounded, understood dev-loop hazard, not
 per this task's own instruction.
 ---
 
+### 3.7b — Wire the Generate Page trigger
+**Timestamp:** 2026-08-18
+**Git SHA at start:** 254bd41
+**Status:** DONE-UNVERIFIED — every part of this reachable without a real authenticated session is
+verified for real below. The one thing that genuinely needs one — clicking Generate Page in the
+browser — is explicitly the human's own step, listed under "Not run / not verified," per this
+task's own split.
+
+**Why this task exists.** Surfaced mid-`3.8`, not invented for its own sake. The sign-off's
+approved deletion list included retiring `lib/actions/concepts.ts`'s `createConcept` (the
+"Choose Template" flow) once its blocking import into `registry.ts` was traced. Before touching
+that, a repo-wide grep for `startPageGeneration` (`3.7`'s own real replacement) turned up exactly
+two kinds of hits: its own definition/tests, and `docs/kondo-v2-execution.md` describing `3.7`'s
+own real run — which called it by enqueueing the job directly, explicitly bypassing the auth
+layer, and logged that as "reviewed by reading, not by a live click." Zero component files import
+it. Retiring the manual flow with nothing wired to replace it would have shipped a client
+workspace with no way to generate a concept at all — not a dead link, a broken core workflow. `3.8`
+paused there; this task closes the gap before `3.8` resumes.
+
+**What was built.**
+- `app/(app)/clients/[id]/page.tsx` — a `Generate Page` button (`<form action={startPageGeneration
+  .bind(null, client.id)}>` + `SubmitButton`) added alongside `Choose Template`, not replacing it —
+  both paths stay live per instruction. Gated the same way `Choose Template` already is (only
+  rendered once `!showForm`, which requires `isApproved`). A new server-side query
+  (`activeGenerationJob`, keyed on `Job.type = GENERATE_PAGE` + `status IN (PENDING, RUNNING)` +
+  `payload.clientId`) swaps the whole button row for `<GenerationProgress>` while one is in flight —
+  `Client.status` can't answer this the way `isAnalyzing` does, because `generate-page.ts` never
+  touches it (see that file's own header comment: `Client.status` is untouched on both the
+  fallback-recovered success path and the real success path, only flipped on genuine outer
+  failure). Updated the two adjacent prose strings that referenced `Choose Template` alone
+  ("...approve it to unlock Generate Page.", "Generate Page and Choose Template stay unlocked...")
+  so they don't go stale the moment a second gated control exists.
+- `app/api/clients/[id]/generation-status/route.ts` — new, mirrors `/api/clients/[id]/status`'s
+  shape (`requireUser()`, 404 if missing) but reads the latest `GENERATE_PAGE` `Job` row for the
+  client instead of the `Client` row, since that's the only real signal that exists.
+- `components/GenerationProgress.tsx` — new, mirrors `AnalysisProgress`'s own polling shape
+  exactly (2s interval, cancel-on-unmount, `router.refresh()` once the underlying thing is no
+  longer in flight). Deliberately **indeterminate**, not a fake bar: `AnalysisProgress` has real
+  `crawlPagesDone`/`crawlPagesTotal` to drive a percentage; `GENERATE_PAGE` has no equivalent —
+  design system resolution and stylesheet generation are synchronous/local (`STALE_JOB_TIMEOUT_MS`'s
+  own comment in `lib/jobs/queue.ts` already says as much: "not counted"), and the one real network
+  step, markup generation, gives no partial-progress signal until it either succeeds or exhausts its
+  retries. An honest "Generating page — this can take a few minutes..." pulse beats a bar that can't
+  reflect anything real.
+
+**`reviewedAt` gate — confirmed already correct, no code change needed.**
+`lib/actions/generation.ts:46`: `if (!contentRecord.reviewedAt) throw new Error(...)` — the same
+real gate `createConcept` enforces, present since `3.7` (see that function's own comment: "The same
+real gate `lib/actions/concepts.ts`'s own `createConcept` already enforces..."). Read directly, not
+assumed.
+
+**`CONCEPT_GENERATED` — confirmed fires from `generate-page.ts`, both by reading and by a real run.**
+`lib/content/generate-page.ts:205`: `await logAuditEvent("CONCEPT_GENERATED", { userId:
+createdByUserId, clientId, metadata: { conceptId: concept.id, templateKey } });`, called
+immediately after the real `prisma.concept.create(...)` two lines above — same shape
+`createConcept`'s own audit call used. Confirmed a second time by the real run below, not just by
+reading.
+
+**Verification without a session — all real, all clean:**
+```
+$ npx tsc --noEmit
+(clean, exit 0)
+
+$ npm run lint
+lib/content/validate-generated-html.ts
+  55:10  warning  'VALIDATED_TEXT_PAIRS' is defined but never used
+✖ 1 problem (0 errors, 1 warning)
+(exit 0 — pre-existing, from 3.5/3.5a, untouched by this task)
+
+$ npx vitest run
+ Test Files  20 passed (20)
+      Tests  304 passed | 1 todo (305)
+(unchanged — this task added UI/route glue, no new test file, same reasoning AnalysisProgress's
+own polling logic was never unit-tested either)
+
+$ npm run build
+✓ Compiled successfully
+✓ TypeScript: clean
+Route (app) includes: ƒ /api/clients/[id]/generation-status   <- new route present, builds clean
+```
+
+**Confirming `startPageGeneration`'s own logic by script — with an honest limit stated up front.**
+The exported `startPageGeneration` itself opens with `requireUser()`, which reads Next's
+request-scoped `cookies()` via the Supabase server client — a bare `tsx` script has no request to
+read cookies from, so literally calling the exported function proves nothing. What a script *can*
+exercise for real is everything after those two lines. Ran directly against BC Security (real
+`reviewedAt` already set from `3.7`'s own run) and a real profile id:
+```
+reviewedAt gate: contentRecord.reviewedAt = Tue Aug 18 2026 12:07:36 ... (PASSES)
+already-running no-op check: none found, proceeding
+checkGenerationRateLimit: {"allowed":true}
+countActiveJobsForUser: 0 (cap is 2)
+checkGlobalDailySpendCeiling: {"allowed":true}
+enqueueJob: created Job cmsy92dk70000h8fffn7z2jf6
+logAuditEvent(CONCEPT_GENERATED, enqueued): written
+```
+Worth stating plainly: `UPSTASH_REDIS_REST_URL`/`UPSTASH_REDIS_REST_TOKEN` are both set in this
+`.env` (confirmed via grep, values not printed) — `allowed:true` above is a real limiter decision
+under real usage, not `checkGenerationRateLimit`'s own documented fail-open behaviour when Upstash
+isn't configured.
+
+**A real, unresolved anomaly hit during this verification, reported rather than smoothed over.**
+The job enqueued above (`cmsy92dk70000h8fffn7z2jf6`) was claimed and failed in 69ms:
+`lastError: "Unknown job type: GENERATE_PAGE"` — the exact `3.7`/`3.7a` symptom. This time it is
+**not** `3.7a`'s already-closed cause: `Get-CimInstance Win32_Process` showed exactly one
+`worker.ts` process tree on this machine, and every process in it had `CreationDate` matching when
+*this task* started its own fresh worker — no stale leftover local process exists. That local
+worker's own log showed zero activity on this job (never logged claiming or processing it), ruling
+out "my own worker had it and silently succeeded." Two things found while checking: `DATABASE_URL`
+points at a real, shared Supabase Postgres (`aws-0-ap-southeast-2.pooler.supabase.com`, not a local
+DB), and `railway.toml` confirms a real Railway worker deployment exists for this exact
+`scripts/worker.ts` (`startCommand = "npm run worker:prod"`). `git status -sb` confirms local
+`main` is `254bd41`, in sync with `origin/main` — commit `fafcbaf` (`3.7`, which added the
+`GENERATE_PAGE` case) has been pushed. The coherent explanation: a live Railway worker, still
+running code older than `fafcbaf`, raced this task's local worker for the row via `FOR UPDATE SKIP
+LOCKED` and won, hitting its own stale `default` branch. **Not confirmed** — I have no access to
+Railway's actual dashboard/deploy state, and per the build plan's own Task `0.3` ("Production
+reality check — HUMAN TASK, not the agent's"), that check is explicitly outside what I can verify
+from here. Retried once, per the session's own "don't chase past a short pass" precedent: a second
+job (`cmsy9bzr10000agff9gn39o7p`) enqueued moments later was claimed by this task's own local
+worker (`[worker] processing cmsy9bzr10000agff9gn39o7p (GENERATE_PAGE)`) and completed for real —
+see below. Both `Job` rows left in place, real and disclosed, not cleaned up — same reasoning
+`3.7a` gave for leaving its own forced-failure row.
+
+**The real end-to-end run that did succeed:**
+```
+$ (worker log)
+[worker] processing cmsy9bzr10000agff9gn39o7p (GENERATE_PAGE)
+[generate-markup] attempt 1: stop_reason=tool_use output_tokens=4443/10000
+[worker] completed cmsy9bzr10000agff9gn39o7p
+
+$ (real Concept row)
+id: cmsy9csf30000ikffpmvr7b53
+clientId: cms7sdjdb000kf0ff5l3mto7p (BC Security)
+templateKey: "generated"   (real AI-markup success, not fallback)
+html: 15,692 chars
+createdByUserId: de0d2cc6-524a-495e-be1d-7348ed4891dd
+createdAt: 2026-08-18T06:04:38.751Z
+
+$ (real audit log)
+CONCEPT_GENERATED { conceptId: "cmsy9csf30000ikffpmvr7b53", templateKey: "generated" }
+createdAt: 2026-08-18T06:04:39.754Z
+```
+This is BC Security's second real generated Concept (the first was `3.7`'s own run) — both are
+genuine, both left in place.
+
+**Instructions for the human's own click-through, exactly as requested:**
+1. **Worker.** Already running, started fresh for this task, confirmed polling
+   (`[worker] started, polling for jobs...`) before either job above was enqueued, and it correctly
+   claimed and completed the second one. No action needed on your end — don't start a second local
+   worker, it would just be a third process racing for the same rows.
+2. Log in, then go to **BC Security**'s client page: `/clients/cms7sdjdb000kf0ff5l3mto7p`. Content
+   is already approved, so you should land on the approved-content view with three controls: `Edit
+   content`, `Choose Template`, `Generate Page`.
+3. Click **Generate Page**. Expect the button to briefly read "Starting...", then the whole card to
+   swap to a progress block: "Queued — page generation will start shortly..." or "Generating page —
+   resolving design system and writing markup with AI, this can take a few minutes..." with a
+   pulsing (not percentage) bar. This is deliberate — see "What was built" above for why there's no
+   real percentage to show.
+4. Real timing from the run above: claimed in under a second, full generation (markup call +
+   validation + persist) completed in under 10 seconds this time — but budget up to a few minutes,
+   the pipeline's own worst-case retry math allows for real retries under load.
+5. Once done, the page auto-refreshes (polls every 2s, calls `router.refresh()` the moment the Job
+   leaves PENDING/RUNNING) and **Concept history** at the bottom should show a new entry at the
+   top.
+6. **If it fails immediately** with something that reads like "Unknown job type" — that's the
+   anomaly above, not a bug in what this task built. Click Generate Page again (the no-op guard
+   only blocks a second click while one is already PENDING/RUNNING, so this is safe) and report
+   either outcome; it's useful evidence either way.
+7. **Closing `0.2`/`3.0`'s own carry-forward while you're there:** with dev tools open on this same
+   authenticated `/clients/[id]` page, check the console for CSP violations. `3.0`'s own "Done
+   when" specifically required *an authenticated dashboard page* (not `/login`, not a public
+   `/p/[slug]` page — both proven insufficient in `0.2`'s own entry) hydrating with zero violations.
+   This page is exactly that test, not yet performed against it directly.
+
+**Files created/modified:**
+```
+$ git status --porcelain -- app/\(app\)/clients/\[id\]/page.tsx app/api/clients/\[id\]/generation-status/ components/GenerationProgress.tsx
+ M app/(app)/clients/[id]/page.tsx
+?? app/api/clients/[id]/generation-status/
+?? components/GenerationProgress.tsx
+```
+(`3.8`'s own already-completed, still-uncommitted safe deletions — `adm-zip`, `lib/media/
+prepare-image.ts`, the two stale comments — are untouched by this commit; they remain `3.8`'s own,
+committed once that task resumes and finishes.)
+
+**Failures, retries and dead ends:** one real, disclosed, not-fully-resolved anomaly — see above.
+Not chased past a second attempt, per the session's own established bound on this exact failure
+signature (`3.7a`).
+
+**Shortcuts taken:** none.
+
+**Deviations from the task spec:** none — split exactly as instructed, stopped after step 5's
+equivalent (the script-based confirmation and instructions), did not attempt the browser
+click-through myself.
+
+**Not run / not verified:**
+- **The real UI click-through itself** — explicitly the human's own step, per this task's split.
+  Everything upstream of the login screen is verified for real above; the button/component code
+  has not yet been exercised by an actual click.
+- Whether the Railway-worker-race hypothesis above is actually correct — requires checking
+  Railway's own dashboard/deploy state, explicitly a human-only check (build plan's own Task
+  `0.3`).
+- The `0.2`/`3.0` CSP-console check on this specific authenticated page — listed as step 7 above
+  for the human to perform alongside the click-through, not run by this task.
+
+**Confidence:** High that the pipeline itself is correct end to end — a real, unforced run (the
+second job) produced a real `"generated"` Concept with a correct audit trail, using code untouched
+since `3.7a`. High that the new button/component code is correct by reading and by every check that
+doesn't require a session. Low-to-medium on the Railway-race hypothesis specifically — coherent and
+consistent with every fact gathered, but stated as a hypothesis, not a confirmed cause, because
+confirming it requires access I don't have.
+
+**Next task:** awaiting the human's own click-through result, to be logged as
+`3.7b-UI-VERIFIED` with the outcome. `3.8` (the deletions) resumes after that.
+---
+
 ---
 
 # PART E — For the human reviewing this log
