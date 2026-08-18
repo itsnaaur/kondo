@@ -11047,6 +11047,100 @@ concepts.ts` decision) or `3.7d`'s own outstanding visual-review item are the tw
 awaiting the human's own direction.
 ---
 
+### 3.7f — Worker check, one clean regeneration before the sign-off call
+**Timestamp:** 2026-08-18
+**Git SHA at start:** a96c0e1
+**Status:** DONE-VERIFIED for both of this task's own real checks (no stray worker, one clean
+regeneration produced and sent). The actual sign-off decision this task exists to feed — is the
+output good enough to close the door on the templates — is explicitly the human's own call, not
+claimed here.
+
+**1. Worker check.** `Get-CimInstance Win32_Process | Where-Object { CommandLine -like
+'*worker.ts*' }`, same command `3.7a` used: zero real worker processes running — every match
+returned was this query's own shell-wrapper process, matching the search string in its own command
+line (the same false-positive shape `3.7d` already worked through). `bpdtsszu8` (the worker started
+during `3.7c`'s own real regeneration) shows as `failed, exit code 4` in this session's own
+notification history — consistent with having been torn down at some point after `3.7c` finished
+using it, not evidence of anything new; `3.7d` and `3.7e` never depended on it being alive (both
+bypass the job queue entirely, disclosed in each of their own log entries).
+
+**Worker-claim race — four occurrences, counted precisely, not recurred since but only because
+nothing asked it to.** Queried every real `GENERATE_PAGE` `Job` row directly rather than trusting
+memory:
+```
+cmsy56a0x... 04:07:36 FAILED "Unknown job type: GENERATE_PAGE"   (3.7's own original, unexplained)
+cmsy7560h... 05:02:43 FAILED "Unknown job type: GENERATE_PAGE"   (3.7a's own DELIBERATE repro — explained: local stale process)
+cmsy92dk7... 05:56:32 FAILED "Unknown job type: GENERATE_PAGE"   (3.7b's real occurrence — unexplained)
+cmsyat91n... 06:45:26 FAILED "Unknown job type: GENERATE_PAGE"   (3.7c's real occurrence — unexplained)
+```
+Four real rows carrying the identical error string — matching the human's own count exactly. Worth
+stating precisely rather than folding them into one number: #2 is a *different, already-confirmed*
+mechanism (a deliberately-forced local-process-staleness test, `3.7a`'s own log entry), not the
+same open question as #1/#3/#4, which remain real and unexplained. **Not recurred since `3.7c`** —
+but the only real `GENERATE_PAGE` job-queue activity between then and now was zero: `3.7d` and
+`3.7e`'s own real regenerations (six total) all bypassed `enqueueJob`/the worker entirely, for the
+same disclosed reason each time (no real caller can pass a `styleBundleId` override through the
+queue). "Hasn't recurred" and "resolved" are not the same claim — stated as exactly that, not
+rounded up. The human is checking Railway directly, which is the only way this actually gets
+settled (build plan's own Task `0.3`).
+
+**2. One clean, final regeneration — current code, both fixes live.** Bundle choice: `trusted-
+established` — not arbitrary; its own `bestFor` array in `style-bundles.json` names `"security"`
+directly, and its stated character ("sturdier borders and a firmer, more confident card shadow...
+substantial, not decorative") is a real, considered fit for a security company, not a guess. Ran
+through the same real pipeline sequence as `3.7d`/`3.7e` (bypassing the queue, same disclosed
+reason — no real caller can select a non-default bundle yet):
+```
+Resolved style bundle: trusted-established (Trusted Established)
+[generate-markup] attempt 1: stop_reason=tool_use output_tokens=4442/10000
+Concept created: cmsyry78l00004cff9it5w79y | templateKey=generated-trusted-established-3.7f
+```
+Passed validation on the first attempt — no retry needed, consistent with `3.7e`'s own 10/10
+post-fix measurement, not a cherry-picked lucky run (this was the only attempt made).
+
+**Verified directly against the real output, not assumed from the pipeline having worked before:**
+```
+Non-logo image URLs: 5, unique: 5 — zero reuse.
+.grid: 3   .split: 3   .media-16-9: 2   .media-4-3: 3   .card: 23
+.obj-right: 2 — the first real, non-test confirmation that an .obj-* modifier actually fires on
+  real output. The image it applied to has a real focalPoint of {x: 0.75, y: 0.5} (queried
+  directly), safely past the documented ~0.66 threshold — a correct application, not a fluke.
+.stat: 0 — still correct; BC Security's own ContentRecord.stats is still empty.
+data-kondo-section: nav, hero, why, services, feature, mosaic, about, cta, footer (9 real sections)
+inline style= count: 0
+```
+Sent directly to the human via `SendUserFile` — this is the one artifact this task exists to
+produce; no attempt made to characterize whether it "looks good," which is explicitly not this
+task's call to make.
+
+**Files created/modified:** none — this task is verification and one real regeneration, no source
+change. `git status --porcelain` shows only `3.8`'s own already-disclosed, still-uncommitted safe
+deletions (`lib/ai/anthropic-retry.ts`, `lib/crawl/goto-and-settle.ts`, `lib/media/
+prepare-image.ts`, `package.json`/`package-lock.json`), untouched by this task.
+
+**Verification commands and output:** none beyond what's quoted above — no code changed, so no
+`tsc`/`lint`/`vitest`/191-gate re-run was needed or run.
+
+**Failures, retries and dead ends:** none — the worker check matched `3.7a`'s own known false-
+positive shape on the first pass; the regeneration passed on its first and only attempt.
+
+**Shortcuts taken:** the regeneration bypasses the job queue/worker, same disclosed reason as
+`3.7d`/`3.7e` (no real caller can select a bundle yet) — not new, not undisclosed.
+
+**Deviations from the task spec:** none.
+
+**Not run / not verified:** whether the output is actually good enough — explicitly the human's
+own call, stated as such throughout this entry rather than implied by a clean pass. Whether the
+Railway-race hypothesis is correct — the human is checking directly.
+
+**Confidence:** High on both of this task's own real claims (no stray worker; one clean, real,
+first-attempt regeneration with verified zero reuse and real vocabulary use). No claim made, and
+none should be inferred, about the one open question this task was built to feed.
+
+**Next task:** holding, per instruction — `3.8` waits on the human's own review of this file
+alongside `3.7d`'s six-way comparison.
+---
+
 # PART E — For the human reviewing this log
 
 Signs the log is not trustworthy, worth scanning for:
