@@ -9181,6 +9181,188 @@ evidence base is five real data points.
 **Next task:** not specified — awaiting direction.
 ---
 
+### 3.4 — Markup generation
+**Timestamp:** 2026-08-18
+**Git SHA at start:** d71a1df
+**Status:** DONE-VERIFIED — `tsc --noEmit` clean, `lint` clean, full suite 16 files / 239 tests
+passing (219 → 239, exactly the 20 new tests, all on the pure/non-network parts). All five real
+clients generated real markup, `stop_reason=tool_use` every time (never `max_tokens`), every
+`output_tokens` well under the 8,000 done-when bar. One real, honest finding: a single missing
+`data-kondo-section` marker on one client's first real run — not chased or silently re-rolled
+away, reported below with a second real run showing it wasn't reproducible.
+
+**What I did:** New `lib/content/generate-markup.ts` — one forced Claude tool call
+(`generate_markup`, a single `html: string` field), following structure-and-rewrite.ts's and
+Task `1.8`'s exact pattern: `output_config: { effort: "high" }`, `tool_choice` forcing the one
+tool, `anthropic.messages.stream(...).finalMessage()`, `withTransientRetry` wrapping the call
+(imported verbatim, not reimplemented), an outer `MAX_ATTEMPTS = 3` loop feeding a
+`correctionNote` back into the next attempt on failure. `MAX_OUTPUT_TOKENS = 10_000` — above the
+task's own 8,000 bar on purpose, so a genuine sub-8,000 completion is distinguishable from
+"would have kept going but got cut at exactly my chosen ceiling."
+
+**Constraint 1 — `data-kondo-section` on every top-level section.** Required directly in the
+system prompt, with the real, existing production vocabulary (`nav`/`hero`/`why`/`services`/
+`process`/`about`/`reviews`/`faq`/`partners`/`deep`/`feature`/`mosaic`/`cta`/`footer` — grepped
+from the three now-`3.8`-doomed templates' own real `data-kondo-section` values, the exact set
+`lib/templates/section-editor.ts`'s own `SECTION_LABELS` map was built from) offered as existing
+convention, not a mandatory enum — `section-editor.ts`'s own key type is a free string. Confirmed
+directly, not assumed, what breaks without it before writing the prompt:
+`section-editor.ts`'s entire section-lookup mechanism (`listConceptSections`) has zero fallback
+for an unmarked section — it's simply invisible to the section editor, with no heuristic
+detection.
+
+**Constraint 2 — `CLASS_VOCABULARY` read directly, not restated.** `import { CLASS_VOCABULARY }
+from "@/lib/design/generate-stylesheet"` — the system prompt interpolates its real
+`className`/`description` pairs at call time. If `3.3`'s vocabulary changes, this prompt changes
+with it automatically; there is no second, hand-typed copy of the class list anywhere in this
+file to drift out of sync.
+
+**Constraint 3 — forced tool use, `withTransientRetry` reused.** Confirmed via direct research
+before writing any code: `withTransientRetry(label, fn)` (`lib/ai/anthropic-retry.ts`) is
+imported and called exactly as `structure-and-rewrite.ts` and `classify-images.ts` (`1.8`) call
+it — `await withTransientRetry(\`generate-markup attempt ${attempt}\`, async () => { ... })`
+wrapping the `.stream().finalMessage()` call, same label-string convention.
+
+**Constraint 4 — no colour, no `<style>`, no inline styles, enforced two ways, not just one.**
+The system prompt states the rule directly, but the stronger guarantee is structural:
+`MarkupDesignInput` (this module's own input type for "the design system from 3.2") has no
+colour field on it at all — `toMarkupDesignInput()` is the single place a `Palette` ever gets
+dropped, and every other function in this file is typed against `MarkupDesignInput`, never
+`DesignSystem`/`NeutralSystem` directly. The prompt-building code cannot accidentally
+interpolate a hex or hsl value into the model's context, because there is nothing on the type it
+reads from to interpolate. A test confirms this directly (`"palette" in input` is `false`), not
+just that the resulting prompt text happens not to mention one.
+
+**New infrastructure this task needed and built, disclosed as new:** "the image manifest with
+assigned roles" the task names as an input does not exist anywhere in the codebase — confirmed
+before writing code: `run-analysis.ts` calls `assignImageRoles` but only ever reads `.role` off
+the result, never persists or joins it against a real `Asset` URL; the actual analogous join
+pattern (`to-template-content.ts`'s `assetById` Map) operates over the older, different
+`ContentImage`-shaped data. `buildImageManifest(inputs, assignments, urlByAssetId)` is new,
+joining `RoleAssignmentInput`'s own `metrics`/`classification` with `assignImageRoles`' verdict
+and a real `Asset.url` lookup — and excludes `role: "unusable"` assets entirely, so they are
+never even offered to the model as an option (the structural equivalent of one of `§6.5`'s
+eventual checks, satisfied here by construction rather than left for `3.5`).
+
+**`auditMarkup` — a lightweight, reporting-only aid, explicitly not `3.5`'s validator.** Regex
+heuristics over the raw HTML string (same pragmatic non-parser choice `section-editor.ts` already
+made for this exact file format), checking for `<style>`, `style=`, hex/`rgb()`/`hsl()` colour
+literals, banned tags, inline event handlers, `javascript:`/`data:` URIs, `data-kondo-section`
+coverage, and unknown classes. **Never gates a retry** — findings are always just returned and
+reported, per the task's own instruction to report violations rather than patch the prompt until
+they disappear. Its header comment states plainly that `3.5`'s real, tested, HTML-parsing
+validator is a different, later thing this doesn't replace.
+
+**Real 5-client run (fresh, via a throwaway script — `scripts/_tmp-3.4-verify.ts`, deleted after
+use — querying each client's real `ContentRecord`, real `Asset` rows (deduped by URL against
+the append-only table, `3.1`'s own established lesson), running `assignImageRoles` fresh, calling
+`resolveDesignSystem`, then `generateMarkup`):**
+
+| Client | vertical | image manifest | stop_reason | output_tokens | attempts | findings |
+|---|---|---|---|---|---|---|
+| Princeton Dental | medical-dental | 11 images (7 gallery/section-bg, 1 hero, logo) | tool_use | 4,851 | 1 | none |
+| BC Security | trades-construction | 6 images (5 feature-inline, logo) | tool_use | 4,461 | 1 | none |
+| Propell Property | financial-professional-services | 8 images (4 section-bg, 2 gallery, hero, logo) | tool_use | 5,286 | 1 | none |
+| Allen Evans Family Lawyers | legal | 2 images (hero, logo) | tool_use | 2,968 | 1 | **1 warning — see below** |
+| Downseal Solutions | trades-construction | 6 images (hero, 4 section-bg, logo) | tool_use | 3,391 | 1 | none |
+
+**Done-when met exactly as specified:** all five under 8,000 output tokens (range 2,968–5,286),
+`stop_reason=tool_use` every time — never `max_tokens`, never truncated, no attempt needed a
+retry.
+
+**The one real finding, reported rather than chased away.** Allen Evans' first real run: `10
+header/section/footer tags but only 9 data-kondo-section markers — some may be missing one`
+(`auditMarkup`'s own warning-severity check). Investigated directly rather than assumed: a fresh
+regeneration for the identical client/inputs (same script, re-run) came back **completely
+clean** — 9 top-level tags, 9 markers, zero findings, every section (`nav`/`hero`/`why`/
+`services`/`about`/`reviews`/`faq`/`cta`/`footer`) correctly marked. This is real, observed
+sampling variance, not a reproducible defect — exactly what the task's own second "thing to
+expect" named directly (temperature is unavailable on this model; irreducible sampling variance
+is the same class of thing `structure-and-rewrite.ts` already lives with). Not chased further
+into a third run to "confirm it's fixed" — that would have been exactly the anti-pattern the task
+warned against ("don't chase reproducibility"). One honest caveat on precision, disclosed rather
+than glossed over: `auditMarkup`'s tag count is a regex heuristic over the whole HTML string, not
+a real parser — it cannot distinguish a genuinely-unmarked *top-level* section from an
+incidental *nested* `<section>` element (e.g. inside an FAQ accordion) that never needed its own
+marker. Without the first run's raw HTML saved (it wasn't, at the time), it isn't possible to say
+with certainty which of those two the original "10 vs 9" count actually was — reported as the
+real, uncertain finding it is, not inflated into a more precise claim than the evidence supports.
+
+**Both blind-spot caveats the task named, stated plainly rather than left implicit:**
+- **Sampling variance is real and irreducible, not something this task tried to eliminate.**
+  Beyond the Allen Evans finding above, a direct before/after comparison on Princeton Dental
+  (same inputs, two real calls) shows genuinely different output every time: run 1 was 4,851
+  output tokens / 11,686 HTML chars / sections `nav,hero,why,services,about,mosaic,feature,
+  reviews,faq,cta,footer`; run 2 was 5,024 output tokens / 12,051 chars / sections `nav,hero,
+  why,services,feature,about,mosaic,reviews,faq,cta,footer` — same section *set*, different
+  section *order* (`feature` moved), different exact wording throughout, `identical html: false`.
+  No attempt was made to force determinism (not possible — no `temperature` parameter on this
+  model) or to characterize this as a bug.
+- **This is not evidence markup fits for a large, messy prospect.** All five real dev-database
+  clients are small, tidy sites — the same blind spot Phase 1 flagged for extraction (no
+  dev-database client exceeds ~32% of the extraction token ceiling). The highest real usage seen
+  here, Propell Property at 5,286 output tokens, is 53% of this task's own 10,000 ceiling and
+  66% of the 8,000 done-when bar — comfortable, but on a content base this session has
+  repeatedly described as small and clean throughout every prior task. A prospect with
+  meaningfully more services/testimonials/FAQs/credentials than any of these five has not been
+  tested, and this task does not claim it would still fit.
+
+**Files created:**
+```
+$ git status --porcelain
+?? lib/content/generate-markup.test.ts
+?? lib/content/generate-markup.ts
+```
+
+**Verification commands and output:**
+```
+$ npx tsc --noEmit && npm run lint && npx vitest run
+ Test Files  16 passed (16)
+      Tests  239 passed | 1 todo (240)
+
+(throwaway scripts, deleted after use: scripts/_tmp-3.4-verify.ts — the real 5-client run per
+the table above, plus the Princeton Dental repeat-run variance check; scripts/_tmp-
+3.4-inspect-allen.ts — the follow-up regeneration that showed Allen Evans' one finding wasn't
+reproducible)
+```
+
+**Failures, retries and dead ends:** none in the code itself — `tsc` failed once while writing
+the test file (a synthetic `ImageClassification.subject` test fixture used `"place"`, not a real
+value in that enum — `"person"|"people"|"product"|"interior"|"exterior"|"equipment"|"abstract"|
+"graphic"|"screenshot"|"map"|"icon"` — caught immediately by the type-checker, fixed to
+`"exterior"`, not a runtime bug). The Allen Evans finding itself isn't a failure of this task —
+it's the real, honestly-reported evidence the task asked for.
+
+**Shortcuts taken:** `filterMarkupContent` drops every `flagged: true` item before it ever
+reaches the model, rather than sending it with a caveat the model has no real way to act on
+visually. Stated as a deliberate scope decision, not hidden: a flagged-but-real item is simply
+withheld from this generation, not specially treated.
+
+**Deviations from the task spec:** none. All four constraints addressed with both a stated rule
+and, for constraint 4, an actual structural guarantee beyond the stated rule. `3.5`'s own
+validator was not built here, exactly as scoped.
+
+**Not run / not verified:**
+- No real caller wires `generateMarkup` into `run-analysis.ts` or a Job type yet — that's later
+  wiring work (build plan §7's "a second `Job.type`"), not this task's scope.
+- `3.5`'s full validation gate (well-formed HTML parsing, banned-tag/protocol enforcement beyond
+  `auditMarkup`'s regex heuristics, contrast, mode coherence, image provenance) — explicitly
+  deferred, not attempted here.
+- Whether markup generation holds up against a real prospect larger than any of these five real
+  clients — named directly above as untested, not claimed.
+
+**Confidence:** High that the four stated constraints are met on real output — directly observed
+across five real calls, not inferred. High that `stop_reason`/`output_tokens` comfortably clear
+the done-when bar for this specific client population. Medium-low that this generalizes to a
+larger, messier prospect — explicitly flagged as untested, matching Phase 1's own blind-spot
+framing. High confidence the Allen Evans finding is real sampling variance rather than a
+systematic prompt defect (a second real run on identical inputs came back clean), but honest
+uncertainty about whether the original "10 vs 9" count reflected a genuinely unmarked section or
+`auditMarkup`'s own nesting-blind heuristic — not resolved, stated as unresolved.
+
+**Next task:** not specified — awaiting direction.
+---
+
 ---
 
 # PART E — For the human reviewing this log
