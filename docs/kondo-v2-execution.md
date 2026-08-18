@@ -12180,6 +12180,223 @@ what `3.13` itself calls for; the variant-misapplication and image-transcription
 named for whoever picks that up, not started here.
 ---
 
+### 3.13 — Adopt free CSS as the live path
+**Timestamp:** 2026-08-19
+**Git SHA at start:** ce6c045
+**Status:** DONE-VERIFIED — full suite, 191 gate, lint, build all real and green; a real forced
+failure proved the fallback path fires and persists a real Concept with `Client.status` untouched;
+a real, separate end-to-end queue run proved the success path fires, passes the rendered-contrast
+gate on its first attempt, and persists a real `templateKey: "generated"` Concept.
+
+**1 — `generate-markup.ts` rebuilt around 3.12's tuned prompt, real and verbatim, not
+re-authored from memory.** All three rule sets carried over exactly: the contrast rule (accent
+text only on `--paper`/`--mist`, never `--accent-soft`/`--deep-soft`), the blanket-multi-tag-reset
+rule, and the specificity-tie rule — plus the three reference compositions and the token-headroom
+note. `data-kondo-section` and the 3.7e image-reuse-at-most-once rule (including its own
+`roleCountSummary` reinforcement line) are unchanged from the pre-3.13 file. What changed
+structurally: `MarkupDesignInput`/`toMarkupDesignInput` (deliberately colour-free, Task 3.4's own
+safety guarantee) is replaced by `PageDesignInput`/`toPageDesignInput` — colour is now
+*deliberately* reachable, the inverse of the old guarantee, because the model now composes the CSS
+that guarantee used to make unnecessary. `buildMarkupTool`'s schema gained a required `css` field
+alongside `html`. `auditMarkup` dropped its class-vocabulary-conformance check (there is no fixed
+vocabulary any more) and lost its `knownClasses` parameter; every other check (banned tags, event
+handlers, javascript:/data: URIs, no `<style>`/inline `style=`/hex/rgb/hsl literals *in the html
+field* — CSS still lives in its own separate field — `data-kondo-section` coverage) is unchanged.
+`MAX_OUTPUT_TOKENS` raised `10_000` -> `16_000`, matching what `3.9`/`3.11`/`3.12` actually tested
+(real range across all three: `9455`-`11700`).
+
+**2 — `generate-stylesheet.ts` retired from the live path, not deleted. Checked directly, not
+assumed, what still depends on it:**
+```
+$ grep -rln "generateStylesheet\|CLASS_VOCABULARY" --include="*.ts" app lib scripts
+```
+Real, non-comment hits, filtered by hand:
+- `lib/design/generate-stylesheet.test.ts` — the module's own test suite. Untouched; still green.
+- `lib/content/validate-generated-html.ts` — `checkSurfaceClassContrast`'s `SURFACE_CLASS_PAIRS` is
+  a hardcoded table that MIRRORS `generate-stylesheet.ts`'s class names by convention, not by
+  import — no real code dependency. It stays as a dormant, non-authoritative branch: a free-
+  composing model won't reliably emit `.surface-*` literal class names, same real finding `3.9`
+  made about the pre-existing static check.
+- `lib/content/validate-generated-html.test.ts` — calls `generateStylesheet()` only to build one
+  convenient, real, safe CSS fixture for testing the validator itself. Not a live-path dependency.
+- `lib/design/build/validate-contrast.ts` (the 191 gate) — **zero dependency**, checked directly;
+  its own earlier "match" in a broad grep was a comment, not an import. It reads
+  `VALIDATED_TEXT_PAIRS` from `validated-text-pairs.ts` directly and is completely unaffected by
+  anything in this task.
+**Correcting this task's own framing, checked directly rather than assumed correct:** "the
+fallback renderer needs tokens" is true, but not of `generate-stylesheet.ts` — `fallback-
+renderer.ts`/`fallback-renderer-styles.ts` import `resolveTemplateTokens`/`TemplateTokens` from
+`lib/design/resolve-tokens.ts`, a separate module `generate-stylesheet.ts` doesn't touch and this
+task didn't touch either. The fallback renderer has zero real dependency on `generate-
+stylesheet.ts`/`CLASS_VOCABULARY` — confirmed by reading `fallback-renderer.ts`'s own real imports,
+not inferred from the module names looking related. No production code depends on `generate-
+stylesheet.ts`/`CLASS_VOCABULARY` any more; the module, its exports, and its own test suite are
+fully intact for any future caller.
+
+**3 — `checkRenderedContrast` confirmed firing on the real path, not just present in the call
+graph.** It was already the authoritative gate inside `validateGeneratedHtml` since `3.10a` — this
+task's own job was making sure the LIVE path actually reaches it with the model's own CSS instead
+of `generateStylesheet()`'s deterministic output. `generate-page.ts`'s try block now calls the
+rebuilt `generateMarkup` for both `html` and `css`, then `validateGeneratedHtml({html: genResult.html,
+css: genResult.css, ...})` unchanged otherwise. Real confirmation, not inferred: the real end-to-end
+run below (`Job cmsz387u60000hsffui1wmczl`) produced `templateKey: "generated"` — `validateGeneratedHtml`
+only returns `valid:true` after `checkContrast` -> `checkRenderedContrast` actually renders the page
+and finds no failing pairs; a fallback would have fired otherwise. `checkEmittedContrast` (`3.10`'s
+static parser) is unreachable from this call — confirmed by the same code read `3.10a`'s own entry
+already did (`checkContrast` never calls it; only `checkInlineColorStyles`, `checkSurfaceClassContrast`,
+and `rendered.failures` feed the array `validateGeneratedHtml` gates on).
+
+**4 — Fallback reachability, confirmed with a real forced failure, not assumed from reading the
+try/catch.** `MAX_OUTPUT_TOKENS` was temporarily set to `200` (guaranteeing `stop_reason:
+"max_tokens"` on every attempt, a deterministic failure mode no model-behaviour guess is needed
+for), a real job run through the real queue, then reverted to `16_000` before anything was
+committed. Real result:
+```
+[worker] processing cmsz2zrx500009kffvy2rh8ye (GENERATE_PAGE)
+[generate-markup] attempt 1: stop_reason=max_tokens output_tokens=200/200
+[generate-markup] attempt 1/3 failed: Page generation was cut off by the token limit.
+[generate-markup] attempt 2: stop_reason=max_tokens output_tokens=200/200
+[generate-markup] attempt 2/3 failed: Page generation was cut off by the token limit.
+[generate-markup] attempt 3: stop_reason=max_tokens output_tokens=200/200
+[generate-markup] attempt 3/3 failed: Page generation was cut off by the token limit.
+[generate-page] markup generation/validation failed for client cms7sdjdb000kf0ff5l3mto7p, falling
+  back to renderFallbackConcept: Page generation was cut off by the token limit.
+[worker] completed cmsz2zrx500009kffvy2rh8ye
+```
+Real `Job` row: `status: "COMPLETE"`, `attempts: 1`, `lastError: null` (the JOB itself succeeded —
+only the inner generation attempts failed, exactly the two-layer contract this file's own header
+comment states). Real `Concept` row: `templateKey: "fallback"`, `html: [33877 chars]`. Real
+`Client.status` after: `"READY_FOR_REVIEW"` — unmoved, confirming the inner-failure contract holds
+under the new generator exactly as it did under the old one.
+
+**A real, unplanned discovery while running this — disclosed, not worked around silently.** A
+second, unidentified process — not any local `worker.ts` instance (`Get-CimInstance` confirmed zero
+matching `node.exe` processes at the exact moment a job still got claimed and failed within about a
+second) — is independently polling this same job queue and failing every real `GENERATE_PAGE` job
+with `"Unknown job type: GENERATE_PAGE"`, meaning it's running a build of `worker.ts` that predates
+`3.7`. This is not caused by anything in this task and was not introduced by it — `git diff` on
+`scripts/worker.ts` is empty; the file is correct and unmodified. Most likely explanation given
+this machine has WSL running (`wslservice`/`vmcompute` both live in the process list): a stale
+worker started in a separate WSL process namespace invisible to Windows' own process listing. This
+means **real `GENERATE_PAGE` jobs enqueued through the actual app right now may be silently lost to
+this exact error**, independent of anything in this session — worth finding and killing that
+process (or redeploying/restarting whatever host runs it) outside this task's own scope. To get a
+clean, single-attempt real measurement of the new success path despite this, the end-to-end run
+below combines enqueue-then-immediate-claim in one process (`claimNextJob`/`generatePageInBackground`/
+`completeJob` — the exact same real functions `worker.ts`'s own `dispatch`/`processJob` call, not a
+reimplementation) rather than racing the long-running poll loop against the unidentified competitor.
+The forced-failure run above, run earlier via a real, unmodified `npx tsx scripts/worker.ts`
+process before this second process apparently won a few subsequent races, is unaffected — that one
+result reflects the real worker loop directly.
+
+**5 — A real, separate end-to-end run through the queue, success path, real numbers:**
+```
+Job cmsz387u60000hsffui1wmczl:
+  type: GENERATE_PAGE, status: COMPLETE, attempts: 1, lastError: null
+  createdAt: 2026-08-18T20:00:53.935Z, startedAt: 2026-08-18T20:00:54.494Z,
+  finishedAt: 2026-08-18T20:02:18.530Z  (84.0s real wall-clock: one real Claude call at
+  output_config effort:high plus validateGeneratedHtml's full check suite, including a real
+  checkRenderedContrast browser render)
+
+Concept cmsz3a0810001hsffa638suz7:
+  clientId: cms7sdjdb000kf0ff5l3mto7p, templateKey: "generated", html: [24353 chars]
+  publishStatus: DRAFT
+
+Client cms7sdjdb000kf0ff5l3mto7p.status after: READY_FOR_REVIEW (unmoved)
+
+Generation log: "[generate-markup] attempt 1: stop_reason=tool_use output_tokens=10657/16000" —
+first attempt succeeded outright, no retry needed, no truncation.
+```
+The real Concept HTML was saved and sent to the human directly (`3.13-live-path-concept.html`) —
+pixel-level judgement remains the human's own call, same disclosed limitation as every prior real-
+generation task this session.
+
+**Retry budget — real math, not a guess, against the rate this task's own instruction named.**
+`MAX_ATTEMPTS` stays at `3`, unchanged from the pre-3.13 file. Using the user's own stated ~25%
+validation-failure rate (`3.11`'s real `20%`, `3.12`'s real `30%`, both measured one-shot with no
+retry): `P(all 3 attempts fail) = 0.25^3 ≈ 1.56%`. Two things make this a conservative (worst-case)
+estimate, stated rather than assumed: (a) `3.11`/`3.12`'s own `20%`/`30%` figures are ONE-SHOT
+rates — no real multi-attempt run with `generateMarkup`'s own `correctionNote` feedback has been
+measured this session, and a model told exactly which rule it broke on a real reject should fail
+less often on a real second attempt than an independent fresh roll would predict; (b) the two
+failure-mode classes `3.12` found (variant misapplication, image-URL transcription) are both
+plausibly the kind of mistake a correction note fixes directly, being specific and mechanical
+rather than a broad creative miss. `3` was not re-derived from scratch — it matches the constant
+already established for this exact shape of retry loop (`generate-markup.ts` pre-3.13,
+`structure-and-rewrite.ts`), and `1.56%` under a conservative assumption is a real, low, acceptable
+fallback-trigger rate for a feature whose whole point is that hitting fallback is never a dead end.
+
+**Files created/modified:**
+```
+$ git status --porcelain -- lib/content/generate-markup.ts lib/content/generate-markup.test.ts lib/content/generate-page.ts
+ M lib/content/generate-markup.ts
+ M lib/content/generate-markup.test.ts
+ M lib/content/generate-page.ts
+```
+
+**Verification commands and output:**
+```
+$ npx tsc --noEmit
+(clean)
+
+$ npx vitest run
+ Test Files  20 passed (20)
+      Tests  339 passed | 1 todo (340)
+(340 -> 339: two class-vocabulary-conformance tests removed, one freely-composed-classes test
+added, net -1, matching exactly what generate-markup.test.ts's own rebuild removed/added)
+
+$ npm run lint
+(clean)
+
+$ npx tsx lib/design/build/validate-contrast.ts
+SUMMARY: 191/191 palettes fully AA-passing across all 12 checked pairs.
+(unaffected — this task changed no palette-derivation code, confirmed in §2 above)
+
+$ npm run build
+✓ Compiled successfully
+```
+Plus the two real, separate end-to-end queue runs (§4 forced failure, §5 success) above — neither
+is a mocked or simulated result.
+
+**Failures, retries and dead ends:** the unidentified-competing-process discovery (§4's own aside)
+cost real debugging time — a `taskkill`/restart cycle, a direct `claimNextJob` diagnostic script
+proving the claimed job's `type` really was the plain string `"GENERATE_PAGE"` (ruling out an
+enum-serialisation or whitespace theory) before concluding the claimant was an entirely separate,
+unmodified-`worker.ts`-running process this session never started. Six throwaway scripts used for
+enqueueing, claiming, and inspecting real rows during this investigation, all deleted after use.
+
+**Shortcuts taken:** the success-path end-to-end run used an enqueue-then-immediate-claim script
+calling the same real `claimNextJob`/`generatePageInBackground`/`completeJob` functions
+`worker.ts`'s own `dispatch`/`processJob` call, rather than the real persistent worker loop —
+disclosed in §4's own aside as a deliberate adaptation to the discovered competing-process problem,
+not a weaker test. The forced-failure run, by contrast, used the real, unmodified, persistent
+`npx tsx scripts/worker.ts` process directly.
+
+**Deviations from the task spec:** none of the four numbered points. `MAX_ATTEMPTS`'s value (`3`,
+unchanged) was kept rather than raised — the task asked to "say what it's set to and why," not
+necessarily to raise it; the real math above is the reason given, not silently substituted for a
+larger number without justification.
+
+**Not run / not verified:** the unidentified competing process itself — not tracked down or killed,
+named as a real, disclosed, out-of-scope finding for the human to act on rather than chased further
+here. Real multi-attempt retry behaviour with a genuine `correctionNote` round-trip (the `1.56%`
+estimate above is real math on real one-shot data, not a measurement of retries themselves — no
+real run this session has yet exhausted more than one attempt on a genuine, non-forced content
+failure). Whether `7/10`-ish real-world reliability holds at volume across many different real
+clients, not just BC Security — the same real scope limit named in every prior real-generation task
+this session.
+
+**Confidence:** High on everything actually measured — both end-to-end runs are real rows read
+directly from the database, not asserted from logs alone; the dependency audit in §2 is grep output
+filtered by hand-reading each hit, not assumed from file names. Lower on the retry-budget math,
+which is real arithmetic on a real but small (`n=20` combined across `3.11`/`3.12`) sample, and
+explicitly flagged as a conservative estimate rather than a measured one.
+
+**Next task:** holding — no next step specified. Free CSS with the rendered-contrast gate is now
+the live path; the unidentified competing worker process (§4) is a real, separate, out-of-scope
+finding worth the human's own attention independent of any further build-plan task.
+---
+
 # PART E — For the human reviewing this log
 
 Signs the log is not trustworthy, worth scanning for:
