@@ -218,19 +218,24 @@ export { SURFACE_CLASS_PAIRS };
 
 const INLINE_COLOR_STYLE = /\b(color|background(-color)?)\s*:/i;
 
-function checkContrast($: cheerio.CheerioAPI, palette: Palette): ValidationFailure[] {
+function checkInlineColorStyles($: cheerio.CheerioAPI): ValidationFailure[] {
   const failures: ValidationFailure[] = [];
-
   // Any inline colour-setting style bypasses the class system 3.3 built the whole guarantee
   // on — there is no principled way to trust it, so it's an automatic failure regardless of
   // what the actual computed ratio would be, not a value this check tries to compute and pass.
+  // Unchanged by Task 3.10 — still catches exactly what it always caught, including 3.9's own
+  // run 10 (an inline style="" carrying a literal, invented hex).
   $("[style]").each((_, el) => {
     const style = $(el).attr("style") ?? "";
     if (INLINE_COLOR_STYLE.test(style)) {
       failures.push({ check: "contrast", message: `Inline style="${style}" sets a colour/background — colour must come only from the class vocabulary.` });
     }
   });
+  return failures;
+}
 
+function checkSurfaceClassContrast($: cheerio.CheerioAPI, palette: Palette): ValidationFailure[] {
+  const failures: ValidationFailure[] = [];
   // For every real .surface-* class actually present, independently recompute contrast against
   // this concept's REAL resolved palette — not trusting that 3.3's CSS is safe, verifying it,
   // for this exact palette, right now.
@@ -250,8 +255,157 @@ function checkContrast($: cheerio.CheerioAPI, palette: Palette): ValidationFailu
       }
     }
   });
-
   return failures;
+}
+
+// ---------- 5b. Real contrast validation of the EMITTED CSS text (Task 3.10) ----------
+//
+// Task 3.9 found the real gap: checkSurfaceClassContrast above only recomputes a ratio for
+// elements carrying one of eight HARDCODED class names — a model given no CLASS_VOCABULARY (3.9's
+// own free-CSS experiment) has no reason to ever use those exact strings, and across 91 real
+// colour declarations in that experiment's 10 runs, none did; the pair-matching logic above never
+// fired once. This function validates what the model actually emitted, in its own <style> block,
+// instead of assuming our own generated CSS is what's on the page.
+//
+// KEPT AS A SEPARATE BRANCH, NOT A REPLACEMENT for checkSurfaceClassContrast — deliberate, not an
+// oversight. generate-stylesheet.ts's own scoped utilities (.text-muted, .text-accent,
+// .btn--outline) are safe by SELECTOR NESTING under one specific ancestor .surface-* class (e.g.
+// `.surface-mist .text-accent { color: var(--accent); }`), not by same-rule co-declaration — this
+// function only resolves same-rule pairs, so without an explicit exemption it would flag every one
+// of those three real, already-safe utilities as unresolvable the moment a real stylesheet reaches
+// it (confirmed directly: this exact regression fires against a real generateStylesheet() output
+// in this task's own test suite unless exempted — NESTED_UTILITY_SKIP_RE below is that exemption,
+// mirroring generate-stylesheet.test.ts's own SAFE_NESTED_SELECTOR allow-list exactly, the same
+// three names, not a fourth hand-copied list). Reimplementing real CSS cascade/selector resolution
+// to subsume that one nesting pattern generally would be a materially larger, riskier task than
+// this one's own scope — so the known-safe shape stays carved out by name, and every other rule —
+// arbitrary free-authored CSS included — goes through the real, per-declaration check below.
+const NESTED_UTILITY_SKIP_RE = /^\.surface-[a-z-]+ \.(text-muted|text-accent|btn--outline)$/;
+// "inherit"/"currentColor" declare no NEW colour of their own — same shape as generate-
+// stylesheet.ts's own `a { color: inherit; }`, already established as never a pairing risk.
+const NO_NEW_COLOR_VALUES = new Set(["inherit", "currentcolor"]);
+
+type ResolvedColorValue = { hex: string | null; traceable: boolean; skip: boolean; reason: string | null };
+
+// Resolves ONE declared colour value against the real palette — by role identity (var(--role))
+// wherever possible, never by reversing a hex back to a role. Task 3.9's own investigation found
+// several DISTINCT Palette roles legitimately share an identical hex for a given client (confirmed
+// directly: paper/accentInk/onSecondary/onDestructive can all be #ffffff at once; ring equals
+// accent) — a hex->role reverse lookup is ambiguous by construction, not a fixable bug in the
+// lookup itself, which is exactly the mistake 3.9's own first analysis draft made and had to
+// correct. A literal hex is still accepted for RATIO purposes if it matches a real palette value
+// (the ratio only needs the real colour, not which role produced it) — but per this task's own
+// constraint 3, a literal colour that matches NOTHING in the palette is rejected outright,
+// regardless of what ratio it would compute to, the same "fails regardless of the actual computed
+// ratio" shape the existing inline-style ban already uses.
+function resolveEmittedColorValue(raw: string, palette: Palette, paletteHexSet: Set<string>): ResolvedColorValue {
+  const value = raw.trim();
+  if (NO_NEW_COLOR_VALUES.has(value.toLowerCase())) return { hex: null, traceable: true, skip: true, reason: null };
+
+  const varMatch = /^var\(\s*--([a-z-]+)\s*\)$/i.exec(value);
+  if (varMatch) {
+    const camelRole = varMatch[1].replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
+    if (camelRole === "derivedFrom" || !(camelRole in palette)) {
+      return { hex: null, traceable: false, skip: false, reason: `var(--${varMatch[1]}) does not name a real palette role` };
+    }
+    return { hex: paletteColorToHex(palette[camelRole as keyof Palette] as string), traceable: true, skip: false, reason: null };
+  }
+
+  const hexMatch = /^#([0-9a-f]{6}|[0-9a-f]{3})$/i.exec(value);
+  if (hexMatch) {
+    const hex6 = hexMatch[1].length === 3 ? `#${[...hexMatch[1]].map((c) => c + c).join("")}` : `#${hexMatch[1]}`;
+    if (paletteHexSet.has(hex6.toLowerCase())) return { hex: hex6, traceable: true, skip: false, reason: null };
+    return { hex: hex6, traceable: false, skip: false, reason: `${value} does not match any colour in this client's real palette` };
+  }
+
+  // rgb()/rgba()/hsl()/named colours/gradients/transparent/anything else — not a format this
+  // check resolves to a single, real, traceable colour. Constraint 4's own explicit case:
+  // reported as a real coverage gap, never silently skipped.
+  return { hex: null, traceable: false, skip: false, reason: `"${value}" is not a var(--role) reference or a resolvable hex — cannot verify it traces to the palette or compute a ratio` };
+}
+
+export type ContrastCoverage = { resolved: number; total: number };
+
+// Exported so this task's own real validation run (all ten of 3.9's saved outputs) and any
+// future caller can report coverage independently of the pass/fail boolean ValidationResult
+// exposes — "what fraction of declarations could actually be evaluated" is a real, separate
+// number from "did validation pass," and constraint 4 asks for it reported, not folded silently
+// into a single true/false.
+export function checkEmittedContrast(css: string, palette: Palette): { failures: ValidationFailure[]; coverage: ContrastCoverage } {
+  const failures: ValidationFailure[] = [];
+  let total = 0;
+  let resolved = 0;
+
+  const paletteHexSet = new Set(
+    (Object.keys(palette) as (keyof Palette)[])
+      .filter((role) => role !== "derivedFrom")
+      .map((role) => paletteColorToHex(palette[role] as string).toLowerCase())
+  );
+
+  const withoutComments = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const ruleRegex = /([^{}]+)\{([^{}]*)\}/g;
+  let match: RegExpExecArray | null;
+  while ((match = ruleRegex.exec(withoutComments)) !== null) {
+    const [, selectorRaw, body] = match;
+
+    // "Last declaration wins" — real CSS semantics for a property repeated within one rule body,
+    // not just the first regex match.
+    const colorMatches = [...body.matchAll(/(?<![-a-z])color\s*:\s*([^;]+);/g)];
+    if (colorMatches.length === 0) continue; // no text colour asserted here — nothing to check
+    const colorValue = colorMatches[colorMatches.length - 1][1];
+
+    const fgResolved = resolveEmittedColorValue(colorValue, palette, paletteHexSet);
+    if (fgResolved.skip) continue; // inherit/currentColor — declares no new colour, not a finding
+
+    // Skip only if EVERY selector in a comma-separated group is the known-safe nested shape
+    // (handled by checkSurfaceClassContrast already) — a mixed group (rare, but a real
+    // possibility) still needs the general check for its other branches.
+    if (selectorRaw.split(",").map((s) => s.trim()).every((s) => NESTED_UTILITY_SKIP_RE.test(s))) continue;
+
+    total++;
+    const selector = selectorRaw.trim().replace(/\s+/g, " ");
+
+    if (!fgResolved.traceable) {
+      failures.push({ check: "contrast", message: `${selector}: text colour "${colorValue.trim()}" ${fgResolved.reason}.` });
+      continue;
+    }
+
+    const bgMatches = [...body.matchAll(/background(?:-color)?\s*:\s*([^;]+);/g)];
+    if (bgMatches.length === 0) {
+      failures.push({ check: "contrast", message: `${selector}: sets text colour "${colorValue.trim()}" with no background declared in the same rule — cannot verify contrast; nesting under an ancestor surface is not resolved statically.` });
+      continue;
+    }
+    const bgValue = bgMatches[bgMatches.length - 1][1];
+    const bgResolved = resolveEmittedColorValue(bgValue, palette, paletteHexSet);
+    if (bgResolved.skip) {
+      failures.push({ check: "contrast", message: `${selector}: text colour "${colorValue.trim()}" with background "${bgValue.trim()}" — an inherited background cannot be verified statically.` });
+      continue;
+    }
+    if (!bgResolved.traceable) {
+      failures.push({ check: "contrast", message: `${selector}: background "${bgValue.trim()}" ${bgResolved.reason}.` });
+      continue;
+    }
+    if (!fgResolved.hex || !bgResolved.hex) {
+      failures.push({ check: "contrast", message: `${selector}: could not resolve a concrete colour for "${colorValue.trim()}" on "${bgValue.trim()}" — not a solid colour (e.g. a gradient) or another unsupported form.` });
+      continue;
+    }
+
+    resolved++;
+    const ratio = contrastRatio(fgResolved.hex, bgResolved.hex);
+    if (ratio < 4.5) {
+      failures.push({ check: "contrast", message: `${selector}: text "${colorValue.trim()}" on background "${bgValue.trim()}" contrasts at ${ratio.toFixed(2)}:1 — below the 4.5:1 minimum.` });
+    }
+  }
+
+  return { failures, coverage: { resolved, total } };
+}
+
+function checkContrast($: cheerio.CheerioAPI, css: string, palette: Palette): ValidationFailure[] {
+  return [
+    ...checkInlineColorStyles($),
+    ...checkSurfaceClassContrast($, palette),
+    ...checkEmittedContrast(css, palette).failures,
+  ];
 }
 
 // ---------- 6. Mode coherence ----------
@@ -336,7 +490,7 @@ export function validateGeneratedHtml(input: ValidateGeneratedHtmlInput): Valida
     ...checkSectionMarkers($),
     ...checkBannedContent($),
     ...checkImages($, input.allowedImages),
-    ...checkContrast($, input.palette),
+    ...checkContrast($, input.css, input.palette),
     ...checkModeCoherence(input.palette, input.styleBundleMode),
     ...checkNoEmptySections($),
     ...checkGoogleFontsImport(input.css, input.typographyGoogleFontsUrl),

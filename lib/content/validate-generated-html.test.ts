@@ -4,6 +4,7 @@ import {
   formatFailuresForRetry,
   isDarkColor,
   checkModeCoherence,
+  checkEmittedContrast,
   SURFACE_CLASS_PAIRS,
   type ValidateGeneratedHtmlInput,
 } from "./validate-generated-html";
@@ -233,6 +234,127 @@ describe("check 5/8 — contrast >= 4.5:1 on every text/background pair used", (
   it("clean markup with a real, currently-safe palette passes", () => {
     const result = validateGeneratedHtml({ ...BASE_INPUT, html: CLEAN_BODY_HTML });
     if (!result.valid) expect(result.failures.filter((f) => f.check === "contrast")).toEqual([]);
+  });
+});
+
+// Task 3.10. checkSurfaceClassContrast above only ever recomputes a ratio for eight hardcoded
+// class names OUR OWN generate-stylesheet.ts happens to emit — 3.9's own free-CSS experiment
+// found that pair-matching logic never fires against a model given no CLASS_VOCABULARY (91 real
+// colour declarations across 10 runs, zero matches). checkEmittedContrast is the real thing: it
+// parses whatever CSS text is actually passed in and validates by var(--role) identity, never by
+// reversing a hex back to a role (several distinct Palette roles legitimately share an identical
+// hex for a given client — confirmed directly in 3.9's own investigation — so a hex->role map is
+// ambiguous by construction, not a fixable bug in a lookup).
+describe("checkEmittedContrast (Task 3.10) — validates what the model actually emitted, not what we generated", () => {
+  const P = REAL_PALETTE;
+
+  it("a same-rule co-declared pair that is genuinely safe resolves and passes (no failure)", () => {
+    const css = `.badge { color: var(--ink); background: var(--mist); }`;
+    const { failures, coverage } = checkEmittedContrast(css, P);
+    expect(failures).toEqual([]);
+    expect(coverage).toEqual({ resolved: 1, total: 1 });
+  });
+
+  it("a same-rule co-declared pair with a real ratio below 4.5:1 fails, naming the real computed ratio — not assumed, computed for this exact palette", () => {
+    const css = `.bad-label { color: var(--accent); background: var(--deep-soft); }`;
+    const { failures, coverage } = checkEmittedContrast(css, P);
+    expect(failures).toHaveLength(1);
+    expect(failures[0].check).toBe("contrast");
+    expect(failures[0].message).toMatch(/contrasts at \d+\.\d\d:1 — below the 4\.5:1 minimum/);
+    expect(coverage).toEqual({ resolved: 1, total: 1 });
+  });
+
+  // The same real SHAPE 3.9's own experiment found twice, independently, in two different real
+  // runs — accent text directly on a deepSoft background, a combination that isn't one of the 12
+  // validated pairs. This file's own REAL_PALETTE fixture derives from a different input hex
+  // (#2563eb) than BC Security's real one (hue 204), so the exact ratio differs from 3.9's own
+  // 2.99:1 — asserted here as "really computed, really below 4.5" rather than a specific number
+  // that depends on which palette produced it; the 10-real-file run in this task's own log entry
+  // is what confirms the exact 2.99:1 figure against the real palette that produced it.
+  it("catches the same real shape 3.9 found — accent text directly on a deepSoft background, a real, computed, unsafe ratio for this palette too", () => {
+    const css = `.why-head .section-label { color: var(--accent); background: var(--deep-soft); }`;
+    const { failures } = checkEmittedContrast(css, P);
+    expect(failures).toHaveLength(1);
+    expect(failures[0].message).toMatch(/contrasts at \d+\.\d\d:1 — below the 4\.5:1 minimum/);
+  });
+
+  it("constraint 3 — a literal hex colour not traceable to any real palette value is rejected outright, regardless of what ratio it would compute to", () => {
+    // #ff00ff is not one of REAL_PALETTE's own derived values for hex "#2563eb" — confirmed by
+    // construction (buildPalette never derives magenta from a blue input), not merely assumed.
+    const css = `.invented { color: #ff00ff; background: var(--paper); }`;
+    const { failures, coverage } = checkEmittedContrast(css, P);
+    expect(failures).toHaveLength(1);
+    expect(failures[0].message).toContain("does not match any colour in this client's real palette");
+    // Counted in the total (a real declaration existed) but not resolved — it could not be
+    // verified, so it must not silently count as evaluated either.
+    expect(coverage).toEqual({ resolved: 0, total: 1 });
+  });
+
+  it("constraint 3 — a var() referencing a name that isn't a real palette role is rejected, not silently ignored", () => {
+    const css = `.rogue { color: var(--brand-blue); background: var(--paper); }`;
+    const { failures } = checkEmittedContrast(css, P);
+    expect(failures).toHaveLength(1);
+    expect(failures[0].message).toContain("does not name a real palette role");
+  });
+
+  it("constraint 4 — a colour with no co-declared background in the same rule is a finding, not a silent pass (nested inheritance cannot be resolved statically)", () => {
+    const css = `.hero h1 { color: var(--paper); }`;
+    const { failures, coverage } = checkEmittedContrast(css, P);
+    expect(failures).toHaveLength(1);
+    expect(failures[0].message).toContain("no background declared in the same rule");
+    expect(coverage.total).toBe(1);
+    expect(coverage.resolved).toBe(0);
+  });
+
+  it("constraint 4 — a gradient background is a finding, not a silent pass — the exact real shape found in 3.9's own runs", () => {
+    const css = `.caption { color: var(--paper); background: linear-gradient(to top, rgba(0,0,0,0.8), transparent); }`;
+    const { failures, coverage } = checkEmittedContrast(css, P);
+    expect(failures).toHaveLength(1);
+    expect(failures[0].message).toContain("not a var(--role) reference or a resolvable hex");
+    expect(coverage).toEqual({ resolved: 0, total: 1 });
+  });
+
+  it("a transparent background is a finding, not a silent pass", () => {
+    const css = `.btn-outline { color: var(--ink); background: transparent; }`;
+    const { failures, coverage } = checkEmittedContrast(css, P);
+    expect(failures).toHaveLength(1);
+    expect(coverage).toEqual({ resolved: 0, total: 1 });
+  });
+
+  it("color: inherit / currentColor declare no new colour — skipped entirely, not counted as a finding or toward coverage's total", () => {
+    const css = `a { color: inherit; } .marker { color: currentColor; background: var(--mist); }`;
+    const { failures, coverage } = checkEmittedContrast(css, P);
+    expect(failures).toEqual([]);
+    expect(coverage).toEqual({ resolved: 0, total: 0 });
+  });
+
+  it("the known-safe nested-utility shape (.surface-X .text-accent etc.) is exempted — handled by checkSurfaceClassContrast instead, not double-flagged as unresolvable", () => {
+    const css = `.surface-mist .text-accent { color: var(--accent); }`;
+    const { failures, coverage } = checkEmittedContrast(css, P);
+    expect(failures).toEqual([]);
+    expect(coverage).toEqual({ resolved: 0, total: 0 });
+  });
+
+  it("real generate-stylesheet.ts output resolves every co-declared pair safely and has non-zero, non-total coverage (some rules are the exempted nested-utility shape)", () => {
+    const { failures, coverage } = checkEmittedContrast(REAL_CSS, P);
+    expect(failures).toEqual([]);
+    expect(coverage.resolved).toBeGreaterThan(0);
+    expect(coverage.total).toBe(coverage.resolved); // every non-exempt rule in our own real CSS fully resolves
+  });
+
+  it("last-declaration-wins within one rule body, matching real CSS cascade semantics", () => {
+    const css = `.x { color: var(--ink); color: var(--accent); background: var(--mist); }`;
+    const { failures } = checkEmittedContrast(css, P);
+    // accent on mist is a real validated pair — if the FIRST color (ink) were used instead this
+    // would still pass, so this test only proves something if it specifically used the LAST one;
+    // proven by checking the second, deliberately-unsafe case below instead.
+    expect(failures).toEqual([]);
+    const css2 = `.y { color: var(--accent); color: var(--deep-soft); background: var(--deep-soft); }`;
+    // deepSoft-on-deepSoft is definitionally unreadable (ratio 1:1) — only fails if the LAST
+    // declaration (deepSoft) was the one actually used for the ratio.
+    const result2 = checkEmittedContrast(css2, P);
+    expect(result2.failures).toHaveLength(1);
+    expect(result2.failures[0].message).toContain("1.00:1");
   });
 });
 
